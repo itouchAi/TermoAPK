@@ -1,0 +1,1102 @@
+import 'dart:math' as math;
+import 'package:flutter/material.dart';
+
+enum PresetId { eko, konfor, gece, boost }
+
+enum TabId { termo, hava, rapor, prog }
+
+enum LangCode { tr, en }
+
+class RgbAccent {
+  final double r;
+  final double g;
+  final double b;
+
+  const RgbAccent(this.r, this.g, this.b);
+
+  Color toColor([double opacity = 1.0]) => Color.fromRGBO(
+        (r * 255).round().clamp(0, 255),
+        (g * 255).round().clamp(0, 255),
+        (b * 255).round().clamp(0, 255),
+        opacity,
+      );
+
+  static RgbAccent lerp(RgbAccent a, RgbAccent b, double u) {
+    return RgbAccent(
+      a.r + (b.r - a.r) * u,
+      a.g + (b.g - a.g) * u,
+      a.b + (b.b - a.b) * u,
+    );
+  }
+}
+
+class ThermostatPreset {
+  final PresetId id;
+  final String labelTr;
+  final String labelEn;
+  final String modeNameTr;
+  final String modeNameEn;
+  final double temp;
+  final RgbAccent accent;
+  final Color color;
+
+  const ThermostatPreset({
+    required this.id,
+    required this.labelTr,
+    required this.labelEn,
+    required this.modeNameTr,
+    required this.modeNameEn,
+    required this.temp,
+    required this.accent,
+    required this.color,
+  });
+}
+
+class TabMeta {
+  final TabId id;
+  final String labelTr;
+  final String labelEn;
+  final RgbAccent accent;
+  final Color color;
+
+  const TabMeta({
+    required this.id,
+    required this.labelTr,
+    required this.labelEn,
+    required this.accent,
+    required this.color,
+  });
+}
+
+class BoilerTelemetry {
+  final bool isHeating;
+  final int flamePercent;
+  final int pumpRpm;
+  final double waterPressureBar;
+  final bool modulationActive;
+  final String statusTextTr;
+  final String statusTextEn;
+
+  const BoilerTelemetry({
+    required this.isHeating,
+    required this.flamePercent,
+    required this.pumpRpm,
+    required this.waterPressureBar,
+    required this.modulationActive,
+    required this.statusTextTr,
+    required this.statusTextEn,
+  });
+}
+
+class ScheduleSlot {
+  final String id;
+  final String labelTr;
+  final String labelEn;
+  final String time;
+  final double targetTemp;
+  final bool enabled;
+
+  const ScheduleSlot({
+    required this.id,
+    required this.labelTr,
+    required this.labelEn,
+    required this.time,
+    required this.targetTemp,
+    required this.enabled,
+  });
+
+  ScheduleSlot copyWith({
+    String? time,
+    double? targetTemp,
+    bool? enabled,
+  }) {
+    return ScheduleSlot(
+      id: id,
+      labelTr: labelTr,
+      labelEn: labelEn,
+      time: time ?? this.time,
+      targetTemp: targetTemp ?? this.targetTemp,
+      enabled: enabled ?? this.enabled,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'time': time,
+        'targetTemp': targetTemp,
+        'enabled': enabled,
+      };
+}
+
+class FlowMove {
+  final double ts;
+  final int a;
+  final int b;
+  final double d;
+  final RgbAccent fromAcc;
+  final RgbAccent toAcc;
+
+  const FlowMove({
+    required this.ts,
+    required this.a,
+    required this.b,
+    required this.d,
+    required this.fromAcc,
+    required this.toAcc,
+  });
+}
+
+class FlowTabState {
+  final double x;
+  final double rise;
+  final double sx;
+  final RgbAccent acc;
+  final double tapX;
+  final double tapAge;
+  final double sw;
+  final int cur;
+  final double draw;
+
+  const FlowTabState({
+    required this.x,
+    required this.rise,
+    required this.sx,
+    required this.acc,
+    required this.tapX,
+    required this.tapAge,
+    required this.sw,
+    required this.cur,
+    required this.draw,
+  });
+}
+
+class VoiceCommandResult {
+  final bool handled;
+  final double? newTargetTemp;
+  final PresetId? newPreset;
+  final TabId? navigateTab;
+  final String replyTr;
+  final String replyEn;
+
+  const VoiceCommandResult({
+    required this.handled,
+    this.newTargetTemp,
+    this.newPreset,
+    this.navigateTab,
+    required this.replyTr,
+    required this.replyEn,
+  });
+}
+
+abstract final class ThermostatMath {
+  static const double minTemp = 10.0;
+  static const double maxTemp = 30.0;
+  static const double tempStep = 0.5;
+  static const double dialStartDeg = -135.0;
+  static const double dialEndDeg = 135.0;
+
+  static const List<double> tabXs = [240.0, 440.0, 640.0, 840.0];
+
+  static const List<ThermostatPreset> presets = [
+    ThermostatPreset(
+      id: PresetId.eko,
+      labelTr: 'EKO',
+      labelEn: 'ECO',
+      modeNameTr: 'EKO MODU',
+      modeNameEn: 'ECO MODE',
+      temp: 20.0,
+      accent: RgbAccent(0.22, 0.85, 0.58),
+      color: Color(0xFF38D994),
+    ),
+    ThermostatPreset(
+      id: PresetId.konfor,
+      labelTr: 'KONFOR',
+      labelEn: 'COMFORT',
+      modeNameTr: 'KONFOR MODU',
+      modeNameEn: 'COMFORT MODE',
+      temp: 22.5,
+      accent: RgbAccent(1.0, 0.48, 0.14),
+      color: Color(0xFFFF7A24),
+    ),
+    ThermostatPreset(
+      id: PresetId.gece,
+      labelTr: 'GECE',
+      labelEn: 'NIGHT',
+      modeNameTr: 'GECE MODU',
+      modeNameEn: 'NIGHT MODE',
+      temp: 18.5,
+      accent: RgbAccent(0.46, 0.48, 1.0),
+      color: Color(0xFF757AFF),
+    ),
+    ThermostatPreset(
+      id: PresetId.boost,
+      labelTr: 'BOOST',
+      labelEn: 'BOOST',
+      modeNameTr: 'BOOST MODU',
+      modeNameEn: 'BOOST MODE',
+      temp: 25.0,
+      accent: RgbAccent(1.0, 0.30, 0.28),
+      color: Color(0xFFFF4D47),
+    ),
+  ];
+
+  static const List<TabMeta> tabs = [
+    TabMeta(
+      id: TabId.termo,
+      labelTr: 'Termo.',
+      labelEn: 'Thermo',
+      accent: RgbAccent(1.0, 0.48, 0.14),
+      color: Color(0xFFFF7A24),
+    ),
+    TabMeta(
+      id: TabId.hava,
+      labelTr: 'Hava',
+      labelEn: 'Weather',
+      accent: RgbAccent(0.20, 0.72, 1.0),
+      color: Color(0xFF33B8FF),
+    ),
+    TabMeta(
+      id: TabId.rapor,
+      labelTr: 'Rapor',
+      labelEn: 'Report',
+      accent: RgbAccent(0.55, 0.40, 1.0),
+      color: Color(0xFF8C66FF),
+    ),
+    TabMeta(
+      id: TabId.prog,
+      labelTr: 'Prog.',
+      labelEn: 'Sched.',
+      accent: RgbAccent(0.25, 0.92, 0.65),
+      color: Color(0xFF40EB9E),
+    ),
+  ];
+
+  static const List<ScheduleSlot> defaultSchedule = [
+    ScheduleSlot(id: 'night', labelTr: 'Gece Modu', labelEn: 'Night Mode', time: '23:00', targetTemp: 19.0, enabled: true),
+    ScheduleSlot(id: 'morning', labelTr: 'Sabah Modu', labelEn: 'Morning Mode', time: '06:30', targetTemp: 23.0, enabled: true),
+    ScheduleSlot(id: 'away', labelTr: 'Dışarıda Modu', labelEn: 'Away Mode', time: '08:00', targetTemp: 17.5, enabled: true),
+    ScheduleSlot(id: 'evening', labelTr: 'Akşam Konforu', labelEn: 'Evening Comfort', time: '18:30', targetTemp: 22.5, enabled: true),
+  ];
+
+  static double clamp01(double v) => v.clamp(0.0, 1.0);
+
+  static double lerp(double a, double b, double u) => a + (b - a) * u;
+
+  static double snapTemperature(double temp) {
+    final c = temp.clamp(minTemp, maxTemp);
+    return (c * 2.0).round() / 2.0;
+  }
+
+  static double tempToAngleDeg(double temp) {
+    final norm = ((temp - minTemp) / (maxTemp - minTemp)).clamp(0.0, 1.0);
+    return lerp(dialStartDeg, dialEndDeg, norm);
+  }
+
+  static double pointerOffsetToTemp(double dx, double dy) {
+    var deg = math.atan2(dx, -dy) * 180.0 / math.pi;
+    if (deg > dialEndDeg) deg = dialEndDeg;
+    if (deg < dialStartDeg) deg = dialStartDeg;
+    final norm = (deg - dialStartDeg) / (dialEndDeg - dialStartDeg);
+    return snapTemperature(lerp(minTemp, maxTemp, norm));
+  }
+
+  static ThermostatPreset? findMatchingPreset(double targetTemp) {
+    for (final p in presets) {
+      if ((p.temp - targetTemp).abs() < 0.05) return p;
+    }
+    return null;
+  }
+
+  static RgbAccent resolveThermostatAccent(double targetTemp, PresetId? activePreset) {
+    if (activePreset != null) {
+      for (final p in presets) {
+        if (p.id == activePreset) return p.accent;
+      }
+    }
+    if (targetTemp <= 19.0) return const RgbAccent(0.46, 0.48, 1.0);
+    if (targetTemp <= 21.0) return const RgbAccent(0.22, 0.85, 0.58);
+    if (targetTemp <= 23.5) return const RgbAccent(1.0, 0.48, 0.14);
+    return const RgbAccent(1.0, 0.30, 0.28);
+  }
+
+  static Color resolveThermostatColor(double targetTemp, PresetId? activePreset) {
+    return resolveThermostatAccent(targetTemp, activePreset).toColor();
+  }
+
+  static BoilerTelemetry computeBoilerTelemetry(double roomTemp, double targetTemp) {
+    final delta = targetTemp - roomTemp;
+    if (delta <= 0.1) {
+      return const BoilerTelemetry(
+        isHeating: false,
+        flamePercent: 0,
+        pumpRpm: 0,
+        waterPressureBar: 1.6,
+        modulationActive: false,
+        statusTextTr: 'Beklemede',
+        statusTextEn: 'Standby',
+      );
+    }
+    final flamePercent = (20.0 + (delta / 3.5) * 80.0).clamp(20.0, 100.0).round();
+    final pumpRpm = (1280.0 + (flamePercent / 100.0) * 1120.0).round();
+    final modulationActive = flamePercent < 75;
+    return BoilerTelemetry(
+      isHeating: true,
+      flamePercent: flamePercent,
+      pumpRpm: pumpRpm,
+      waterPressureBar: 1.6,
+      modulationActive: modulationActive,
+      statusTextTr: modulationActive ? 'Modülasyon · %$flamePercent' : 'Yüksek Alev · %$flamePercent',
+      statusTextEn: modulationActive ? 'Modulating · $flamePercent%' : 'High Flame · $flamePercent%',
+    );
+  }
+
+  static double _eOut(double u) => 1.0 - math.pow(1.0 - clamp01(u), 5).toDouble();
+
+  static double _eIO(double u) {
+    final c = clamp01(u);
+    return c < 0.5 ? 4.0 * c * c * c : 1.0 - math.pow(-2.0 * c + 2.0, 3).toDouble() / 2.0;
+  }
+
+  static double moveLength(int deltaTabs) {
+    final n = deltaTabs.abs();
+    return n <= 1 ? 0.65 : n <= 2 ? 0.8 : 0.95;
+  }
+
+  static FlowTabState computeFlowState(
+    double t,
+    FlowMove? move,
+    int activeIndex,
+    RgbAccent liveAccent,
+  ) {
+    if (move == null || t < move.ts) {
+      return FlowTabState(
+        x: tabXs[activeIndex.clamp(0, 3)],
+        rise: 1.0,
+        sx: 1.0,
+        acc: liveAccent,
+        tapX: 0.0,
+        tapAge: -1.0,
+        sw: 0.0,
+        cur: activeIndex,
+        draw: 1.0,
+      );
+    }
+
+    final rawK = (t - move.ts) / move.d;
+    final u = _eIO(rawK);
+    final k = clamp01(rawK);
+    final x = lerp(tabXs[move.a], tabXs[move.b], u);
+    final dive = math.sin(math.pi * math.min(1.0, k * 1.08));
+    var rise = 1.0 - 0.9 * math.pow(dive, 0.7).toDouble();
+    if (k >= 1.0) {
+      rise = 1.0 + 0.06 * math.exp(-(t - move.ts - move.d) * 9.0) * math.sin((t - move.ts - move.d) * 22.0);
+    }
+    final sx = 1.0 + 0.55 * math.sin(math.pi * k) * ((move.b - move.a).abs() > 1 ? 1.25 : 1.0);
+    var acc = RgbAccent.lerp(move.fromAcc, move.toAcc, u);
+    if (t >= move.ts + move.d + 0.25) {
+      acc = liveAccent;
+    }
+    final tapAge = t - move.ts;
+    final sw = clamp01((t - move.ts - move.d * 0.9) / 0.9);
+    final draw = k < 0.5 ? 1.0 - _eIO((k - 0.25) / 0.25) : _eOut((t - move.ts - move.d * 0.5) / 0.6);
+
+    return FlowTabState(
+      x: x,
+      rise: rise,
+      sx: sx,
+      acc: acc,
+      tapX: tabXs[move.b],
+      tapAge: tapAge,
+      sw: sw,
+      cur: move.b,
+      draw: draw,
+    );
+  }
+
+  static VoiceCommandResult parseVoiceCommand(String raw) {
+    final text = raw.trim().toLowerCase();
+    if (text.isEmpty) {
+      return const VoiceCommandResult(
+        handled: false,
+        replyTr: 'Bir komut yazın veya aşağıdan seçin.',
+        replyEn: 'Type or pick a command below.',
+      );
+    }
+
+    final tempMatch = RegExp(r'(\d{2}(?:[.,]\d)?)').firstMatch(text);
+    if (tempMatch != null &&
+        (text.contains('derece') ||
+            text.contains('yap') ||
+            text.contains('ayar') ||
+            text.contains('temp') ||
+            text.contains('set') ||
+            text.contains('°'))) {
+      final parsed = double.tryParse(tempMatch.group(1)!.replaceAll(',', '.'));
+      if (parsed != null) {
+        final snapped = snapTemperature(parsed);
+        final preset = findMatchingPreset(snapped);
+        return VoiceCommandResult(
+          handled: true,
+          newTargetTemp: snapped,
+          newPreset: preset?.id,
+          navigateTab: TabId.termo,
+          replyTr: 'Hedef sıcaklık ${snapped.toStringAsFixed(1)}°C olarak ayarlandı.',
+          replyEn: 'Target temperature set to ${snapped.toStringAsFixed(1)}°C.',
+        );
+      }
+    }
+
+    if (text.contains('eko') || text.contains('eco')) {
+      return const VoiceCommandResult(
+        handled: true,
+        newTargetTemp: 20.0,
+        newPreset: PresetId.eko,
+        navigateTab: TabId.termo,
+        replyTr: 'Eko modu (20.0°C) etkinleştirildi.',
+        replyEn: 'Eco mode (20.0°C) activated.',
+      );
+    }
+    if (text.contains('konfor') || text.contains('comfort')) {
+      return const VoiceCommandResult(
+        handled: true,
+        newTargetTemp: 22.5,
+        newPreset: PresetId.konfor,
+        navigateTab: TabId.termo,
+        replyTr: 'Konfor modu (22.5°C) etkinleştirildi.',
+        replyEn: 'Comfort mode (22.5°C) activated.',
+      );
+    }
+    if (text.contains('gece') || text.contains('night')) {
+      return const VoiceCommandResult(
+        handled: true,
+        newTargetTemp: 18.5,
+        newPreset: PresetId.gece,
+        navigateTab: TabId.termo,
+        replyTr: 'Gece modu (18.5°C) etkinleştirildi.',
+        replyEn: 'Night mode (18.5°C) activated.',
+      );
+    }
+    if (text.contains('boost') || text.contains('hızlı') || text.contains('yüksek')) {
+      return const VoiceCommandResult(
+        handled: true,
+        newTargetTemp: 25.0,
+        newPreset: PresetId.boost,
+        navigateTab: TabId.termo,
+        replyTr: 'Boost modu (25.0°C) etkinleştirildi.',
+        replyEn: 'Boost mode (25.0°C) activated.',
+      );
+    }
+    if (text.contains('hava') || text.contains('weather')) {
+      return const VoiceCommandResult(
+        handled: true,
+        navigateTab: TabId.hava,
+        replyTr: 'Hava durumu ekranına geçiliyor.',
+        replyEn: 'Opening weather forecast.',
+      );
+    }
+    if (text.contains('rapor') || text.contains('analiz') || text.contains('tüketim') || text.contains('report')) {
+      return const VoiceCommandResult(
+        handled: true,
+        navigateTab: TabId.rapor,
+        replyTr: 'Tüketim ve analiz raporuna geçiliyor.',
+        replyEn: 'Opening consumption report.',
+      );
+    }
+    if (text.contains('program') || text.contains('zaman') || text.contains('schedule')) {
+      return const VoiceCommandResult(
+        handled: true,
+        navigateTab: TabId.prog,
+        replyTr: 'Haftalık zaman programına geçiliyor.',
+        replyEn: 'Opening weekly schedule.',
+      );
+    }
+
+    return const VoiceCommandResult(
+      handled: false,
+      replyTr: 'Anlaşılamadı. Örnek: "23 derece yap", "Eko mod" veya "Hava durumu".',
+      replyEn: 'Not recognized. Try "Set 23°", "Eco mode", or "Weather".',
+    );
+  }
+}
+
+enum SettingsItemId {
+  vault,
+  googleHome,
+  smartDisplay,
+  notifications,
+  haptic,
+  bootCeremony,
+  termoBot,
+  aiPhoneCall,
+  espLog,
+  cloudSync,
+  resetHistory,
+}
+
+class EspLogEntry {
+  final String timestamp;
+  final String event;
+  final String detail;
+  final bool isWarning;
+
+  const EspLogEntry({
+    required this.timestamp,
+    required this.event,
+    required this.detail,
+    this.isWarning = false,
+  });
+}
+
+class SystemSettingsState {
+  final List<SettingsItemId> menuOrder;
+  final String vaultPin;
+  final bool vaultUnlocked;
+  final String telegramToken;
+  final String telegramChatId;
+  final bool googleHomeLinked;
+  final String googleHomeRoom;
+  final bool smartDisplayEnabled;
+  final bool notifications3hEnabled;
+  final bool emergencyBoilerAlerts;
+  final bool hapticEnabled;
+  final bool bootCeremonyEnabled;
+  final bool termoBotEnabled;
+  final bool aiPhoneCallEnabled;
+  final int aiCallRingSeconds;
+  final String espDeviceId;
+  final bool espOnline;
+  final String firebaseRtdbUrl;
+  final bool cloudSyncEnabled;
+  final List<EspLogEntry> espLogs;
+
+  const SystemSettingsState({
+    required this.menuOrder,
+    required this.vaultPin,
+    required this.vaultUnlocked,
+    required this.telegramToken,
+    required this.telegramChatId,
+    required this.googleHomeLinked,
+    required this.googleHomeRoom,
+    required this.smartDisplayEnabled,
+    required this.notifications3hEnabled,
+    required this.emergencyBoilerAlerts,
+    required this.hapticEnabled,
+    required this.bootCeremonyEnabled,
+    required this.termoBotEnabled,
+    required this.aiPhoneCallEnabled,
+    required this.aiCallRingSeconds,
+    required this.espDeviceId,
+    required this.espOnline,
+    required this.firebaseRtdbUrl,
+    required this.cloudSyncEnabled,
+    required this.espLogs,
+  });
+
+  static const List<SettingsItemId> defaultMenuOrder = [
+    SettingsItemId.vault,
+    SettingsItemId.googleHome,
+    SettingsItemId.smartDisplay,
+    SettingsItemId.notifications,
+    SettingsItemId.haptic,
+    SettingsItemId.bootCeremony,
+    SettingsItemId.termoBot,
+    SettingsItemId.aiPhoneCall,
+    SettingsItemId.espLog,
+    SettingsItemId.cloudSync,
+    SettingsItemId.resetHistory,
+  ];
+
+  factory SystemSettingsState.defaults() => const SystemSettingsState(
+        menuOrder: defaultMenuOrder,
+        vaultPin: '1234',
+        vaultUnlocked: false,
+        telegramToken: '',
+        telegramChatId: '',
+        googleHomeLinked: false,
+        googleHomeRoom: 'Salon',
+        smartDisplayEnabled: true,
+        notifications3hEnabled: true,
+        emergencyBoilerAlerts: true,
+        hapticEnabled: true,
+        bootCeremonyEnabled: true,
+        termoBotEnabled: true,
+        aiPhoneCallEnabled: true,
+        aiCallRingSeconds: 10,
+        espDeviceId: 'ESP32-KOMBI-01',
+        espOnline: false,
+        firebaseRtdbUrl: 'https://kombi-kontrol-default-rtdb.firebaseio.com',
+        cloudSyncEnabled: false,
+        espLogs: [
+          EspLogEntry(timestamp: '23:10', event: 'Modülasyon %36', detail: 'Oda 21.8°C → Hedef 22.5°C'),
+          EspLogEntry(timestamp: '20:45', event: 'Brülör Ateşleme', detail: 'Basınç 1.6 Bar normal'),
+          EspLogEntry(timestamp: '16:12', event: 'WDT Kontrolü', detail: 'Çevrimdışı tampon kaydedildi', isWarning: true),
+        ],
+      );
+
+  SystemSettingsState copyWith({
+    List<SettingsItemId>? menuOrder,
+    String? vaultPin,
+    bool? vaultUnlocked,
+    String? telegramToken,
+    String? telegramChatId,
+    bool? googleHomeLinked,
+    String? googleHomeRoom,
+    bool? smartDisplayEnabled,
+    bool? notifications3hEnabled,
+    bool? emergencyBoilerAlerts,
+    bool? hapticEnabled,
+    bool? bootCeremonyEnabled,
+    bool? termoBotEnabled,
+    bool? aiPhoneCallEnabled,
+    int? aiCallRingSeconds,
+    String? espDeviceId,
+    bool? espOnline,
+    String? firebaseRtdbUrl,
+    bool? cloudSyncEnabled,
+    List<EspLogEntry>? espLogs,
+  }) {
+    return SystemSettingsState(
+      menuOrder: menuOrder ?? this.menuOrder,
+      vaultPin: vaultPin ?? this.vaultPin,
+      vaultUnlocked: vaultUnlocked ?? this.vaultUnlocked,
+      telegramToken: telegramToken ?? this.telegramToken,
+      telegramChatId: telegramChatId ?? this.telegramChatId,
+      googleHomeLinked: googleHomeLinked ?? this.googleHomeLinked,
+      googleHomeRoom: googleHomeRoom ?? this.googleHomeRoom,
+      smartDisplayEnabled: smartDisplayEnabled ?? this.smartDisplayEnabled,
+      notifications3hEnabled: notifications3hEnabled ?? this.notifications3hEnabled,
+      emergencyBoilerAlerts: emergencyBoilerAlerts ?? this.emergencyBoilerAlerts,
+      hapticEnabled: hapticEnabled ?? this.hapticEnabled,
+      bootCeremonyEnabled: bootCeremonyEnabled ?? this.bootCeremonyEnabled,
+      termoBotEnabled: termoBotEnabled ?? this.termoBotEnabled,
+      aiPhoneCallEnabled: aiPhoneCallEnabled ?? this.aiPhoneCallEnabled,
+      aiCallRingSeconds: aiCallRingSeconds ?? this.aiCallRingSeconds,
+      espDeviceId: espDeviceId ?? this.espDeviceId,
+      espOnline: espOnline ?? this.espOnline,
+      firebaseRtdbUrl: firebaseRtdbUrl ?? this.firebaseRtdbUrl,
+      cloudSyncEnabled: cloudSyncEnabled ?? this.cloudSyncEnabled,
+      espLogs: espLogs ?? this.espLogs,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'menuOrder': menuOrder.map((e) => e.name).toList(),
+        'vaultPin': vaultPin,
+        'telegramToken': telegramToken,
+        'telegramChatId': telegramChatId,
+        'googleHomeLinked': googleHomeLinked,
+        'googleHomeRoom': googleHomeRoom,
+        'smartDisplayEnabled': smartDisplayEnabled,
+        'notifications3hEnabled': notifications3hEnabled,
+        'emergencyBoilerAlerts': emergencyBoilerAlerts,
+        'hapticEnabled': hapticEnabled,
+        'bootCeremonyEnabled': bootCeremonyEnabled,
+        'termoBotEnabled': termoBotEnabled,
+        'aiPhoneCallEnabled': aiPhoneCallEnabled,
+        'aiCallRingSeconds': aiCallRingSeconds,
+        'espDeviceId': espDeviceId,
+        'firebaseRtdbUrl': firebaseRtdbUrl,
+        'cloudSyncEnabled': cloudSyncEnabled,
+      };
+
+  factory SystemSettingsState.fromJson(Map<String, dynamic> map) {
+    final defaults = SystemSettingsState.defaults();
+    final rawOrder = map['menuOrder'];
+    List<SettingsItemId> parsedOrder = defaults.menuOrder;
+    if (rawOrder is List) {
+      final items = <SettingsItemId>[];
+      for (final name in rawOrder) {
+        for (final id in SettingsItemId.values) {
+          if (id.name == name && !items.contains(id)) {
+            items.add(id);
+          }
+        }
+      }
+      for (final id in SystemSettingsState.defaultMenuOrder) {
+        if (!items.contains(id)) items.add(id);
+      }
+      if (items.isNotEmpty) parsedOrder = items;
+    }
+
+    return defaults.copyWith(
+      menuOrder: parsedOrder,
+      vaultPin: (map['vaultPin'] as String?) ?? defaults.vaultPin,
+      telegramToken: (map['telegramToken'] as String?) ?? defaults.telegramToken,
+      telegramChatId: (map['telegramChatId'] as String?) ?? defaults.telegramChatId,
+      googleHomeLinked: (map['googleHomeLinked'] as bool?) ?? defaults.googleHomeLinked,
+      googleHomeRoom: (map['googleHomeRoom'] as String?) ?? defaults.googleHomeRoom,
+      smartDisplayEnabled: (map['smartDisplayEnabled'] as bool?) ?? defaults.smartDisplayEnabled,
+      notifications3hEnabled: (map['notifications3hEnabled'] as bool?) ?? defaults.notifications3hEnabled,
+      emergencyBoilerAlerts: (map['emergencyBoilerAlerts'] as bool?) ?? defaults.emergencyBoilerAlerts,
+      hapticEnabled: (map['hapticEnabled'] as bool?) ?? defaults.hapticEnabled,
+      bootCeremonyEnabled: (map['bootCeremonyEnabled'] as bool?) ?? defaults.bootCeremonyEnabled,
+      termoBotEnabled: (map['termoBotEnabled'] as bool?) ?? defaults.termoBotEnabled,
+      aiPhoneCallEnabled: (map['aiPhoneCallEnabled'] as bool?) ?? defaults.aiPhoneCallEnabled,
+      aiCallRingSeconds: (map['aiCallRingSeconds'] as int?) ?? defaults.aiCallRingSeconds,
+      espDeviceId: (map['espDeviceId'] as String?) ?? defaults.espDeviceId,
+      firebaseRtdbUrl: (map['firebaseRtdbUrl'] as String?) ?? defaults.firebaseRtdbUrl,
+      cloudSyncEnabled: (map['cloudSyncEnabled'] as bool?) ?? defaults.cloudSyncEnabled,
+    );
+  }
+}
+
+enum AppThemeMode {
+  liquidGlass,
+  darkNight,
+  lightDay,
+  autoSmart,
+  obsidianLavender,
+  tactileDeck,
+}
+
+enum ObsidianPalette {
+  pastelLavender,
+  dustyLilac,
+  royalViolet,
+  deepObsidian,
+}
+
+enum PerformanceMode {
+  ultra60fps,
+  ecoBattery,
+}
+
+enum WeatherEffectPreview {
+  live,
+  sunny,
+  partlyCloudy,
+  rainy,
+  snowy,
+  foggy,
+}
+
+enum ReportSubTab {
+  heatMap,
+  usageBill,
+  boilerSensors,
+}
+
+enum ScheduleSubTab {
+  smartSchedule,
+  dailySavings,
+}
+
+class ThemePaletteSpec {
+  final bool isLight;
+  final bool isTactileDeck;
+  final bool isLiquidGlass;
+  final double daylightMix;
+  final double tactileWarmth;
+  final Color scaffoldBg;
+  final Color cardBg;
+  final Color cardBorder;
+  final Color sheetBg;
+  final Color textPrimary;
+  final Color textSecondary;
+  final RgbAccent? themeOverrideAccent;
+
+  const ThemePaletteSpec({
+    required this.isLight,
+    required this.isTactileDeck,
+    required this.isLiquidGlass,
+    required this.daylightMix,
+    required this.tactileWarmth,
+    required this.scaffoldBg,
+    required this.cardBg,
+    required this.cardBorder,
+    required this.sheetBg,
+    required this.textPrimary,
+    required this.textSecondary,
+    this.themeOverrideAccent,
+  });
+}
+
+class VisualCustomizationState {
+  final AppThemeMode theme;
+  final ObsidianPalette obsidianPalette;
+  final PerformanceMode performanceMode;
+  final WeatherEffectPreview weatherPreview;
+  final List<TabId> tabOrder;
+  final List<ReportSubTab> reportSubTabOrder;
+  final List<ScheduleSubTab> scheduleSubTabOrder;
+
+  const VisualCustomizationState({
+    required this.theme,
+    required this.obsidianPalette,
+    required this.performanceMode,
+    required this.weatherPreview,
+    required this.tabOrder,
+    required this.reportSubTabOrder,
+    required this.scheduleSubTabOrder,
+  });
+
+  static const List<TabId> defaultTabOrder = [
+    TabId.termo,
+    TabId.hava,
+    TabId.rapor,
+    TabId.prog,
+  ];
+
+  static const List<ReportSubTab> defaultReportSubOrder = [
+    ReportSubTab.heatMap,
+    ReportSubTab.usageBill,
+    ReportSubTab.boilerSensors,
+  ];
+
+  static const List<ScheduleSubTab> defaultScheduleSubOrder = [
+    ScheduleSubTab.smartSchedule,
+    ScheduleSubTab.dailySavings,
+  ];
+
+  factory VisualCustomizationState.defaults() => const VisualCustomizationState(
+        theme: AppThemeMode.liquidGlass,
+        obsidianPalette: ObsidianPalette.pastelLavender,
+        performanceMode: PerformanceMode.ultra60fps,
+        weatherPreview: WeatherEffectPreview.live,
+        tabOrder: defaultTabOrder,
+        reportSubTabOrder: defaultReportSubOrder,
+        scheduleSubTabOrder: defaultScheduleSubOrder,
+      );
+
+  List<TabMeta> get orderedTabs {
+    final result = <TabMeta>[];
+    for (final id in tabOrder) {
+      for (final meta in ThermostatMath.tabs) {
+        if (meta.id == id) result.add(meta);
+      }
+    }
+    for (final meta in ThermostatMath.tabs) {
+      if (!result.any((r) => r.id == meta.id)) result.add(meta);
+    }
+    return result;
+  }
+
+  ThemePaletteSpec resolvePalette([DateTime? now]) {
+    final hour = (now ?? DateTime.now()).hour;
+    final autoIsLight = hour >= 7 && hour < 19;
+
+    switch (theme) {
+      case AppThemeMode.lightDay:
+        return ThemePaletteSpec(
+          isLight: true,
+          isTactileDeck: false,
+          isLiquidGlass: false,
+          daylightMix: 1.0,
+          tactileWarmth: 0.0,
+          scaffoldBg: const Color(0xFFDCE7F5),
+          cardBg: Colors.white.withValues(alpha: 0.72),
+          cardBorder: const Color(0xFF0F172A).withValues(alpha: 0.12),
+          sheetBg: const Color(0xFFF1F5F9),
+          textPrimary: const Color(0xFF0F172A),
+          textSecondary: const Color(0xFF334155),
+        );
+      case AppThemeMode.autoSmart:
+        if (autoIsLight) {
+          return ThemePaletteSpec(
+            isLight: true,
+            isTactileDeck: false,
+            isLiquidGlass: true,
+            daylightMix: 0.92,
+            tactileWarmth: 0.0,
+            scaffoldBg: const Color(0xFFD8E5F4),
+            cardBg: Colors.white.withValues(alpha: 0.70),
+            cardBorder: const Color(0xFF0F172A).withValues(alpha: 0.12),
+            sheetBg: const Color(0xFFF1F5F9),
+            textPrimary: const Color(0xFF0F172A),
+            textSecondary: const Color(0xFF334155),
+          );
+        }
+        return ThemePaletteSpec(
+          isLight: false,
+          isTactileDeck: false,
+          isLiquidGlass: true,
+          daylightMix: 0.0,
+          tactileWarmth: 0.0,
+          scaffoldBg: const Color(0xFF040406),
+          cardBg: Colors.white.withValues(alpha: 0.05),
+          cardBorder: Colors.white.withValues(alpha: 0.10),
+          sheetBg: const Color(0xFF0D0E14),
+          textPrimary: Colors.white,
+          textSecondary: Colors.white.withValues(alpha: 0.62),
+        );
+      case AppThemeMode.darkNight:
+        return ThemePaletteSpec(
+          isLight: false,
+          isTactileDeck: false,
+          isLiquidGlass: false,
+          daylightMix: 0.0,
+          tactileWarmth: 0.0,
+          scaffoldBg: const Color(0xFF020305),
+          cardBg: const Color(0xFF0B0E17).withValues(alpha: 0.85),
+          cardBorder: Colors.white.withValues(alpha: 0.08),
+          sheetBg: const Color(0xFF090B11),
+          textPrimary: Colors.white,
+          textSecondary: Colors.white.withValues(alpha: 0.58),
+        );
+      case AppThemeMode.obsidianLavender:
+        final RgbAccent lavAccent;
+        final Color cardTint;
+        switch (obsidianPalette) {
+          case ObsidianPalette.pastelLavender:
+            lavAccent = const RgbAccent(0.76, 0.60, 1.0);
+            cardTint = const Color(0xFF1A1429).withValues(alpha: 0.76);
+            break;
+          case ObsidianPalette.dustyLilac:
+            lavAccent = const RgbAccent(0.68, 0.54, 0.88);
+            cardTint = const Color(0xFF191523).withValues(alpha: 0.78);
+            break;
+          case ObsidianPalette.royalViolet:
+            lavAccent = const RgbAccent(0.55, 0.36, 1.0);
+            cardTint = const Color(0xFF16102B).withValues(alpha: 0.80);
+            break;
+          case ObsidianPalette.deepObsidian:
+            lavAccent = const RgbAccent(0.58, 0.56, 0.72);
+            cardTint = const Color(0xFF121218).withValues(alpha: 0.85);
+            break;
+        }
+        return ThemePaletteSpec(
+          isLight: false,
+          isTactileDeck: false,
+          isLiquidGlass: true,
+          daylightMix: 0.0,
+          tactileWarmth: 0.12,
+          scaffoldBg: const Color(0xFF09070F),
+          cardBg: cardTint,
+          cardBorder: lavAccent.toColor(0.24),
+          sheetBg: const Color(0xFF110D1B),
+          textPrimary: const Color(0xFFF5F0FF),
+          textSecondary: const Color(0xFFC4B5FD).withValues(alpha: 0.78),
+          themeOverrideAccent: lavAccent,
+        );
+      case AppThemeMode.tactileDeck:
+        return ThemePaletteSpec(
+          isLight: false,
+          isTactileDeck: true,
+          isLiquidGlass: false,
+          daylightMix: 0.0,
+          tactileWarmth: 1.0,
+          scaffoldBg: const Color(0xFF0C0A09),
+          cardBg: const Color(0xFF1C1917).withValues(alpha: 0.90),
+          cardBorder: const Color(0xFFD97706).withValues(alpha: 0.25),
+          sheetBg: const Color(0xFF161311),
+          textPrimary: const Color(0xFFFAF7F2),
+          textSecondary: const Color(0xFFD6CFC7),
+          themeOverrideAccent: const RgbAccent(0.98, 0.62, 0.22),
+        );
+      case AppThemeMode.liquidGlass:
+        return ThemePaletteSpec(
+          isLight: false,
+          isTactileDeck: false,
+          isLiquidGlass: true,
+          daylightMix: 0.0,
+          tactileWarmth: 0.0,
+          scaffoldBg: const Color(0xFF040406),
+          cardBg: Colors.white.withValues(alpha: 0.05),
+          cardBorder: Colors.white.withValues(alpha: 0.11),
+          sheetBg: const Color(0xFF0D0E14),
+          textPrimary: Colors.white,
+          textSecondary: Colors.white.withValues(alpha: 0.58),
+        );
+    }
+  }
+
+  VisualCustomizationState copyWith({
+    AppThemeMode? theme,
+    ObsidianPalette? obsidianPalette,
+    PerformanceMode? performanceMode,
+    WeatherEffectPreview? weatherPreview,
+    List<TabId>? tabOrder,
+    List<ReportSubTab>? reportSubTabOrder,
+    List<ScheduleSubTab>? scheduleSubTabOrder,
+  }) {
+    return VisualCustomizationState(
+      theme: theme ?? this.theme,
+      obsidianPalette: obsidianPalette ?? this.obsidianPalette,
+      performanceMode: performanceMode ?? this.performanceMode,
+      weatherPreview: weatherPreview ?? this.weatherPreview,
+      tabOrder: tabOrder ?? this.tabOrder,
+      reportSubTabOrder: reportSubTabOrder ?? this.reportSubTabOrder,
+      scheduleSubTabOrder: scheduleSubTabOrder ?? this.scheduleSubTabOrder,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'theme': theme.name,
+        'obsidianPalette': obsidianPalette.name,
+        'performanceMode': performanceMode.name,
+        'weatherPreview': weatherPreview.name,
+        'tabOrder': tabOrder.map((e) => e.name).toList(),
+        'reportSubTabOrder': reportSubTabOrder.map((e) => e.name).toList(),
+        'scheduleSubTabOrder': scheduleSubTabOrder.map((e) => e.name).toList(),
+      };
+
+  static List<T> _parseEnumOrder<T extends Enum>(
+    dynamic raw,
+    List<T> values,
+    List<T> fallback,
+  ) {
+    if (raw is! List) return fallback;
+    final parsed = <T>[];
+    for (final item in raw) {
+      for (final v in values) {
+        if (v.name == item && !parsed.contains(v)) parsed.add(v);
+      }
+    }
+    for (final v in fallback) {
+      if (!parsed.contains(v)) parsed.add(v);
+    }
+    return parsed.isEmpty ? fallback : parsed;
+  }
+
+  factory VisualCustomizationState.fromJson(Map<String, dynamic> map) {
+    final d = VisualCustomizationState.defaults();
+
+    AppThemeMode parseTheme(String? n) {
+      for (final v in AppThemeMode.values) {
+        if (v.name == n) return v;
+      }
+      return d.theme;
+    }
+
+    ObsidianPalette parseObs(String? n) {
+      for (final v in ObsidianPalette.values) {
+        if (v.name == n) return v;
+      }
+      return d.obsidianPalette;
+    }
+
+    PerformanceMode parsePerf(String? n) {
+      for (final v in PerformanceMode.values) {
+        if (v.name == n) return v;
+      }
+      return d.performanceMode;
+    }
+
+    WeatherEffectPreview parseWeather(String? n) {
+      for (final v in WeatherEffectPreview.values) {
+        if (v.name == n) return v;
+      }
+      return d.weatherPreview;
+    }
+
+    return VisualCustomizationState(
+      theme: parseTheme(map['theme'] as String?),
+      obsidianPalette: parseObs(map['obsidianPalette'] as String?),
+      performanceMode: parsePerf(map['performanceMode'] as String?),
+      weatherPreview: parseWeather(map['weatherPreview'] as String?),
+      tabOrder: _parseEnumOrder(map['tabOrder'], TabId.values, defaultTabOrder),
+      reportSubTabOrder: _parseEnumOrder(
+        map['reportSubTabOrder'],
+        ReportSubTab.values,
+        defaultReportSubOrder,
+      ),
+      scheduleSubTabOrder: _parseEnumOrder(
+        map['scheduleSubTabOrder'],
+        ScheduleSubTab.values,
+        defaultScheduleSubOrder,
+      ),
+    );
+  }
+}
+
+
