@@ -13,6 +13,7 @@ import 'screens/widget_order_sheet.dart';
 import 'services/ambient_audio_service.dart';
 import 'services/firebase_sync_service.dart';
 import 'services/hardware_service.dart';
+import 'services/notification_service.dart';
 import 'widgets/flow_tab_bar.dart';
 import 'widgets/overlays.dart';
 import 'widgets/termo_bot.dart';
@@ -81,6 +82,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
   Timer? _clockTimer;
   Timer? _idleTimer;
+  Timer? _automationTimer;
 
   @override
   void initState() {
@@ -108,6 +110,23 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           }
         });
       }
+    });
+    _automationTimer = Timer.periodic(const Duration(hours: 3), (_) {
+      if (!mounted || !_settings.notifications3hEnabled) return;
+      final b = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp);
+      NotificationService.dispatchNotification(
+        context: context,
+        lang: _lang,
+        locationName: _locationName,
+        roomTemp: _roomTemp,
+        targetTemp: _targetTemp,
+        boiler: b,
+        settings: _settings,
+      ).then((res) {
+        if (!mounted) return;
+        setState(() => _settings = _settings.copyWith(lastNotificationAt: res.timestampLabel));
+        _persist();
+      });
     });
   }
 
@@ -206,7 +225,10 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
   void _triggerHaptic() {
     if (_settings.hapticEnabled) {
-      HardwareService.vibrateMs(40, amplitude: 110);
+      HardwareService.vibrateMs(
+        40,
+        amplitude: HardwareService.scaledAmplitude(135, _settings.hapticStrength),
+      );
     }
   }
 
@@ -277,6 +299,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   void dispose() {
     _clockTimer?.cancel();
     _idleTimer?.cancel();
+    _automationTimer?.cancel();
     _pageController.dispose();
     AmbientAudioService.stop();
     HardwareService.exitSmartDisplayHardware();
@@ -366,6 +389,10 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             locationName: _locationName,
             palette: palette,
             weatherAlertsEnabled: _settings.weatherAlertsEnabled,
+            roomTemp: _roomTemp,
+            targetTemp: _targetTemp,
+            boiler: boiler,
+            settings: _settings,
             onToggleWeatherAlerts: (v) {
               _triggerHaptic();
               setState(() => _settings = _settings.copyWith(weatherAlertsEnabled: v));

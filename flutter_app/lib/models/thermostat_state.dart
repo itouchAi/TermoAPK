@@ -769,7 +769,10 @@ class SystemSettingsState {
   final bool notifications3hEnabled;
   final bool emergencyBoilerAlerts;
   final bool weatherAlertsEnabled;
+  final bool notifyChimeEnabled;
+  final String lastNotificationAt;
   final bool hapticEnabled;
+  final int hapticStrength;
   final bool bootCeremonyEnabled;
   final bool termoBotEnabled;
   final MascotCharacter mascotCharacter;
@@ -811,7 +814,10 @@ class SystemSettingsState {
     required this.notifications3hEnabled,
     required this.emergencyBoilerAlerts,
     required this.weatherAlertsEnabled,
+    required this.notifyChimeEnabled,
+    required this.lastNotificationAt,
     required this.hapticEnabled,
+    required this.hapticStrength,
     required this.bootCeremonyEnabled,
     required this.termoBotEnabled,
     required this.mascotCharacter,
@@ -868,7 +874,10 @@ class SystemSettingsState {
         notifications3hEnabled: true,
         emergencyBoilerAlerts: true,
         weatherAlertsEnabled: true,
+        notifyChimeEnabled: true,
+        lastNotificationAt: '',
         hapticEnabled: true,
+        hapticStrength: 80,
         bootCeremonyEnabled: true,
         termoBotEnabled: true,
         mascotCharacter: MascotCharacter.termoBot,
@@ -935,7 +944,10 @@ class SystemSettingsState {
     bool? notifications3hEnabled,
     bool? emergencyBoilerAlerts,
     bool? weatherAlertsEnabled,
+    bool? notifyChimeEnabled,
+    String? lastNotificationAt,
     bool? hapticEnabled,
+    int? hapticStrength,
     bool? bootCeremonyEnabled,
     bool? termoBotEnabled,
     MascotCharacter? mascotCharacter,
@@ -977,7 +989,10 @@ class SystemSettingsState {
       notifications3hEnabled: notifications3hEnabled ?? this.notifications3hEnabled,
       emergencyBoilerAlerts: emergencyBoilerAlerts ?? this.emergencyBoilerAlerts,
       weatherAlertsEnabled: weatherAlertsEnabled ?? this.weatherAlertsEnabled,
+      notifyChimeEnabled: notifyChimeEnabled ?? this.notifyChimeEnabled,
+      lastNotificationAt: lastNotificationAt ?? this.lastNotificationAt,
       hapticEnabled: hapticEnabled ?? this.hapticEnabled,
+      hapticStrength: (hapticStrength ?? this.hapticStrength).clamp(40, 100),
       bootCeremonyEnabled: bootCeremonyEnabled ?? this.bootCeremonyEnabled,
       termoBotEnabled: termoBotEnabled ?? this.termoBotEnabled,
       mascotCharacter: mascotCharacter ?? this.mascotCharacter,
@@ -1020,7 +1035,10 @@ class SystemSettingsState {
         'notifications3hEnabled': notifications3hEnabled,
         'emergencyBoilerAlerts': emergencyBoilerAlerts,
         'weatherAlertsEnabled': weatherAlertsEnabled,
+        'notifyChimeEnabled': notifyChimeEnabled,
+        'lastNotificationAt': lastNotificationAt,
         'hapticEnabled': hapticEnabled,
+        'hapticStrength': hapticStrength,
         'bootCeremonyEnabled': bootCeremonyEnabled,
         'termoBotEnabled': termoBotEnabled,
         'mascotCharacter': mascotCharacter.name,
@@ -1113,7 +1131,10 @@ class SystemSettingsState {
       notifications3hEnabled: (map['notifications3hEnabled'] as bool?) ?? defaults.notifications3hEnabled,
       emergencyBoilerAlerts: (map['emergencyBoilerAlerts'] as bool?) ?? defaults.emergencyBoilerAlerts,
       weatherAlertsEnabled: (map['weatherAlertsEnabled'] as bool?) ?? defaults.weatherAlertsEnabled,
+      notifyChimeEnabled: (map['notifyChimeEnabled'] as bool?) ?? defaults.notifyChimeEnabled,
+      lastNotificationAt: (map['lastNotificationAt'] as String?) ?? defaults.lastNotificationAt,
       hapticEnabled: (map['hapticEnabled'] as bool?) ?? defaults.hapticEnabled,
+      hapticStrength: (map['hapticStrength'] as int?) ?? defaults.hapticStrength,
       bootCeremonyEnabled: (map['bootCeremonyEnabled'] as bool?) ?? defaults.bootCeremonyEnabled,
       termoBotEnabled: (map['termoBotEnabled'] as bool?) ?? defaults.termoBotEnabled,
       mascotCharacter: _parseEnum(map['mascotCharacter'] as String?, MascotCharacter.values, defaults.mascotCharacter),

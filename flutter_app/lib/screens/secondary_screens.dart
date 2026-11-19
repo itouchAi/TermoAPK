@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/thermostat_state.dart';
+import '../services/notification_service.dart';
 
 class WeatherScreen extends StatefulWidget {
   final LangCode lang;
@@ -7,6 +8,10 @@ class WeatherScreen extends StatefulWidget {
   final ThemePaletteSpec palette;
   final VoidCallback onApplyEcoCompensation;
   final bool weatherAlertsEnabled;
+  final double roomTemp;
+  final double targetTemp;
+  final BoilerTelemetry? boiler;
+  final SystemSettingsState? settings;
   final ValueChanged<bool>? onToggleWeatherAlerts;
   final ValueChanged<String>? onChangeLocation;
 
@@ -17,6 +22,10 @@ class WeatherScreen extends StatefulWidget {
     required this.palette,
     required this.onApplyEcoCompensation,
     this.weatherAlertsEnabled = true,
+    this.roomTemp = 21.8,
+    this.targetTemp = 22.5,
+    this.boiler,
+    this.settings,
     this.onToggleWeatherAlerts,
     this.onChangeLocation,
   });
@@ -504,11 +513,28 @@ class _WeatherScreenState extends State<WeatherScreen> {
                         ),
                         const SizedBox(width: 8),
                         OutlinedButton(
-                          onPressed: () {
+                          onPressed: () async {
+                            final activeBoiler = widget.boiler ??
+                                ThermostatMath.computeBoilerTelemetry(widget.roomTemp, widget.targetTemp);
+                            final res = await NotificationService.dispatchNotification(
+                              context: context,
+                              lang: widget.lang,
+                              locationName: widget.locationName,
+                              roomTemp: widget.roomTemp,
+                              targetTemp: widget.targetTemp,
+                              boiler: activeBoiler,
+                              settings: widget.settings ?? SystemSettingsState.defaults(),
+                              customTitle: tr
+                                  ? '🌧️ Hava & Donma Koruma Test Bildirimi'
+                                  : '🌧️ Weather & Freeze Guard Test Alert',
+                              customBody: tr
+                                  ? '${widget.locationName}: Yarın %90 yağış & gece 11-13°C düşüş bekleniyor. Oda ${widget.roomTemp.toStringAsFixed(1)}°C.'
+                                  : '${widget.locationName}: 90% rain & 11-13°C night drop ahead. Room ${widget.roomTemp.toStringAsFixed(1)}°C.',
+                              severityOverride: AlertSeverity.warning,
+                            );
+                            if (!mounted) return;
                             setState(() {
-                              _toastMsg = tr
-                                  ? 'Test bildirimi gönderildi: Yarın yağış & %90 nem uyarısı.'
-                                  : 'Test alert sent: Rain & 90% humidity advisory.';
+                              _toastMsg = tr ? res.statusTextTr : res.statusTextEn;
                             });
                           },
                           style: OutlinedButton.styleFrom(

@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:termostat_flow/models/thermostat_state.dart';
 import 'package:termostat_flow/services/ambient_audio_service.dart';
+import 'package:termostat_flow/services/hardware_service.dart';
+import 'package:termostat_flow/services/notification_service.dart';
 import 'package:termostat_flow/services/vault_crypto_service.dart';
 
 void main() {
@@ -56,6 +58,9 @@ void main() {
       displaySleepMinutes: 15,
       oledPixelShiftEnabled: false,
       weatherAlertsEnabled: false,
+      notifyChimeEnabled: false,
+      lastNotificationAt: '21:45',
+      hapticStrength: 95,
       mascotCharacter: MascotCharacter.mirnav,
       screensaverIdleSeconds: 120,
       screensaverBackdrop: ScreensaverBackdrop.termoLab,
@@ -79,6 +84,9 @@ void main() {
     expect(restored.displaySleepMinutes, 15);
     expect(restored.oledPixelShiftEnabled, isFalse);
     expect(restored.weatherAlertsEnabled, isFalse);
+    expect(restored.notifyChimeEnabled, isFalse);
+    expect(restored.lastNotificationAt, '21:45');
+    expect(restored.hapticStrength, 95);
     expect(restored.mascotCharacter, MascotCharacter.mirnav);
     expect(restored.screensaverIdleSeconds, 120);
     expect(restored.screensaverBackdrop, ScreensaverBackdrop.termoLab);
@@ -124,12 +132,60 @@ void main() {
     );
   });
 
-  test('AmbientAudioService generates valid RIFF/WAVE PCM headers for soundtracks', () {
+  test('AmbientAudioService generates valid RIFF/WAVE PCM headers for soundtracks and chimes', () {
     for (final track in AmbientSoundtrack.values) {
       final bytes = AmbientAudioService.generateAmbientWavBytes(track);
       expect(bytes.length, greaterThan(44));
       expect(String.fromCharCodes(bytes.sublist(0, 4)), 'RIFF');
       expect(String.fromCharCodes(bytes.sublist(8, 12)), 'WAVE');
     }
+    final chime = AmbientAudioService.generateChimeWavBytes();
+    final urgentChime = AmbientAudioService.generateChimeWavBytes(urgent: true);
+    expect(String.fromCharCodes(chime.sublist(0, 4)), 'RIFF');
+    expect(String.fromCharCodes(urgentChime.sublist(8, 12)), 'WAVE');
+  });
+
+  test('NotificationService detects low pressure and freeze risk thresholds accurately', () {
+    final safeBoiler = ThermostatMath.computeBoilerTelemetry(21.8, 22.5);
+    final safeGuard = NotificationService.evaluateSafetyThresholds(
+      roomTemp: 21.8,
+      outsideTemp: 15.0,
+      boiler: safeBoiler,
+    );
+    expect(safeGuard.hasCriticalAlert, isFalse);
+    expect(safeGuard.lowPressure, isFalse);
+    expect(safeGuard.freezeRisk, isFalse);
+
+    const lowBarBoiler = BoilerTelemetry(
+      isHeating: false,
+      flamePercent: 0,
+      pumpRpm: 0,
+      waterPressureBar: 0.8,
+      modulationActive: false,
+      statusTextTr: 'Düşük Basınç',
+      statusTextEn: 'Low Pressure',
+    );
+    final lowBarGuard = NotificationService.evaluateSafetyThresholds(
+      roomTemp: 21.0,
+      outsideTemp: 12.0,
+      boiler: lowBarBoiler,
+    );
+    expect(lowBarGuard.hasCriticalAlert, isTrue);
+    expect(lowBarGuard.lowPressure, isTrue);
+
+    final freezeGuard = NotificationService.evaluateSafetyThresholds(
+      roomTemp: 4.5,
+      outsideTemp: 2.0,
+      boiler: safeBoiler,
+    );
+    expect(freezeGuard.hasCriticalAlert, isTrue);
+    expect(freezeGuard.freezeRisk, isTrue);
+  });
+
+  test('HardwareService scales haptic vibration amplitude within valid 1-255 bounds', () {
+    expect(HardwareService.scaledAmplitude(200, 100), 200);
+    expect(HardwareService.scaledAmplitude(200, 50), 100);
+    expect(HardwareService.scaledAmplitude(200, 10), 80); // clamped min 40%
+    expect(HardwareService.scaledAmplitude(255, 100), 255);
   });
 }

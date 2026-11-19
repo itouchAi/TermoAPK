@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../models/thermostat_state.dart';
 import '../services/ambient_audio_service.dart';
 import '../services/hardware_service.dart';
+import '../services/notification_service.dart';
 import '../widgets/termo_bot.dart';
 import 'google_home_sheet.dart';
 import 'vault_center_sheet.dart';
@@ -93,8 +94,13 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
   late double _liveTargetTemp;
   bool _editOrderMode = false;
   bool _audioPreviewPlaying = false;
+  bool _sendingTestNotification = false;
   SettingsItemId? _expandedId;
   String? _statusBanner;
+  String? _notificationStatus;
+  bool _notificationStatusIsSuccess = true;
+  HapticCapabilityInfo? _hapticCap;
+  int? _lastTestedHapticMs;
 
   final _firebaseUrlCtrl = TextEditingController();
   final _espIdCtrl = TextEditingController();
@@ -112,6 +118,9 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     _firebaseUrlCtrl.text = _draft.firebaseRtdbUrl;
     _espIdCtrl.text = _draft.espDeviceId;
     _customAudioCtrl.text = _draft.customAudioLabel;
+    HardwareService.detectHapticCapability().then((info) {
+      if (mounted) setState(() => _hapticCap = info);
+    });
   }
 
   @override
@@ -127,8 +136,18 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
 
   void _hapticTap() {
     if (_draft.hapticEnabled) {
-      HardwareService.vibrateMs(40, amplitude: 110);
+      HardwareService.vibrateMs(
+        40,
+        amplitude: HardwareService.scaledAmplitude(135, _draft.hapticStrength),
+      );
     }
+  }
+
+  Future<void> _testHapticPulse(int durationMs, int baseAmplitude) async {
+    final scaled = HardwareService.scaledAmplitude(baseAmplitude, _draft.hapticStrength);
+    await HardwareService.vibrateMs(durationMs, amplitude: scaled);
+    if (!mounted) return;
+    setState(() => _lastTestedHapticMs = durationMs);
   }
 
   String _resolveAudioSource() {
@@ -185,6 +204,32 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
       volume: _draft.ambientVolume,
     );
     if (mounted) setState(() => _audioPreviewPlaying = true);
+  }
+
+  Future<void> _sendTestNotification() async {
+    if (_sendingTestNotification) return;
+    setState(() {
+      _sendingTestNotification = true;
+      _notificationStatus = null;
+    });
+    final res = await NotificationService.dispatchNotification(
+      context: context,
+      lang: _lang,
+      locationName: _location,
+      roomTemp: widget.roomTemp,
+      targetTemp: _liveTargetTemp,
+      boiler: ThermostatMath.computeBoilerTelemetry(widget.roomTemp, _liveTargetTemp),
+      settings: _draft,
+    );
+    if (!mounted) return;
+    final next = _draft.copyWith(lastNotificationAt: res.timestampLabel);
+    setState(() {
+      _sendingTestNotification = false;
+      _draft = next;
+      _notificationStatus = _lang == LangCode.tr ? res.statusTextTr : res.statusTextEn;
+      _notificationStatusIsSuccess = !res.telegramAttempted || res.telegramDelivered;
+    });
+    widget.onSaveSettings(next);
   }
 
   void _openVaultCenter() {
@@ -1721,30 +1766,373 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
         );
 
       case SettingsItemId.notifications:
+        final liveBoiler = ThermostatMath.computeBoilerTelemetry(widget.roomTemp, _liveTargetTemp);
+        final safety = NotificationService.evaluateSafetyThresholds(
+          roomTemp: widget.roomTemp,
+          outsideTemp: 17.7,
+          boiler: liveBoiler,
+        );
+        final guardOk = !safety.hasCriticalAlert;
+
         return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
+            // Period Badge + Last Dispatched Timestamp
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF59E0B).withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.42)),
+                  ),
+                  child: Text(
+                    tr ? '⏱️ Periyot: 3 Saatte Bir (Otomatik)' : '⏱️ Interval: Every 3 Hours (Auto)',
+                    style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFFFCD34D)),
+                  ),
+                ),
+                if (_draft.lastNotificationAt.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.35)),
+                    ),
+                    child: Text(
+                      tr ? 'Son Gönderim: ${_draft.lastNotificationAt}' : 'Last Sent: ${_draft.lastNotificationAt}',
+                      style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFF6EE7B7)),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // Live Pressure & Freeze Protection Guard Monitor Card
+            Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: (guardOk ? const Color(0xFF10B981) : const Color(0xFFEF4444)).withValues(alpha: 0.09),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: (guardOk ? const Color(0xFF10B981) : const Color(0xFFEF4444)).withValues(alpha: 0.36),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        guardOk ? Icons.verified_user_outlined : Icons.warning_amber_rounded,
+                        size: 17,
+                        color: guardOk ? const Color(0xFF34D399) : const Color(0xFFFCA5A5),
+                      ),
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          safety.headline(_lang),
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: guardOk ? const Color(0xFF6EE7B7) : const Color(0xFFFCA5A5),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    tr
+                        ? '• Basınç İzleme: ${liveBoiler.waterPressureBar.toStringAsFixed(1)} Bar (Eşik: < 1.0 Bar acil uyarı)\n'
+                            '• Donma Koruması: Oda ${widget.roomTemp.toStringAsFixed(1)}°C (Eşik: < 5.0°C otomatik ateşleme)\n'
+                            '• Alev & Brülör: ${liveBoiler.statusTextTr}'
+                        : '• Pressure Guard: ${liveBoiler.waterPressureBar.toStringAsFixed(1)} Bar (Threshold: < 1.0 Bar)\n'
+                            '• Freeze Guard: Room ${widget.roomTemp.toStringAsFixed(1)}°C (Threshold: < 5.0°C)\n'
+                            '• Flame & Burner: ${liveBoiler.statusTextEn}',
+                    style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.76), height: 1.45),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // 4 Interactive Automation Switches
+            _MiniToggleTile(
+              label: tr ? '📊 3 Saatlik Tüketim & Durum Özeti' : '📊 3-Hour Usage & Status Summary',
               value: _draft.notifications3hEnabled,
-              title: Text(tr ? '3 Saatlik Tüketim Özeti' : '3-Hour Usage Summary', style: const TextStyle(fontSize: 12.5, color: Colors.white)),
-              onChanged: (v) {
+              activeColor: const Color(0xFFF59E0B),
+              onTap: () {
                 _hapticTap();
-                setState(() => _draft = _draft.copyWith(notifications3hEnabled: v));
+                setState(() => _draft = _draft.copyWith(notifications3hEnabled: !_draft.notifications3hEnabled));
               },
             ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
+            const SizedBox(height: 6),
+            _MiniToggleTile(
+              label: tr ? '🚨 Kritik Basınç (<1.0 Bar) & Alev Kesintisi' : '🚨 Critical Pressure (<1.0 Bar) & Flame Loss',
               value: _draft.emergencyBoilerAlerts,
-              title: Text(tr ? 'Kritik Basınç & Aşırı Isınma Uyarısı' : 'Critical Pressure & Overheat Alert', style: const TextStyle(fontSize: 12.5, color: Colors.white)),
-              onChanged: (v) {
+              activeColor: const Color(0xFFEF4444),
+              onTap: () {
                 _hapticTap();
-                setState(() => _draft = _draft.copyWith(emergencyBoilerAlerts: v));
+                setState(() => _draft = _draft.copyWith(emergencyBoilerAlerts: !_draft.emergencyBoilerAlerts));
               },
             ),
+            const SizedBox(height: 6),
+            _MiniToggleTile(
+              label: tr ? '🌧️ Dış Hava & Ani Soğuma Bildirimleri' : '🌧️ Weather & Sudden Drop Alerts',
+              value: _draft.weatherAlertsEnabled,
+              activeColor: const Color(0xFF38BDF8),
+              onTap: () {
+                _hapticTap();
+                setState(() => _draft = _draft.copyWith(weatherAlertsEnabled: !_draft.weatherAlertsEnabled));
+              },
+            ),
+            const SizedBox(height: 6),
+            _MiniToggleTile(
+              label: tr ? '🔔 Bildirim Sesi & Haptik Uyarısı' : '🔔 Alert Chime & Haptic Pulse',
+              value: _draft.notifyChimeEnabled,
+              activeColor: const Color(0xFF10B981),
+              onTap: () {
+                _hapticTap();
+                setState(() => _draft = _draft.copyWith(notifyChimeEnabled: !_draft.notifyChimeEnabled));
+              },
+            ),
+            const SizedBox(height: 11),
+
+            // Real Test Notification Dispatcher Button
+            FilledButton.icon(
+              onPressed: _sendingTestNotification ? null : _sendTestNotification,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFF59E0B),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 11),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              icon: _sendingTestNotification
+                  ? const SizedBox(
+                      width: 15,
+                      height: 15,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.notifications_active_outlined, size: 17),
+              label: Text(
+                tr ? 'Test Bildirimi Gönder' : 'Send Test Notification',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+            ),
+            if (_notificationStatus != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: (_notificationStatusIsSuccess ? const Color(0xFF10B981) : const Color(0xFFF59E0B))
+                      .withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: (_notificationStatusIsSuccess ? const Color(0xFF10B981) : const Color(0xFFF59E0B))
+                        .withValues(alpha: 0.40),
+                  ),
+                ),
+                child: Text(
+                  _notificationStatus!,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: _notificationStatusIsSuccess ? const Color(0xFFA7F3D0) : const Color(0xFFFCD34D),
+                  ),
+                ),
+              ),
+            ],
           ],
         );
 
       case SettingsItemId.haptic:
+        final cap = _hapticCap;
+        final capLabel = cap == null
+            ? (tr ? 'Donanım kontrol ediliyor...' : 'Checking hardware...')
+            : cap.hasVibrator
+                ? (cap.hasAmplitudeControl
+                    ? (tr ? '✓ Titreşim Motoru + Genişlik Kontrolü Aktif' : '✓ Vibration Motor + Amplitude Control')
+                    : (tr ? '✓ Standart Titreşim Motoru Aktif' : '✓ Standard Vibration Motor'))
+                : (tr ? 'ℹ️ Sistem Dokunma Haptiği / Tarayıcı Modu' : 'ℹ️ System Haptic Fallback / Web Mode');
+
+        final testProfiles = [
+          (40, 120, tr ? '40ms · Hafif' : '40ms · Light', tr ? 'Kadran tıkı' : 'Dial tick'),
+          (55, 155, tr ? '55ms · Orta' : '55ms · Medium', tr ? 'Flow Bar geçiş' : 'Tab transition'),
+          (80, 195, tr ? '80ms · Güçlü' : '80ms · Strong', tr ? 'Kaydet & onay' : 'Save & confirm'),
+          (140, 245, tr ? '140ms · Kritik' : '140ms · Alert', tr ? 'Acil uyarı' : 'Critical alert'),
+        ];
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Detected Hardware Capability Badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: (cap?.hasVibrator == true ? const Color(0xFF10B981) : const Color(0xFF38BDF8))
+                    .withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(11),
+                border: Border.all(
+                  color: (cap?.hasVibrator == true ? const Color(0xFF10B981) : const Color(0xFF38BDF8))
+                      .withValues(alpha: 0.35),
+                ),
+              ),
+              child: Text(
+                capLabel,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: cap?.hasVibrator == true ? const Color(0xFF6EE7B7) : const Color(0xFF7DD3FC),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // Toggle + Vibration Intensity Slider
+            _MiniToggleTile(
+              label: tr ? '📳 Dokunsal Titreşim Motoru' : '📳 Haptic Feedback Motor',
+              value: _draft.hapticEnabled,
+              activeColor: const Color(0xFFF59E0B),
+              onTap: () {
+                final nextVal = !_draft.hapticEnabled;
+                setState(() => _draft = _draft.copyWith(hapticEnabled: nextVal));
+                if (nextVal) _testHapticPulse(55, 155);
+              },
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  tr ? 'Titreşim Şiddeti (Genişlik):' : 'Vibration Intensity:',
+                  style: const TextStyle(fontSize: 11.5, color: Colors.white70),
+                ),
+                Text(
+                  '%${_draft.hapticStrength}',
+                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
+                ),
+              ],
+            ),
+            Slider(
+              value: _draft.hapticStrength.toDouble(),
+              min: 40,
+              max: 100,
+              divisions: 6,
+              activeColor: const Color(0xFFF59E0B),
+              onChanged: (v) => setState(() => _draft = _draft.copyWith(hapticStrength: v.round())),
+              onChangeEnd: (_) {
+                if (_draft.hapticEnabled) _testHapticPulse(55, 160);
+              },
+            ),
+            const SizedBox(height: 4),
+
+            // 4 Live Haptic Test Buttons (40ms, 55ms, 80ms, 140ms)
+            Text(
+              tr ? 'Canlı Titreşim Test Profilleri (Dokunarak Test Et):' : 'Live Haptic Test Profiles (Tap to Trigger):',
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
+            ),
+            const SizedBox(height: 8),
+            GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: 2,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+              childAspectRatio: 2.35,
+              children: [
+                for (final p in testProfiles)
+                  GestureDetector(
+                    onTap: () => _testHapticPulse(p.$1, p.$2),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 160),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: _lastTestedHapticMs == p.$1
+                            ? const Color(0xFFF59E0B).withValues(alpha: 0.20)
+                            : Colors.white.withValues(alpha: 0.045),
+                        borderRadius: BorderRadius.circular(13),
+                        border: Border.all(
+                          color: _lastTestedHapticMs == p.$1
+                              ? const Color(0xFFFBBF24)
+                              : Colors.white.withValues(alpha: 0.11),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.vibration_rounded, size: 14, color: Color(0xFFFBBF24)),
+                              const SizedBox(width: 5),
+                              Expanded(
+                                child: Text(
+                                  p.$3,
+                                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.white),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (_lastTestedHapticMs == p.$1)
+                                const Icon(Icons.check_circle_outline_rounded, size: 13, color: Color(0xFF6EE7B7)),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            p.$4,
+                            style: TextStyle(fontSize: 9.5, color: Colors.white.withValues(alpha: 0.58)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            if (_lastTestedHapticMs != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                tr
+                    ? '✓ ${_lastTestedHapticMs}ms (%${_draft.hapticStrength} güç) titreşim sinyali gönderildi.'
+                    : '✓ Dispatched ${_lastTestedHapticMs}ms (${_draft.hapticStrength}% strength) haptic pulse.',
+                style: const TextStyle(fontSize: 11, color: Color(0xFF6EE7B7), fontWeight: FontWeight.w600),
+              ),
+            ],
+            const SizedBox(height: 10),
+
+            // Android / Xiaomi / HyperOS Troubleshooting Card
+            Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF59E0B).withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.30)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    tr ? '🛠️ Android / Xiaomi / HyperOS Titreşim İpuçları' : '🛠️ Android / Xiaomi / HyperOS Haptic Tips',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFFCD34D)),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    tr
+                        ? '• Xiaomi / HyperOS cihazlarda titreşim hissedilmiyorsa: Ayarlar → Ses ve Titreşim → Dokunsal Geri Bildirim seçeneğini açın.\n'
+                            '• Pil Tasarrufu veya Rahatsız Etmeyin modu sistem titreşim motorunu geçici olarak susturabilir.'
+                        : '• On Xiaomi / HyperOS devices, enable Settings → Sound & Vibration → Haptic Feedback.\n'
+                            '• Battery Saver or Do Not Disturb mode may suppress system vibration pulses.',
+                    style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.72), height: 1.4),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+
       case SettingsItemId.bootCeremony:
         return Text(
           tr

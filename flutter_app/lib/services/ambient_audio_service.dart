@@ -7,6 +7,7 @@ class AmbientAudioService {
   AmbientAudioService._();
 
   static final AudioPlayer _player = AudioPlayer();
+  static final AudioPlayer _chimePlayer = AudioPlayer();
   static bool _playing = false;
   static Uint8List? _customAudioBytes;
 
@@ -143,5 +144,60 @@ class AmbientAudioService {
       await _player.stop();
     } catch (_) {}
     _playing = false;
+  }
+
+  /// Generates a clean two-note PCM WAV notification chime (22050Hz 16-bit mono).
+  static Uint8List generateChimeWavBytes({bool urgent = false}) {
+    const sampleRate = 22050;
+    const totalMs = 420;
+    const numSamples = (sampleRate * totalMs) ~/ 1000;
+    const dataSize = numSamples * 2;
+    final buffer = ByteData(44 + dataSize);
+
+    void writeAscii(int offset, String text) {
+      for (int i = 0; i < text.length; i++) {
+        buffer.setUint8(offset + i, text.codeUnitAt(i));
+      }
+    }
+
+    writeAscii(0, 'RIFF');
+    buffer.setUint32(4, 36 + dataSize, Endian.little);
+    writeAscii(8, 'WAVE');
+    writeAscii(12, 'fmt ');
+    buffer.setUint32(16, 16, Endian.little);
+    buffer.setUint16(20, 1, Endian.little);
+    buffer.setUint16(22, 1, Endian.little);
+    buffer.setUint32(24, sampleRate, Endian.little);
+    buffer.setUint32(28, sampleRate * 2, Endian.little);
+    buffer.setUint16(32, 2, Endian.little);
+    buffer.setUint16(34, 16, Endian.little);
+    writeAscii(36, 'data');
+    buffer.setUint32(40, dataSize, Endian.little);
+
+    final f1 = urgent ? 784.0 : 587.33;
+    final f2 = urgent ? 1046.5 : 880.0;
+    final split = numSamples ~/ 2;
+
+    for (int i = 0; i < numSamples; i++) {
+      final t = i / sampleRate;
+      final isSecond = i >= split;
+      final localIdx = isSecond ? i - split : i;
+      final localLen = isSecond ? (numSamples - split) : split;
+      final env = math.sin((localIdx / localLen) * math.pi);
+      final freq = isSecond ? f2 : f1;
+      final sample = (math.sin(2 * math.pi * freq * t) + 0.3 * math.sin(4 * math.pi * freq * t)) * env * 0.42;
+      final pcm = (sample * 18000).round().clamp(-32767, 32767);
+      buffer.setInt16(44 + i * 2, pcm, Endian.little);
+    }
+    return buffer.buffer.asUint8List();
+  }
+
+  static Future<void> playNotificationChime({bool urgent = false}) async {
+    try {
+      await _chimePlayer.stop();
+      await _chimePlayer.setReleaseMode(ReleaseMode.release);
+      await _chimePlayer.setVolume(0.75);
+      await _chimePlayer.play(BytesSource(generateChimeWavBytes(urgent: urgent)));
+    } catch (_) {}
   }
 }
