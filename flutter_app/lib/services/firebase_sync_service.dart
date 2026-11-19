@@ -60,7 +60,7 @@ class FirebaseSyncService {
               'targetTemp': targetTemp,
               'boilerActive': boiler.isHeating,
               'flamePercent': boiler.flamePercent,
-              'pressureBar': boiler.pressureBar,
+              'pressureBar': boiler.waterPressureBar,
               'roomName': roomName,
               'espDeviceId': espDeviceId,
               'updatedAt': DateTime.now().toUtc().toIso8601String(),

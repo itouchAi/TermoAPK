@@ -15,10 +15,12 @@ void main() {
     final heating = ThermostatMath.computeBoilerTelemetry(21.8, 22.5);
     expect(heating.isHeating, isTrue);
     expect(heating.flamePercent, greaterThanOrEqualTo(20));
+    expect(heating.waterPressureBar, 1.6);
 
     final standby = ThermostatMath.computeBoilerTelemetry(22.5, 22.0);
     expect(standby.isHeating, isFalse);
     expect(standby.flamePercent, 0);
+    expect(standby.waterPressureBar, 1.6);
   });
 
   test('VisualCustomizationState round-trips theme and tab order', () {
