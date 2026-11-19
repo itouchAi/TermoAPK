@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,6 +10,9 @@ import 'screens/settings_sheet.dart';
 import 'screens/theme_effects_sheet.dart';
 import 'screens/thermostat_screen.dart';
 import 'screens/widget_order_sheet.dart';
+import 'services/ambient_audio_service.dart';
+import 'services/firebase_sync_service.dart';
+import 'services/hardware_service.dart';
 import 'widgets/flow_tab_bar.dart';
 import 'widgets/overlays.dart';
 import 'widgets/termo_bot.dart';
@@ -54,7 +58,7 @@ class TermostatHomeShell extends StatefulWidget {
 class _TermostatHomeShellState extends State<TermostatHomeShell> {
   static const _storageKey = 'termostat_flow_flutter_v2';
 
-  final PageController _pageController = PageController();
+  final PageController _pageController = PageController(viewportFraction: 0.91);
   TabId _activeTab = TabId.termo;
   final double _roomTemp = 21.8;
   double _targetTemp = 22.5;
@@ -66,10 +70,14 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   VisualCustomizationState _visual = VisualCustomizationState.defaults();
   bool _savedNotice = false;
   bool _ambientMode = false;
+  bool _screensaverPreview = false;
   bool _voiceOpen = false;
   bool _showBootCeremony = false;
   bool _termoBotIdle = false;
   DateTime _now = DateTime.now();
+  int _slideIndex = 0;
+  int _slideTicks = 0;
+  int _ambientElapsedSeconds = 0;
 
   Timer? _clockTimer;
   Timer? _idleTimer;
@@ -80,8 +88,25 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     _loadPersisted();
     _resetIdleTimer();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && (_ambientMode || _visual.theme == AppThemeMode.autoSmart)) {
-        setState(() => _now = DateTime.now());
+      if (!mounted) return;
+      if (_ambientMode || _visual.theme == AppThemeMode.autoSmart) {
+        setState(() {
+          _now = DateTime.now();
+          if (_ambientMode) {
+            _ambientElapsedSeconds++;
+            final sleepMinutes = _settings.displaySleepMinutes;
+            if (sleepMinutes > 0 && _ambientElapsedSeconds >= sleepMinutes * 60) {
+              _exitAmbientMode();
+            }
+            if (_settings.smartDisplayMode == SmartDisplayMode.slideshow) {
+              _slideTicks++;
+              if (_slideTicks >= _settings.slideDurationSeconds) {
+                _slideTicks = 0;
+                _slideIndex = (_slideIndex + 1) % 4;
+              }
+            }
+          }
+        });
       }
     });
   }
@@ -92,8 +117,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     }
     _idleTimer?.cancel();
     if (_settings.termoBotEnabled) {
-      _idleTimer = Timer(const Duration(seconds: 12), () {
-        if (mounted && !_ambientMode && !_voiceOpen) {
+      _idleTimer = Timer(Duration(seconds: _settings.screensaverIdleSeconds), () {
+        if (mounted && !_ambientMode && !_voiceOpen && !_screensaverPreview) {
           setState(() => _termoBotIdle = true);
         }
       });
@@ -181,7 +206,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
   void _triggerHaptic() {
     if (_settings.hapticEnabled) {
-      HapticFeedback.selectionClick();
+      HardwareService.vibrateMs(40, amplitude: 110);
     }
   }
 
@@ -200,11 +225,61 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     }
   }
 
+  void _enterAmbientMode() {
+    setState(() {
+      _now = DateTime.now();
+      _slideTicks = 0;
+      _ambientElapsedSeconds = 0;
+      _ambientMode = true;
+    });
+    if (_settings.ambientVolume > 0.01) {
+      AmbientAudioService.start(
+        track: _settings.ambientSoundtrack,
+        customSource: _settings.customAudioSource.isNotEmpty
+            ? _settings.customAudioSource
+            : _settings.customAudioLabel,
+        volume: _settings.ambientVolume,
+      );
+    }
+    HardwareService.enterSmartDisplayHardware(
+      brightnessPercent: _settings.displayBrightness,
+      keepAwake: _settings.displaySleepMinutes == 0,
+    );
+  }
+
+  void _exitAmbientMode() {
+    if (_ambientMode) {
+      setState(() {
+        _ambientMode = false;
+        _ambientElapsedSeconds = 0;
+      });
+    } else {
+      _ambientElapsedSeconds = 0;
+    }
+    AmbientAudioService.stop();
+    HardwareService.exitSmartDisplayHardware();
+  }
+
+  void _syncFirebaseBackground(double target) {
+    if (!_settings.googleHomeLinked && !_settings.cloudSyncEnabled) return;
+    final b = ThermostatMath.computeBoilerTelemetry(_roomTemp, target);
+    FirebaseSyncService.pushState(
+      baseUrl: _settings.firebaseRtdbUrl,
+      roomName: _settings.googleHomeRoom,
+      espDeviceId: _settings.espDeviceId,
+      roomTemp: _roomTemp,
+      targetTemp: target,
+      boiler: b,
+    );
+  }
+
   @override
   void dispose() {
     _clockTimer?.cancel();
     _idleTimer?.cancel();
     _pageController.dispose();
+    AmbientAudioService.stop();
+    HardwareService.exitSmartDisplayHardware();
     super.dispose();
   }
 
@@ -233,6 +308,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       _activePreset = ThermostatMath.findMatchingPreset(snapped)?.id;
     });
     _persist();
+    _syncFirebaseBackground(snapped);
   }
 
   void _selectPreset(ThermostatPreset preset) {
@@ -243,6 +319,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       _activePreset = preset.id;
     });
     _persist();
+    _syncFirebaseBackground(preset.temp);
   }
 
   void _updateVisual(VisualCustomizationState next) {
@@ -288,6 +365,17 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             lang: _lang,
             locationName: _locationName,
             palette: palette,
+            weatherAlertsEnabled: _settings.weatherAlertsEnabled,
+            onToggleWeatherAlerts: (v) {
+              _triggerHaptic();
+              setState(() => _settings = _settings.copyWith(weatherAlertsEnabled: v));
+              _persist();
+            },
+            onChangeLocation: (loc) {
+              _triggerHaptic();
+              setState(() => _locationName = loc);
+              _persist();
+            },
             onApplyEcoCompensation: () => _selectPreset(ThermostatMath.presets.first),
           ),
         );
@@ -546,156 +634,279 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                     const SizedBox(width: 5),
                                     _TopActionButton(
                                       palette: palette,
+                                        onTap: () {
+                                          _triggerHaptic();
+                                          _enterAmbientMode();
+                                        },
+                                        child: Icon(Icons.tv_rounded, size: 17, color: palette.textPrimary),
+                                      ),
+                                    ],
+                                    const SizedBox(width: 5),
+
+                                    // System Settings Sheet
+                                    _TopActionButton(
+                                      palette: palette,
                                       onTap: () {
                                         _triggerHaptic();
-                                        setState(() {
-                                          _now = DateTime.now();
-                                          _ambientMode = true;
-                                        });
-                                      },
-                                      child: Icon(Icons.tv_rounded, size: 17, color: palette.textPrimary),
-                                    ),
-                                  ],
-                                  const SizedBox(width: 5),
+                                        showSystemSettingsSheet(
+                                          context: context,
+                                          lang: _lang,
+                                          locationName: _locationName,
+                                          accentColor: activeColor,
+                                          roomTemp: _roomTemp,
+                                          targetTemp: _targetTemp,
+                                          boiler: boiler,
+                                          initialSettings: _settings,
+                                          onChangeLang: (l) => setState(() => _lang = l),
+                                          onChangeLocation: (loc) => setState(() => _locationName = loc),
+                                          onChangeTargetTemp: _changeTarget,
+                                          onSaveSettings: (updated) {
+                                            setState(() => _settings = updated);
+                                            _resetIdleTimer();
+                                            _persist();
+                                          },
+                                          onOpenAmbient: _enterAmbientMode,
+                                         onOpenScreensaverPreview: () => setState(() {
+                                           _termoBotIdle = false;
+                                           _screensaverPreview = true;
+                                         }),
+                                         onResetTelemetryHistory: () {
+                                           setState(() {
+                                             _schedule = ThermostatMath.defaultSchedule;
+                                             _targetTemp = 22.5;
+                                             _activePreset = PresetId.konfor;
+                                           });
+                                           _persist();
+                                         },
+                                       );
+                                     },
+                                     child: Icon(Icons.settings_outlined, size: 17, color: palette.textPrimary),
+                                   ),
+                                 ],
+                               ),
+                             ],
+                           ),
+                         ),
 
-                                  // System Settings Sheet
-                                  _TopActionButton(
-                                    palette: palette,
-                                    onTap: () {
-                                      _triggerHaptic();
-                                      showSystemSettingsSheet(
-                                        context: context,
-                                        lang: _lang,
-                                        locationName: _locationName,
-                                        accentColor: activeColor,
-                                        initialSettings: _settings,
-                                        onChangeLang: (l) => setState(() => _lang = l),
-                                        onChangeLocation: (loc) => setState(() => _locationName = loc),
-                                        onSaveSettings: (updated) {
-                                          setState(() => _settings = updated);
-                                          _resetIdleTimer();
-                                          _persist();
-                                        },
-                                        onOpenAmbient: () => setState(() {
-                                          _now = DateTime.now();
-                                          _ambientMode = true;
-                                        }),
-                                        onResetTelemetryHistory: () {
-                                          setState(() {
-                                            _schedule = ThermostatMath.defaultSchedule;
-                                            _targetTemp = 22.5;
-                                            _activePreset = PresetId.konfor;
-                                          });
-                                          _persist();
-                                        },
-                                      );
-                                    },
-                                    child: Icon(Icons.settings_outlined, size: 17, color: palette.textPrimary),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
+                         // 3D Perspective Card Carousel synchronized with orderedTabs
+                         Expanded(
+                           child: Padding(
+                             padding: EdgeInsets.only(bottom: (compactLandscape ? 66.0 : 76.0) + media.padding.bottom),
+                             child: Stack(
+                               children: [
+                                 PageView.builder(
+                                   controller: _pageController,
+                                   clipBehavior: Clip.none,
+                                   itemCount: orderedTabs.length,
+                                   onPageChanged: (idx) {
+                                     if (idx >= 0 && idx < orderedTabs.length) {
+                                       setState(() => _activeTab = orderedTabs[idx].id);
+                                     }
+                                   },
+                                   itemBuilder: (context, idx) {
+                                     final meta = orderedTabs[idx];
+                                     return AnimatedBuilder(
+                                       animation: _pageController,
+                                       builder: (context, child) {
+                                         double currentPage = orderedTabs.indexWhere((t) => t.id == _activeTab).toDouble();
+                                         if (_pageController.hasClients && _pageController.position.haveDimensions) {
+                                           currentPage = _pageController.page ?? currentPage;
+                                         }
+                                         final delta = currentPage - idx;
+                                         final absDelta = delta.abs().clamp(0.0, 1.5);
+                                         final scale = (1.0 - absDelta * 0.09).clamp(0.86, 1.0);
+                                         final opacity = (1.0 - absDelta * 0.42).clamp(0.38, 1.0);
+                                         final tiltY = (delta * 0.34).clamp(-0.62, 0.62);
+                                         final perspective = Matrix4.identity()
+                                           ..setEntry(3, 2, 0.0012)
+                                           ..rotateY(tiltY);
 
-                        // Fluid 4-page horizontal PageView synchronized with orderedTabs
-                        Expanded(
-                          child: Padding(
-                            padding: EdgeInsets.only(bottom: (compactLandscape ? 68.0 : 78.0) + media.padding.bottom),
-                            child: PageView(
-                              controller: _pageController,
-                              onPageChanged: (idx) {
-                                if (idx >= 0 && idx < orderedTabs.length) {
-                                  setState(() => _activeTab = orderedTabs[idx].id);
-                                }
-                              },
-                              children: [
-                                for (final meta in orderedTabs)
-                                  _buildTabPage(meta.id, boiler, activeColor, palette),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
+                                         return Opacity(
+                                           opacity: opacity,
+                                           child: Transform(
+                                             alignment: delta > 0 ? Alignment.centerRight : Alignment.centerLeft,
+                                             transform: perspective,
+                                             child: Transform.scale(
+                                               scale: scale,
+                                               child: Container(
+                                                 margin: EdgeInsets.symmetric(
+                                                   horizontal: isLandscape ? 8 : 4,
+                                                   vertical: compactLandscape ? 4 : 8,
+                                                 ),
+                                                 decoration: BoxDecoration(
+                                                   borderRadius: BorderRadius.circular(24),
+                                                   color: palette.isLight
+                                                       ? Colors.white.withValues(alpha: 0.72)
+                                                       : const Color(0xFF0E1018).withValues(alpha: 0.90),
+                                                   border: Border.all(
+                                                     color: absDelta < 0.25
+                                                         ? activeColor.withValues(alpha: 0.28)
+                                                         : palette.cardBorder,
+                                                   ),
+                                                   boxShadow: [
+                                                     BoxShadow(
+                                                       color: Colors.black.withValues(alpha: palette.isLight ? 0.14 : 0.50),
+                                                       blurRadius: 24,
+                                                       offset: const Offset(0, 10),
+                                                     ),
+                                                   ],
+                                                 ),
+                                                 child: ClipRRect(
+                                                   borderRadius: BorderRadius.circular(24),
+                                                   child: Column(
+                                                     children: [
+                                                       Container(
+                                                         height: compactLandscape ? 32 : 38,
+                                                         padding: const EdgeInsets.symmetric(horizontal: 14),
+                                                         decoration: BoxDecoration(
+                                                           color: palette.cardBg,
+                                                           border: Border(bottom: BorderSide(color: palette.cardBorder)),
+                                                         ),
+                                                         child: Row(
+                                                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                           children: [
+                                                             Flexible(
+                                                               child: Row(
+                                                                 children: [
+                                                                   Icon(_iconForTab(meta.id), size: 15, color: meta.color),
+                                                                   const SizedBox(width: 7),
+                                                                   Flexible(
+                                                                     child: Text(
+                                                                       _cardTitleForTab(meta.id, _lang),
+                                                                       style: TextStyle(
+                                                                         fontSize: 12.5,
+                                                                         fontWeight: FontWeight.w700,
+                                                                         color: palette.textPrimary,
+                                                                       ),
+                                                                       overflow: TextOverflow.ellipsis,
+                                                                     ),
+                                                                   ),
+                                                                 ],
+                                                               ),
+                                                             ),
+                                                             Text(
+                                                               _lang == LangCode.tr ? '‹ Kaydırın ›' : '‹ Swipe ›',
+                                                               style: TextStyle(fontSize: 10.5, color: palette.textSecondary),
+                                                             ),
+                                                           ],
+                                                         ),
+                                                       ),
+                                                       Expanded(child: child!),
+                                                     ],
+                                                   ),
+                                                 ),
+                                               ),
+                                             ),
+                                           ),
+                                         );
+                                       },
+                                       child: _buildTabPage(meta.id, boiler, activeColor, palette),
+                                     );
+                                   },
+                                 ),
 
-            // TermoBot Idle Companion Mascot
-            TermoBotOverlay(
-              enabled: _settings.termoBotEnabled && !_ambientMode,
-              isSleeping: _termoBotIdle,
-              lang: _lang,
-              accentColor: activeColor,
-              bottomOffset: (compactLandscape ? 72.0 : 88.0) + media.padding.bottom,
-              onWake: _resetIdleTimer,
-            ),
+                                 // Wide/Tablet Side Carousel Arrow Buttons
+                                 if (media.size.width >= 680) ...[
+                                   Positioned(
+                                     left: 10,
+                                     top: 0,
+                                     bottom: 0,
+                                     child: Center(
+                                       child: _CarouselNavButton(
+                                         icon: Icons.chevron_left_rounded,
+                                         palette: palette,
+                                         onTap: () {
+                                           final cur = orderedTabs.indexWhere((t) => t.id == _activeTab);
+                                           if (cur > 0) _selectTab(orderedTabs[cur - 1].id);
+                                         },
+                                       ),
+                                     ),
+                                   ),
+                                   Positioned(
+                                     right: 10,
+                                     top: 0,
+                                     bottom: 0,
+                                     child: Center(
+                                       child: _CarouselNavButton(
+                                         icon: Icons.chevron_right_rounded,
+                                         palette: palette,
+                                         onTap: () {
+                                           final cur = orderedTabs.indexWhere((t) => t.id == _activeTab);
+                                           if (cur < orderedTabs.length - 1) _selectTab(orderedTabs[cur + 1].id);
+                                         },
+                                       ),
+                                     ),
+                                   ),
+                                 ],
+                               ],
+                             ),
+                           ),
+                         ),
+                       ],
+                     ),
+                   ),
+                 ],
+               ),
+             ),
 
-            // Enhanced Smart Display / Ambient Mode Fullscreen Clock & Telemetry
-            if (_ambientMode)
-              Positioned.fill(
-                child: GestureDetector(
-                  onTap: () => setState(() => _ambientMode = false),
-                  child: Container(
-                    color: const Color(0xFF040406).withValues(alpha: 0.96),
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.nights_stay_outlined, size: 22, color: activeColor),
-                            const SizedBox(width: 8),
-                            Text(
-                              _locationName,
-                              style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.68)),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          _formatClock(_now),
-                          style: const TextStyle(
-                            fontSize: 44,
-                            fontWeight: FontWeight.w300,
-                            letterSpacing: 2.0,
-                            color: Colors.white,
-                            fontFeatures: [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                        Text(
-                          _formatDate(_now, _lang),
-                          style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.55)),
-                        ),
-                        const SizedBox(height: 22),
-                        Text(
-                          '${_targetTemp.toStringAsFixed(1)}°',
-                          style: TextStyle(
-                            fontSize: 72,
-                            fontWeight: FontWeight.w700,
-                            color: activeColor,
-                            height: 1.0,
-                            fontFeatures: const [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${_lang == LangCode.tr ? 'Oda' : 'Room'}: ${_roomTemp.toStringAsFixed(1)}°C  ·  ${_lang == LangCode.tr ? boiler.statusTextTr : boiler.statusTextEn}',
-                          style: TextStyle(fontSize: 14, color: Colors.white.withValues(alpha: 0.70)),
-                        ),
-                        const SizedBox(height: 28),
-                        Text(
-                          _lang == LangCode.tr ? 'Çıkmak için ekrana dokunun' : 'Tap anywhere to return',
-                          style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.42)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+             // TermoBot Idle Companion Mascot
+             TermoBotOverlay(
+               enabled: _settings.termoBotEnabled && !_ambientMode && !_screensaverPreview,
+               isSleeping: _termoBotIdle,
+               character: _settings.mascotCharacter,
+               soundsEnabled: _settings.mascotSoundsEnabled,
+               lang: _lang,
+               accentColor: activeColor,
+               bottomOffset: (compactLandscape ? 72.0 : 88.0) + media.padding.bottom,
+               onWake: _resetIdleTimer,
+             ),
+
+             // Fullscreen Screensaver Preview Overlay
+             if (_screensaverPreview)
+               FullscreenScreensaverOverlay(
+                 character: _settings.mascotCharacter,
+                 backdrop: _settings.screensaverBackdrop,
+                 blurBackground: _settings.screensaverBlurBg,
+                 soundsEnabled: _settings.mascotSoundsEnabled,
+                 roomTemp: _roomTemp,
+                 targetTemp: _targetTemp,
+                 accentColor: activeColor,
+                 lang: _lang,
+                 onExit: () {
+                   _resetIdleTimer();
+                   setState(() => _screensaverPreview = false);
+                 },
+               ),
+
+             // Enhanced Smart Display / Ambient Mode Fullscreen Clock & Telemetry
+             if (_ambientMode)
+               Positioned.fill(
+                 child: GestureDetector(
+                   onTap: _exitAmbientMode,
+                   child: _SmartDisplayAmbientView(
+                     mode: _settings.smartDisplayMode,
+                     layoutMode: _settings.smartDisplayLayout,
+                     slideEffect: _settings.slideEffect,
+                     slideIndex: _slideIndex,
+                     now: _now,
+                     clockText: _formatClock(_now),
+                     dateText: _formatDate(_now, _lang),
+                     locationName: _locationName,
+                     roomTemp: _roomTemp,
+                     targetTemp: _targetTemp,
+                     boiler: boiler,
+                     accentColor: activeColor,
+                     lang: _lang,
+                     trackTitle: _settings.ambientTrackTitle(_lang),
+                     ambientVolume: _settings.ambientVolume,
+                     marqueeTrackEnabled: _settings.marqueeTrackEnabled,
+                     equalizerEnabled: _settings.equalizerEnabled,
+                     equalizerStyle: _settings.equalizerStyle,
+                     displayBrightness: _settings.displayBrightness,
+                     oledPixelShiftEnabled: _settings.oledPixelShiftEnabled,
+                   ),
+                 ),
+               ),
 
             // Boot Calibration Ceremony
             if (_showBootCeremony)
@@ -764,4 +975,431 @@ class _TopActionButton extends StatelessWidget {
       ),
     );
   }
+}
+
+IconData _iconForTab(TabId id) {
+  switch (id) {
+    case TabId.termo:
+      return Icons.home_outlined;
+    case TabId.hava:
+      return Icons.wb_sunny_outlined;
+    case TabId.rapor:
+      return Icons.bar_chart_rounded;
+    case TabId.prog:
+      return Icons.schedule_rounded;
+  }
+}
+
+String _cardTitleForTab(TabId id, LangCode lang) {
+  final tr = lang == LangCode.tr;
+  switch (id) {
+    case TabId.termo:
+      return tr ? 'Termostat & Kombi Ana Kontrol' : 'Thermostat & Boiler Control';
+    case TabId.hava:
+      return tr ? 'Hava Durumu & Bölgesel Tahmin' : 'Weather & Regional Forecast';
+    case TabId.rapor:
+      return tr ? '24s Tüketim & Kombi Sensörleri' : '24h Usage & Boiler Sensors';
+    case TabId.prog:
+      return tr ? 'Akıllı Zaman Programı & Tasarruf' : 'Smart Schedule & Savings';
+  }
+}
+
+class _CarouselNavButton extends StatelessWidget {
+  final IconData icon;
+  final ThemePaletteSpec palette;
+  final VoidCallback onTap;
+
+  const _CarouselNavButton({
+    required this.icon,
+    required this.palette,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: palette.sheetBg.withValues(alpha: 0.85),
+          border: Border.all(color: palette.cardBorder),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 12),
+          ],
+        ),
+        child: Icon(icon, color: palette.textPrimary, size: 22),
+      ),
+    );
+  }
+}
+
+class _SmartDisplayAmbientView extends StatefulWidget {
+  final SmartDisplayMode mode;
+  final VisualLayoutMode layoutMode;
+  final SlideTransitionEffect slideEffect;
+  final int slideIndex;
+  final DateTime now;
+  final String clockText;
+  final String dateText;
+  final String locationName;
+  final double roomTemp;
+  final double targetTemp;
+  final BoilerTelemetry boiler;
+  final Color accentColor;
+  final LangCode lang;
+  final String trackTitle;
+  final double ambientVolume;
+  final bool marqueeTrackEnabled;
+  final bool equalizerEnabled;
+  final EqualizerStyle equalizerStyle;
+  final int displayBrightness;
+  final bool oledPixelShiftEnabled;
+
+  const _SmartDisplayAmbientView({
+    required this.mode,
+    required this.layoutMode,
+    required this.slideEffect,
+    required this.slideIndex,
+    required this.now,
+    required this.clockText,
+    required this.dateText,
+    required this.locationName,
+    required this.roomTemp,
+    required this.targetTemp,
+    required this.boiler,
+    required this.accentColor,
+    required this.lang,
+    required this.trackTitle,
+    required this.ambientVolume,
+    required this.marqueeTrackEnabled,
+    required this.equalizerEnabled,
+    required this.equalizerStyle,
+    required this.displayBrightness,
+    required this.oledPixelShiftEnabled,
+  });
+
+  @override
+  State<_SmartDisplayAmbientView> createState() => _SmartDisplayAmbientViewState();
+}
+
+class _SmartDisplayAmbientViewState extends State<_SmartDisplayAmbientView> with SingleTickerProviderStateMixin {
+  late final AnimationController _animCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _animCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat();
+  }
+
+  @override
+  void dispose() {
+    _animCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tr = widget.lang == LangCode.tr;
+
+    const slidePalettes = [
+      [Color(0xFF1E293B), Color(0xFF090D16)],
+      [Color(0xFF431407), Color(0xFF140704)],
+      [Color(0xFF1E1B4B), Color(0xFF09071A)],
+      [Color(0xFF064E3B), Color(0xFF041410)],
+    ];
+
+    List<Color> bgColors;
+    IconData modeIcon;
+    String modeBadge;
+    switch (widget.mode) {
+      case SmartDisplayMode.aod:
+        bgColors = const [Colors.black, Colors.black];
+        modeIcon = Icons.nights_stay_outlined;
+        modeBadge = 'Always-On Display (AOD)';
+        break;
+      case SmartDisplayMode.silentVideoMp3:
+        bgColors = const [Color(0xFF0C2A45), Color(0xFF050A14)];
+        modeIcon = Icons.music_video_outlined;
+        modeBadge = tr ? 'Sessiz Video + MP3' : 'Silent Video + MP3';
+        break;
+      case SmartDisplayMode.liveNature:
+        bgColors = const [Color(0xFF5C1D0C), Color(0xFF0E0504)];
+        modeIcon = Icons.local_fire_department_outlined;
+        modeBadge = tr ? 'Canlı Doğa / Şömine' : 'Live Nature / Hearth';
+        break;
+      case SmartDisplayMode.slideshow:
+        bgColors = slidePalettes[widget.slideIndex % slidePalettes.length];
+        modeIcon = Icons.collections_outlined;
+        modeBadge = tr ? 'Slayt Gösterisi (${widget.slideIndex + 1}/4)' : 'Slideshow (${widget.slideIndex + 1}/4)';
+        break;
+      case SmartDisplayMode.singlePhoto:
+        bgColors = const [Color(0xFF1B1932), Color(0xFF07070D)];
+        modeIcon = Icons.photo_outlined;
+        modeBadge = tr ? 'Tekli Görsel' : 'Single Backdrop';
+        break;
+    }
+
+    // Subtle OLED pixel-shift offset when OLED Pixel Protection is enabled
+    final aodShift = (widget.oledPixelShiftEnabled || widget.mode == SmartDisplayMode.aod)
+        ? Offset(((widget.now.minute % 5) - 2) * 3.0, ((widget.now.second % 3) - 1) * 2.0)
+        : Offset.zero;
+
+    final insetPadding = switch (widget.layoutMode) {
+      VisualLayoutMode.cover => EdgeInsets.zero,
+      VisualLayoutMode.contain => const EdgeInsets.all(20),
+      VisualLayoutMode.framed => const EdgeInsets.symmetric(horizontal: 28, vertical: 44),
+    };
+
+    final innerContent = AnimatedSwitcher(
+      duration: const Duration(milliseconds: 520),
+      transitionBuilder: (child, anim) {
+        switch (widget.slideEffect) {
+          case SlideTransitionEffect.fade:
+            return FadeTransition(opacity: anim, child: child);
+          case SlideTransitionEffect.slide:
+            return SlideTransition(
+              position: Tween<Offset>(begin: const Offset(0.08, 0), end: Offset.zero).animate(anim),
+              child: FadeTransition(opacity: anim, child: child),
+            );
+          case SlideTransitionEffect.zoom:
+            return ScaleTransition(
+              scale: Tween<double>(begin: 0.94, end: 1.0).animate(anim),
+              child: FadeTransition(opacity: anim, child: child),
+            );
+        }
+      },
+      child: Container(
+        key: ValueKey('${widget.mode.name}_${widget.slideIndex}'),
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(
+          borderRadius: widget.layoutMode == VisualLayoutMode.cover ? BorderRadius.zero : BorderRadius.circular(26),
+          gradient: widget.mode == SmartDisplayMode.aod
+              ? null
+              : RadialGradient(
+                  center: const Alignment(0, -0.15),
+                  radius: 1.15,
+                  colors: bgColors,
+                ),
+          color: widget.mode == SmartDisplayMode.aod ? Colors.black : null,
+          border: widget.layoutMode == VisualLayoutMode.cover
+              ? null
+              : Border.all(color: Colors.white.withValues(alpha: 0.16), width: 1.4),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Transform.translate(
+          offset: aodShift,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (widget.marqueeTrackEnabled)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0EA5E9).withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.35)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.music_note_rounded, size: 14, color: Color(0xFF7DD3FC)),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          '${widget.trackTitle} · %${(widget.ambientVolume * 100).round()}',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFFE0F2FE)),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(modeIcon, size: 15, color: widget.accentColor),
+                    const SizedBox(width: 6),
+                    Text(
+                      '$modeBadge · ${widget.locationName}',
+                      style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.80)),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                widget.clockText,
+                style: const TextStyle(
+                  fontSize: 48,
+                  fontWeight: FontWeight.w300,
+                  letterSpacing: 2.0,
+                  color: Colors.white,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              Text(
+                widget.dateText,
+                style: TextStyle(fontSize: 13.5, color: Colors.white.withValues(alpha: 0.58)),
+              ),
+              const SizedBox(height: 22),
+              Text(
+                '${widget.targetTemp.toStringAsFixed(1)}°',
+                style: TextStyle(
+                  fontSize: 74,
+                  fontWeight: FontWeight.w700,
+                  color: widget.accentColor,
+                  height: 1.0,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${tr ? 'Oda' : 'Room'}: ${widget.roomTemp.toStringAsFixed(1)}°C  ·  ${tr ? widget.boiler.statusTextTr : widget.boiler.statusTextEn}',
+                style: TextStyle(fontSize: 14, color: Colors.white.withValues(alpha: 0.72)),
+              ),
+              if (widget.equalizerEnabled) ...[
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: 220,
+                  height: 36,
+                  child: AnimatedBuilder(
+                    animation: _animCtrl,
+                    builder: (_, __) => CustomPaint(
+                      painter: _AmbientEqualizerPainter(
+                        phase: _animCtrl.value * math.pi * 2,
+                        style: widget.equalizerStyle,
+                        color: widget.accentColor,
+                        intensity: widget.ambientVolume.clamp(0.15, 1.0),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 20),
+              Text(
+                tr ? 'Çıkmak için ekrana dokunun' : 'Tap anywhere to return',
+                style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.44)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final dimAlpha = ((1.0 - (widget.displayBrightness / 100.0)) * 0.72).clamp(0.0, 0.72);
+
+    return Stack(
+      children: [
+        Container(
+          color: Colors.black,
+          padding: insetPadding,
+          child: widget.layoutMode == VisualLayoutMode.framed
+              ? Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 440, maxHeight: 440),
+                    child: innerContent,
+                  ),
+                )
+              : innerContent,
+        ),
+        if (dimAlpha > 0.01)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Container(color: Colors.black.withValues(alpha: dimAlpha)),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _AmbientEqualizerPainter extends CustomPainter {
+  final double phase;
+  final EqualizerStyle style;
+  final Color color;
+  final double intensity;
+
+  const _AmbientEqualizerPainter({
+    required this.phase,
+    required this.style,
+    required this.color,
+    required this.intensity,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    switch (style) {
+      case EqualizerStyle.bars:
+        const count = 16;
+        final barW = (size.width / count) * 0.56;
+        final step = size.width / count;
+        final paint = Paint()..style = PaintingStyle.fill;
+        for (int i = 0; i < count; i++) {
+          final wave = 0.25 + 0.75 * (0.5 + 0.5 * math.sin(phase * 2.0 + i * 0.65));
+          final h = (size.height * wave * intensity).clamp(4.0, size.height);
+          paint.color = Color.lerp(color, const Color(0xFF38BDF8), i / count)!.withValues(alpha: 0.85);
+          canvas.drawRRect(
+            RRect.fromRectAndRadius(
+              Rect.fromLTWH(i * step + (step - barW) / 2, size.height - h, barW, h),
+              const Radius.circular(3),
+            ),
+            paint,
+          );
+        }
+        break;
+      case EqualizerStyle.wave:
+        final path = Path();
+        final midY = size.height / 2;
+        for (double x = 0; x <= size.width; x += 4) {
+          final norm = x / size.width;
+          final y = midY +
+              math.sin(norm * math.pi * 4 + phase * 2.0) * (size.height * 0.36 * intensity) * math.sin(norm * math.pi);
+          if (x == 0) {
+            path.moveTo(x, y);
+          } else {
+            path.lineTo(x, y);
+          }
+        }
+        canvas.drawPath(
+          path,
+          Paint()
+            ..color = const Color(0xFF38BDF8).withValues(alpha: 0.90)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.4
+            ..strokeCap = StrokeCap.round,
+        );
+        break;
+      case EqualizerStyle.pulse:
+        final center = Offset(size.width / 2, size.height / 2);
+        for (int r = 0; r < 3; r++) {
+          final t = ((phase / (math.pi * 2)) + r * 0.33) % 1.0;
+          final radius = 4.0 + t * (size.width * 0.38) * intensity;
+          canvas.drawOval(
+            Rect.fromCenter(center: center, width: radius * 2, height: (size.height * 0.85) * t + 4),
+            Paint()
+              ..color = color.withValues(alpha: (1.0 - t) * 0.75)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2.0,
+          );
+        }
+        break;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _AmbientEqualizerPainter oldDelegate) =>
+      oldDelegate.phase != phase || oldDelegate.style != style || oldDelegate.intensity != intensity;
 }

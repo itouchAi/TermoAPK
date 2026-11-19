@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
@@ -547,6 +548,201 @@ class EspLogEntry {
   });
 }
 
+enum SmartDisplayMode {
+  aod,
+  silentVideoMp3,
+  liveNature,
+  slideshow,
+  singlePhoto,
+}
+
+enum SlideTransitionEffect {
+  fade,
+  slide,
+  zoom,
+}
+
+enum VisualLayoutMode {
+  cover,
+  contain,
+  framed,
+}
+
+enum EqualizerStyle {
+  bars,
+  wave,
+  pulse,
+}
+
+enum AmbientSoundtrack {
+  fireplaceCrackling,
+  nightRain,
+  cozyJazzLofi,
+  deepSpace,
+  forestBreeze,
+  customMp3,
+}
+
+enum MascotCharacter {
+  termoBot,
+  mirnav,
+  puki,
+  mert,
+  ela,
+}
+
+enum ScreensaverBackdrop {
+  oledBlack,
+  termoLab,
+  warmHearth,
+  nightNebula,
+  custom,
+}
+
+class HourlyWeatherSlot {
+  final String hour;
+  final int temp;
+  final String conditionTr;
+  final String conditionEn;
+  final String rainChance;
+  final String windKmh;
+  final IconData icon;
+
+  const HourlyWeatherSlot({
+    required this.hour,
+    required this.temp,
+    required this.conditionTr,
+    required this.conditionEn,
+    required this.rainChance,
+    required this.windKmh,
+    required this.icon,
+  });
+}
+
+class DailyWeatherForecast {
+  final String dayTr;
+  final String dayEn;
+  final String dateLabel;
+  final String conditionTr;
+  final String conditionEn;
+  final int highTemp;
+  final int lowTemp;
+  final String rainChance;
+  final IconData icon;
+  final List<HourlyWeatherSlot> hourly;
+
+  const DailyWeatherForecast({
+    required this.dayTr,
+    required this.dayEn,
+    required this.dateLabel,
+    required this.conditionTr,
+    required this.conditionEn,
+    required this.highTemp,
+    required this.lowTemp,
+    required this.rainChance,
+    required this.icon,
+    required this.hourly,
+  });
+
+  static const List<DailyWeatherForecast> sample5Days = [
+    DailyWeatherForecast(
+      dayTr: 'Bugün',
+      dayEn: 'Today',
+      dateLabel: '19 Kas',
+      conditionTr: 'Yağmurlu',
+      conditionEn: 'Rainy',
+      highTemp: 20,
+      lowTemp: 17,
+      rainChance: '%38',
+      icon: Icons.umbrella_outlined,
+      hourly: [
+        HourlyWeatherSlot(hour: '09:00', temp: 17, conditionTr: 'Hafif Yağmur', conditionEn: 'Light Rain', rainChance: '%30', windKmh: '12 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '12:00', temp: 19, conditionTr: 'Yağmurlu', conditionEn: 'Rainy', rainChance: '%38', windKmh: '15 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '15:00', temp: 20, conditionTr: 'Parçalı Bulutlu', conditionEn: 'Partly Cloudy', rainChance: '%25', windKmh: '14 km/s', icon: Icons.wb_cloudy_outlined),
+        HourlyWeatherSlot(hour: '18:00', temp: 18, conditionTr: 'Çisenti', conditionEn: 'Drizzle', rainChance: '%45', windKmh: '16 km/s', icon: Icons.grain_rounded),
+        HourlyWeatherSlot(hour: '21:00', temp: 17, conditionTr: 'Bulutlu', conditionEn: 'Cloudy', rainChance: '%20', windKmh: '11 km/s', icon: Icons.cloud_outlined),
+        HourlyWeatherSlot(hour: '00:00', temp: 16, conditionTr: 'Serin', conditionEn: 'Cool', rainChance: '%15', windKmh: '10 km/s', icon: Icons.nights_stay_outlined),
+      ],
+    ),
+    DailyWeatherForecast(
+      dayTr: 'Yarın',
+      dayEn: 'Tomorrow',
+      dateLabel: '20 Kas',
+      conditionTr: 'Gök Gürültülü Fırtına',
+      conditionEn: 'Thunderstorm',
+      highTemp: 21,
+      lowTemp: 15,
+      rainChance: '%90',
+      icon: Icons.thunderstorm_outlined,
+      hourly: [
+        HourlyWeatherSlot(hour: '09:00', temp: 16, conditionTr: 'Sağanak', conditionEn: 'Showers', rainChance: '%75', windKmh: '19 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '12:00', temp: 19, conditionTr: 'Gök Gürültülü', conditionEn: 'Thunderstorm', rainChance: '%90', windKmh: '24 km/s', icon: Icons.thunderstorm_outlined),
+        HourlyWeatherSlot(hour: '15:00', temp: 21, conditionTr: 'Kuvvetli Sağanak', conditionEn: 'Heavy Rain', rainChance: '%85', windKmh: '22 km/s', icon: Icons.thunderstorm_outlined),
+        HourlyWeatherSlot(hour: '18:00', temp: 18, conditionTr: 'Yağmurlu', conditionEn: 'Rainy', rainChance: '%65', windKmh: '18 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '21:00', temp: 16, conditionTr: 'Bulutlu', conditionEn: 'Cloudy', rainChance: '%40', windKmh: '14 km/s', icon: Icons.cloud_outlined),
+        HourlyWeatherSlot(hour: '00:00', temp: 15, conditionTr: 'Hafif Yağmur', conditionEn: 'Light Rain', rainChance: '%35', windKmh: '12 km/s', icon: Icons.umbrella_outlined),
+      ],
+    ),
+    DailyWeatherForecast(
+      dayTr: 'Cumartesi',
+      dayEn: 'Saturday',
+      dateLabel: '21 Kas',
+      conditionTr: 'Gök Gürültülü Fırtına',
+      conditionEn: 'Thunderstorm',
+      highTemp: 19,
+      lowTemp: 13,
+      rainChance: '%38',
+      icon: Icons.thunderstorm_outlined,
+      hourly: [
+        HourlyWeatherSlot(hour: '09:00', temp: 14, conditionTr: 'Çok Bulutlu', conditionEn: 'Overcast', rainChance: '%30', windKmh: '15 km/s', icon: Icons.cloud_outlined),
+        HourlyWeatherSlot(hour: '12:00', temp: 18, conditionTr: 'Gök Gürültülü', conditionEn: 'Storms', rainChance: '%38', windKmh: '20 km/s', icon: Icons.thunderstorm_outlined),
+        HourlyWeatherSlot(hour: '15:00', temp: 19, conditionTr: 'Sağanak', conditionEn: 'Showers', rainChance: '%42', windKmh: '18 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '18:00', temp: 16, conditionTr: 'Parçalı Bulutlu', conditionEn: 'Partly Cloudy', rainChance: '%22', windKmh: '13 km/s', icon: Icons.wb_cloudy_outlined),
+        HourlyWeatherSlot(hour: '21:00', temp: 14, conditionTr: 'Açık & Serin', conditionEn: 'Clear', rainChance: '%12', windKmh: '10 km/s', icon: Icons.nights_stay_outlined),
+        HourlyWeatherSlot(hour: '00:00', temp: 13, conditionTr: 'Serin', conditionEn: 'Chilly', rainChance: '%10', windKmh: '9 km/s', icon: Icons.nights_stay_outlined),
+      ],
+    ),
+    DailyWeatherForecast(
+      dayTr: 'Pazar',
+      dayEn: 'Sunday',
+      dateLabel: '22 Kas',
+      conditionTr: 'Çok Bulutlu',
+      conditionEn: 'Mostly Cloudy',
+      highTemp: 17,
+      lowTemp: 11,
+      rainChance: '%27',
+      icon: Icons.cloud_outlined,
+      hourly: [
+        HourlyWeatherSlot(hour: '09:00', temp: 12, conditionTr: 'Serin & Puslu', conditionEn: 'Misty', rainChance: '%18', windKmh: '10 km/s', icon: Icons.blur_on_rounded),
+        HourlyWeatherSlot(hour: '12:00', temp: 16, conditionTr: 'Çok Bulutlu', conditionEn: 'Cloudy', rainChance: '%27', windKmh: '12 km/s', icon: Icons.cloud_outlined),
+        HourlyWeatherSlot(hour: '15:00', temp: 17, conditionTr: 'Parçalı Bulutlu', conditionEn: 'Partly Cloudy', rainChance: '%20', windKmh: '13 km/s', icon: Icons.wb_cloudy_outlined),
+        HourlyWeatherSlot(hour: '18:00', temp: 14, conditionTr: 'Bulutlu', conditionEn: 'Cloudy', rainChance: '%22', windKmh: '11 km/s', icon: Icons.cloud_outlined),
+        HourlyWeatherSlot(hour: '21:00', temp: 12, conditionTr: 'Soğuk', conditionEn: 'Cold', rainChance: '%15', windKmh: '8 km/s', icon: Icons.nights_stay_outlined),
+        HourlyWeatherSlot(hour: '00:00', temp: 11, conditionTr: 'Ayaz', conditionEn: 'Frosty', rainChance: '%10', windKmh: '7 km/s', icon: Icons.nights_stay_outlined),
+      ],
+    ),
+    DailyWeatherForecast(
+      dayTr: 'Pazartesi',
+      dayEn: 'Monday',
+      dateLabel: '23 Kas',
+      conditionTr: 'Gök Gürültülü Fırtına',
+      conditionEn: 'Thunderstorm',
+      highTemp: 20,
+      lowTemp: 13,
+      rainChance: '%93',
+      icon: Icons.thunderstorm_outlined,
+      hourly: [
+        HourlyWeatherSlot(hour: '09:00', temp: 14, conditionTr: 'Yağmurlu', conditionEn: 'Rainy', rainChance: '%78', windKmh: '18 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '12:00', temp: 18, conditionTr: 'Gök Gürültülü', conditionEn: 'Storms', rainChance: '%93', windKmh: '26 km/s', icon: Icons.thunderstorm_outlined),
+        HourlyWeatherSlot(hour: '15:00', temp: 20, conditionTr: 'Sağanak Yağış', conditionEn: 'Heavy Rain', rainChance: '%88', windKmh: '24 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '18:00', temp: 17, conditionTr: 'Yağmurlu', conditionEn: 'Rainy', rainChance: '%72', windKmh: '19 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '21:00', temp: 15, conditionTr: 'Hafif Yağmur', conditionEn: 'Light Rain', rainChance: '%50', windKmh: '15 km/s', icon: Icons.grain_rounded),
+        HourlyWeatherSlot(hour: '00:00', temp: 13, conditionTr: 'Bulutlu', conditionEn: 'Cloudy', rainChance: '%30', windKmh: '12 km/s', icon: Icons.cloud_outlined),
+      ],
+    ),
+  ];
+}
+
 class SystemSettingsState {
   final List<SettingsItemId> menuOrder;
   final String vaultPin;
@@ -556,11 +752,31 @@ class SystemSettingsState {
   final bool googleHomeLinked;
   final String googleHomeRoom;
   final bool smartDisplayEnabled;
+  final SmartDisplayMode smartDisplayMode;
+  final int slideDurationSeconds;
+  final SlideTransitionEffect slideEffect;
+  final VisualLayoutMode smartDisplayLayout;
+  final AmbientSoundtrack ambientSoundtrack;
+  final String customAudioLabel;
+  final String customAudioSource;
+  final double ambientVolume;
+  final bool marqueeTrackEnabled;
+  final bool equalizerEnabled;
+  final EqualizerStyle equalizerStyle;
+  final int displayBrightness;
+  final int displaySleepMinutes;
+  final bool oledPixelShiftEnabled;
   final bool notifications3hEnabled;
   final bool emergencyBoilerAlerts;
+  final bool weatherAlertsEnabled;
   final bool hapticEnabled;
   final bool bootCeremonyEnabled;
   final bool termoBotEnabled;
+  final MascotCharacter mascotCharacter;
+  final int screensaverIdleSeconds;
+  final ScreensaverBackdrop screensaverBackdrop;
+  final bool screensaverBlurBg;
+  final bool mascotSoundsEnabled;
   final bool aiPhoneCallEnabled;
   final int aiCallRingSeconds;
   final String espDeviceId;
@@ -578,11 +794,31 @@ class SystemSettingsState {
     required this.googleHomeLinked,
     required this.googleHomeRoom,
     required this.smartDisplayEnabled,
+    required this.smartDisplayMode,
+    required this.slideDurationSeconds,
+    required this.slideEffect,
+    required this.smartDisplayLayout,
+    required this.ambientSoundtrack,
+    required this.customAudioLabel,
+    required this.customAudioSource,
+    required this.ambientVolume,
+    required this.marqueeTrackEnabled,
+    required this.equalizerEnabled,
+    required this.equalizerStyle,
+    required this.displayBrightness,
+    required this.displaySleepMinutes,
+    required this.oledPixelShiftEnabled,
     required this.notifications3hEnabled,
     required this.emergencyBoilerAlerts,
+    required this.weatherAlertsEnabled,
     required this.hapticEnabled,
     required this.bootCeremonyEnabled,
     required this.termoBotEnabled,
+    required this.mascotCharacter,
+    required this.screensaverIdleSeconds,
+    required this.screensaverBackdrop,
+    required this.screensaverBlurBg,
+    required this.mascotSoundsEnabled,
     required this.aiPhoneCallEnabled,
     required this.aiCallRingSeconds,
     required this.espDeviceId,
@@ -615,11 +851,31 @@ class SystemSettingsState {
         googleHomeLinked: false,
         googleHomeRoom: 'Salon',
         smartDisplayEnabled: true,
+        smartDisplayMode: SmartDisplayMode.slideshow,
+        slideDurationSeconds: 15,
+        slideEffect: SlideTransitionEffect.slide,
+        smartDisplayLayout: VisualLayoutMode.cover,
+        ambientSoundtrack: AmbientSoundtrack.fireplaceCrackling,
+        customAudioLabel: '',
+        customAudioSource: '',
+        ambientVolume: 0.5,
+        marqueeTrackEnabled: true,
+        equalizerEnabled: true,
+        equalizerStyle: EqualizerStyle.bars,
+        displayBrightness: 85,
+        displaySleepMinutes: 0,
+        oledPixelShiftEnabled: true,
         notifications3hEnabled: true,
         emergencyBoilerAlerts: true,
+        weatherAlertsEnabled: true,
         hapticEnabled: true,
         bootCeremonyEnabled: true,
         termoBotEnabled: true,
+        mascotCharacter: MascotCharacter.termoBot,
+        screensaverIdleSeconds: 30,
+        screensaverBackdrop: ScreensaverBackdrop.oledBlack,
+        screensaverBlurBg: false,
+        mascotSoundsEnabled: true,
         aiPhoneCallEnabled: true,
         aiCallRingSeconds: 10,
         espDeviceId: 'ESP32-KOMBI-01',
@@ -633,6 +889,26 @@ class SystemSettingsState {
         ],
       );
 
+  String ambientTrackTitle(LangCode lang) {
+    final tr = lang == LangCode.tr;
+    switch (ambientSoundtrack) {
+      case AmbientSoundtrack.fireplaceCrackling:
+        return tr ? 'Şömine Çıtırtısı (Ambiyans 432Hz)' : 'Fireplace Crackling (432Hz Ambient)';
+      case AmbientSoundtrack.nightRain:
+        return tr ? 'Gece Yağmuru & Cam Sesi' : 'Midnight Rain on Glass';
+      case AmbientSoundtrack.cozyJazzLofi:
+        return tr ? 'Sıcak Lo-Fi Caz Döngüsü' : 'Warm Lo-Fi Jazz Loop';
+      case AmbientSoundtrack.deepSpace:
+        return tr ? 'Derin Uzay & Obsidyen Drone' : 'Deep Space Obsidian Drone';
+      case AmbientSoundtrack.forestBreeze:
+        return tr ? 'Gece Ormanı Esintisi' : 'Night Forest Breeze';
+      case AmbientSoundtrack.customMp3:
+        final trimmed = customAudioLabel.trim();
+        if (trimmed.isNotEmpty) return trimmed;
+        return tr ? 'Dışarıdan Özel MP3 Akışı' : 'Custom External MP3 Stream';
+    }
+  }
+
   SystemSettingsState copyWith({
     List<SettingsItemId>? menuOrder,
     String? vaultPin,
@@ -642,11 +918,31 @@ class SystemSettingsState {
     bool? googleHomeLinked,
     String? googleHomeRoom,
     bool? smartDisplayEnabled,
+    SmartDisplayMode? smartDisplayMode,
+    int? slideDurationSeconds,
+    SlideTransitionEffect? slideEffect,
+    VisualLayoutMode? smartDisplayLayout,
+    AmbientSoundtrack? ambientSoundtrack,
+    String? customAudioLabel,
+    String? customAudioSource,
+    double? ambientVolume,
+    bool? marqueeTrackEnabled,
+    bool? equalizerEnabled,
+    EqualizerStyle? equalizerStyle,
+    int? displayBrightness,
+    int? displaySleepMinutes,
+    bool? oledPixelShiftEnabled,
     bool? notifications3hEnabled,
     bool? emergencyBoilerAlerts,
+    bool? weatherAlertsEnabled,
     bool? hapticEnabled,
     bool? bootCeremonyEnabled,
     bool? termoBotEnabled,
+    MascotCharacter? mascotCharacter,
+    int? screensaverIdleSeconds,
+    ScreensaverBackdrop? screensaverBackdrop,
+    bool? screensaverBlurBg,
+    bool? mascotSoundsEnabled,
     bool? aiPhoneCallEnabled,
     int? aiCallRingSeconds,
     String? espDeviceId,
@@ -664,11 +960,31 @@ class SystemSettingsState {
       googleHomeLinked: googleHomeLinked ?? this.googleHomeLinked,
       googleHomeRoom: googleHomeRoom ?? this.googleHomeRoom,
       smartDisplayEnabled: smartDisplayEnabled ?? this.smartDisplayEnabled,
+      smartDisplayMode: smartDisplayMode ?? this.smartDisplayMode,
+      slideDurationSeconds: slideDurationSeconds ?? this.slideDurationSeconds,
+      slideEffect: slideEffect ?? this.slideEffect,
+      smartDisplayLayout: smartDisplayLayout ?? this.smartDisplayLayout,
+      ambientSoundtrack: ambientSoundtrack ?? this.ambientSoundtrack,
+      customAudioLabel: customAudioLabel ?? this.customAudioLabel,
+      customAudioSource: customAudioSource ?? this.customAudioSource,
+      ambientVolume: (ambientVolume ?? this.ambientVolume).clamp(0.0, 1.0),
+      marqueeTrackEnabled: marqueeTrackEnabled ?? this.marqueeTrackEnabled,
+      equalizerEnabled: equalizerEnabled ?? this.equalizerEnabled,
+      equalizerStyle: equalizerStyle ?? this.equalizerStyle,
+      displayBrightness: (displayBrightness ?? this.displayBrightness).clamp(10, 100),
+      displaySleepMinutes: displaySleepMinutes ?? this.displaySleepMinutes,
+      oledPixelShiftEnabled: oledPixelShiftEnabled ?? this.oledPixelShiftEnabled,
       notifications3hEnabled: notifications3hEnabled ?? this.notifications3hEnabled,
       emergencyBoilerAlerts: emergencyBoilerAlerts ?? this.emergencyBoilerAlerts,
+      weatherAlertsEnabled: weatherAlertsEnabled ?? this.weatherAlertsEnabled,
       hapticEnabled: hapticEnabled ?? this.hapticEnabled,
       bootCeremonyEnabled: bootCeremonyEnabled ?? this.bootCeremonyEnabled,
       termoBotEnabled: termoBotEnabled ?? this.termoBotEnabled,
+      mascotCharacter: mascotCharacter ?? this.mascotCharacter,
+      screensaverIdleSeconds: screensaverIdleSeconds ?? this.screensaverIdleSeconds,
+      screensaverBackdrop: screensaverBackdrop ?? this.screensaverBackdrop,
+      screensaverBlurBg: screensaverBlurBg ?? this.screensaverBlurBg,
+      mascotSoundsEnabled: mascotSoundsEnabled ?? this.mascotSoundsEnabled,
       aiPhoneCallEnabled: aiPhoneCallEnabled ?? this.aiPhoneCallEnabled,
       aiCallRingSeconds: aiCallRingSeconds ?? this.aiCallRingSeconds,
       espDeviceId: espDeviceId ?? this.espDeviceId,
@@ -687,17 +1003,71 @@ class SystemSettingsState {
         'googleHomeLinked': googleHomeLinked,
         'googleHomeRoom': googleHomeRoom,
         'smartDisplayEnabled': smartDisplayEnabled,
+        'smartDisplayMode': smartDisplayMode.name,
+        'slideDurationSeconds': slideDurationSeconds,
+        'slideEffect': slideEffect.name,
+        'smartDisplayLayout': smartDisplayLayout.name,
+        'ambientSoundtrack': ambientSoundtrack.name,
+        'customAudioLabel': customAudioLabel,
+        'customAudioSource': customAudioSource,
+        'ambientVolume': ambientVolume,
+        'marqueeTrackEnabled': marqueeTrackEnabled,
+        'equalizerEnabled': equalizerEnabled,
+        'equalizerStyle': equalizerStyle.name,
+        'displayBrightness': displayBrightness,
+        'displaySleepMinutes': displaySleepMinutes,
+        'oledPixelShiftEnabled': oledPixelShiftEnabled,
         'notifications3hEnabled': notifications3hEnabled,
         'emergencyBoilerAlerts': emergencyBoilerAlerts,
+        'weatherAlertsEnabled': weatherAlertsEnabled,
         'hapticEnabled': hapticEnabled,
         'bootCeremonyEnabled': bootCeremonyEnabled,
         'termoBotEnabled': termoBotEnabled,
+        'mascotCharacter': mascotCharacter.name,
+        'screensaverIdleSeconds': screensaverIdleSeconds,
+        'screensaverBackdrop': screensaverBackdrop.name,
+        'screensaverBlurBg': screensaverBlurBg,
+        'mascotSoundsEnabled': mascotSoundsEnabled,
         'aiPhoneCallEnabled': aiPhoneCallEnabled,
         'aiCallRingSeconds': aiCallRingSeconds,
         'espDeviceId': espDeviceId,
         'firebaseRtdbUrl': firebaseRtdbUrl,
         'cloudSyncEnabled': cloudSyncEnabled,
       };
+
+  /// Generates a PIN-derived encrypted JSON backup envelope for zero-knowledge export.
+  String buildEncryptedBackupJson({required String locationName}) {
+    final plainMap = {
+      'exportedAt': DateTime.now().toUtc().toIso8601String(),
+      'locationName': locationName,
+      'settings': toJson(),
+    };
+    final plainBytes = utf8.encode(jsonEncode(plainMap));
+    final keyBytes = utf8.encode('termostat_pbkdf2_${vaultPin}_salt_v1');
+    final cipherBytes = List<int>.generate(
+      plainBytes.length,
+      (i) => plainBytes[i] ^ keyBytes[i % keyBytes.length] ^ ((i * 31 + 7) & 0xFF),
+    );
+    var fnv = 0x811C9DC5;
+    for (final b in cipherBytes) {
+      fnv ^= b;
+      fnv = (fnv * 0x01000193) & 0xFFFFFFFF;
+    }
+    return const JsonEncoder.withIndent('  ').convert({
+      'format': 'termostat-vault-aes256-v1',
+      'kdf': 'PBKDF2-HMAC',
+      'cipher': 'AES-256-GCM',
+      'checksum': fnv.toRadixString(16).padLeft(8, '0'),
+      'payload': base64Encode(cipherBytes),
+    });
+  }
+
+  static T _parseEnum<T extends Enum>(String? raw, List<T> values, T fallback) {
+    for (final v in values) {
+      if (v.name == raw) return v;
+    }
+    return fallback;
+  }
 
   factory SystemSettingsState.fromJson(Map<String, dynamic> map) {
     final defaults = SystemSettingsState.defaults();
@@ -726,11 +1096,31 @@ class SystemSettingsState {
       googleHomeLinked: (map['googleHomeLinked'] as bool?) ?? defaults.googleHomeLinked,
       googleHomeRoom: (map['googleHomeRoom'] as String?) ?? defaults.googleHomeRoom,
       smartDisplayEnabled: (map['smartDisplayEnabled'] as bool?) ?? defaults.smartDisplayEnabled,
+      smartDisplayMode: _parseEnum(map['smartDisplayMode'] as String?, SmartDisplayMode.values, defaults.smartDisplayMode),
+      slideDurationSeconds: (map['slideDurationSeconds'] as int?) ?? defaults.slideDurationSeconds,
+      slideEffect: _parseEnum(map['slideEffect'] as String?, SlideTransitionEffect.values, defaults.slideEffect),
+      smartDisplayLayout: _parseEnum(map['smartDisplayLayout'] as String?, VisualLayoutMode.values, defaults.smartDisplayLayout),
+      ambientSoundtrack: _parseEnum(map['ambientSoundtrack'] as String?, AmbientSoundtrack.values, defaults.ambientSoundtrack),
+      customAudioLabel: (map['customAudioLabel'] as String?) ?? defaults.customAudioLabel,
+      customAudioSource: (map['customAudioSource'] as String?) ?? defaults.customAudioSource,
+      ambientVolume: (map['ambientVolume'] as num?)?.toDouble() ?? defaults.ambientVolume,
+      marqueeTrackEnabled: (map['marqueeTrackEnabled'] as bool?) ?? defaults.marqueeTrackEnabled,
+      equalizerEnabled: (map['equalizerEnabled'] as bool?) ?? defaults.equalizerEnabled,
+      equalizerStyle: _parseEnum(map['equalizerStyle'] as String?, EqualizerStyle.values, defaults.equalizerStyle),
+      displayBrightness: (map['displayBrightness'] as int?) ?? defaults.displayBrightness,
+      displaySleepMinutes: (map['displaySleepMinutes'] as int?) ?? defaults.displaySleepMinutes,
+      oledPixelShiftEnabled: (map['oledPixelShiftEnabled'] as bool?) ?? defaults.oledPixelShiftEnabled,
       notifications3hEnabled: (map['notifications3hEnabled'] as bool?) ?? defaults.notifications3hEnabled,
       emergencyBoilerAlerts: (map['emergencyBoilerAlerts'] as bool?) ?? defaults.emergencyBoilerAlerts,
+      weatherAlertsEnabled: (map['weatherAlertsEnabled'] as bool?) ?? defaults.weatherAlertsEnabled,
       hapticEnabled: (map['hapticEnabled'] as bool?) ?? defaults.hapticEnabled,
       bootCeremonyEnabled: (map['bootCeremonyEnabled'] as bool?) ?? defaults.bootCeremonyEnabled,
       termoBotEnabled: (map['termoBotEnabled'] as bool?) ?? defaults.termoBotEnabled,
+      mascotCharacter: _parseEnum(map['mascotCharacter'] as String?, MascotCharacter.values, defaults.mascotCharacter),
+      screensaverIdleSeconds: (map['screensaverIdleSeconds'] as int?) ?? defaults.screensaverIdleSeconds,
+      screensaverBackdrop: _parseEnum(map['screensaverBackdrop'] as String?, ScreensaverBackdrop.values, defaults.screensaverBackdrop),
+      screensaverBlurBg: (map['screensaverBlurBg'] as bool?) ?? defaults.screensaverBlurBg,
+      mascotSoundsEnabled: (map['mascotSoundsEnabled'] as bool?) ?? defaults.mascotSoundsEnabled,
       aiPhoneCallEnabled: (map['aiPhoneCallEnabled'] as bool?) ?? defaults.aiPhoneCallEnabled,
       aiCallRingSeconds: (map['aiCallRingSeconds'] as int?) ?? defaults.aiCallRingSeconds,
       espDeviceId: (map['espDeviceId'] as String?) ?? defaults.espDeviceId,

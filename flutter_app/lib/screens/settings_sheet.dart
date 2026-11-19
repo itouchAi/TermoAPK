@@ -1,17 +1,29 @@
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/thermostat_state.dart';
+import '../services/ambient_audio_service.dart';
+import '../services/hardware_service.dart';
+import '../widgets/termo_bot.dart';
+import 'google_home_sheet.dart';
+import 'vault_center_sheet.dart';
 
 Future<void> showSystemSettingsSheet({
   required BuildContext context,
   required LangCode lang,
   required String locationName,
   required Color accentColor,
+  required double roomTemp,
+  required double targetTemp,
+  required BoilerTelemetry boiler,
   required SystemSettingsState initialSettings,
   required ValueChanged<LangCode> onChangeLang,
   required ValueChanged<String> onChangeLocation,
+  required ValueChanged<double> onChangeTargetTemp,
   required ValueChanged<SystemSettingsState> onSaveSettings,
   required VoidCallback onOpenAmbient,
+  required VoidCallback onOpenScreensaverPreview,
   required VoidCallback onResetTelemetryHistory,
 }) {
   return showModalBottomSheet<void>(
@@ -22,11 +34,16 @@ Future<void> showSystemSettingsSheet({
       lang: lang,
       locationName: locationName,
       accentColor: accentColor,
+      roomTemp: roomTemp,
+      targetTemp: targetTemp,
+      boiler: boiler,
       initialSettings: initialSettings,
       onChangeLang: onChangeLang,
       onChangeLocation: onChangeLocation,
+      onChangeTargetTemp: onChangeTargetTemp,
       onSaveSettings: onSaveSettings,
       onOpenAmbient: onOpenAmbient,
+      onOpenScreensaverPreview: onOpenScreensaverPreview,
       onResetTelemetryHistory: onResetTelemetryHistory,
     ),
   );
@@ -36,22 +53,32 @@ class _SystemSettingsModal extends StatefulWidget {
   final LangCode lang;
   final String locationName;
   final Color accentColor;
+  final double roomTemp;
+  final double targetTemp;
+  final BoilerTelemetry boiler;
   final SystemSettingsState initialSettings;
   final ValueChanged<LangCode> onChangeLang;
   final ValueChanged<String> onChangeLocation;
+  final ValueChanged<double> onChangeTargetTemp;
   final ValueChanged<SystemSettingsState> onSaveSettings;
   final VoidCallback onOpenAmbient;
+  final VoidCallback onOpenScreensaverPreview;
   final VoidCallback onResetTelemetryHistory;
 
   const _SystemSettingsModal({
     required this.lang,
     required this.locationName,
     required this.accentColor,
+    required this.roomTemp,
+    required this.targetTemp,
+    required this.boiler,
     required this.initialSettings,
     required this.onChangeLang,
     required this.onChangeLocation,
+    required this.onChangeTargetTemp,
     required this.onSaveSettings,
     required this.onOpenAmbient,
+    required this.onOpenScreensaverPreview,
     required this.onResetTelemetryHistory,
   });
 
@@ -63,15 +90,15 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
   late SystemSettingsState _draft;
   late LangCode _lang;
   late String _location;
+  late double _liveTargetTemp;
   bool _editOrderMode = false;
+  bool _audioPreviewPlaying = false;
   SettingsItemId? _expandedId;
   String? _statusBanner;
 
-  final _pinInputCtrl = TextEditingController();
-  final _tgTokenCtrl = TextEditingController();
-  final _tgChatCtrl = TextEditingController();
   final _firebaseUrlCtrl = TextEditingController();
   final _espIdCtrl = TextEditingController();
+  final _customAudioCtrl = TextEditingController();
 
   static const _locations = ['Ev · İstanbul', 'Yazlık · İzmir', 'Ofis · Ankara'];
 
@@ -81,26 +108,117 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     _draft = widget.initialSettings;
     _lang = widget.lang;
     _location = widget.locationName;
-    _tgTokenCtrl.text = _draft.telegramToken;
-    _tgChatCtrl.text = _draft.telegramChatId;
+    _liveTargetTemp = widget.targetTemp;
     _firebaseUrlCtrl.text = _draft.firebaseRtdbUrl;
     _espIdCtrl.text = _draft.espDeviceId;
+    _customAudioCtrl.text = _draft.customAudioLabel;
   }
 
   @override
   void dispose() {
-    _pinInputCtrl.dispose();
-    _tgTokenCtrl.dispose();
-    _tgChatCtrl.dispose();
+    if (_audioPreviewPlaying) {
+      AmbientAudioService.stop();
+    }
     _firebaseUrlCtrl.dispose();
     _espIdCtrl.dispose();
+    _customAudioCtrl.dispose();
     super.dispose();
   }
 
   void _hapticTap() {
     if (_draft.hapticEnabled) {
-      HapticFeedback.selectionClick();
+      HardwareService.vibrateMs(40, amplitude: 110);
     }
+  }
+
+  String _resolveAudioSource() {
+    final typed = _customAudioCtrl.text.trim();
+    if (typed.startsWith('http://') || typed.startsWith('https://')) {
+      return typed;
+    }
+    if (_draft.customAudioSource.trim().isNotEmpty) {
+      return _draft.customAudioSource.trim();
+    }
+    return typed;
+  }
+
+  Future<void> _pickLocalMp3() async {
+    _hapticTap();
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.audio,
+        withData: kIsWeb,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final picked = result.files.first;
+      AmbientAudioService.setCustomAudioBytes(picked.bytes);
+      final source = kIsWeb ? picked.name : (picked.path ?? picked.name);
+      if (!mounted) return;
+      setState(() {
+        _customAudioCtrl.text = picked.name;
+        _draft = _draft.copyWith(
+          ambientSoundtrack: AmbientSoundtrack.customMp3,
+          customAudioLabel: picked.name,
+          customAudioSource: source,
+        );
+      });
+      if (_audioPreviewPlaying) {
+        await AmbientAudioService.start(
+          track: AmbientSoundtrack.customMp3,
+          customSource: source,
+          volume: _draft.ambientVolume,
+        );
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _toggleAudioPreview() async {
+    _hapticTap();
+    if (_audioPreviewPlaying) {
+      await AmbientAudioService.stop();
+      if (mounted) setState(() => _audioPreviewPlaying = false);
+      return;
+    }
+    await AmbientAudioService.start(
+      track: _draft.ambientSoundtrack,
+      customSource: _resolveAudioSource(),
+      volume: _draft.ambientVolume,
+    );
+    if (mounted) setState(() => _audioPreviewPlaying = true);
+  }
+
+  void _openVaultCenter() {
+    _hapticTap();
+    showVaultCenterSheet(
+      context: context,
+      lang: _lang,
+      locationName: _location,
+      initialSettings: _draft,
+      onUpdateSettings: (next) {
+        if (mounted) setState(() => _draft = next);
+        widget.onSaveSettings(next);
+      },
+    );
+  }
+
+  void _openGoogleHome() {
+    _hapticTap();
+    showGoogleHomeSheet(
+      context: context,
+      lang: _lang,
+      roomTemp: widget.roomTemp,
+      targetTemp: _liveTargetTemp,
+      boiler: ThermostatMath.computeBoilerTelemetry(widget.roomTemp, _liveTargetTemp),
+      initialSettings: _draft,
+      onUpdateSettings: (next) {
+        if (mounted) setState(() => _draft = next);
+        widget.onSaveSettings(next);
+      },
+      onApplyTargetTemp: (t) {
+        if (mounted) setState(() => _liveTargetTemp = t);
+        widget.onChangeTargetTemp(t);
+      },
+    );
   }
 
   void _moveItem(int oldIdx, int newIdx) {
@@ -377,10 +495,10 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                         onPressed: () {
                           _hapticTap();
                           final updated = _draft.copyWith(
-                            telegramToken: _tgTokenCtrl.text.trim(),
-                            telegramChatId: _tgChatCtrl.text.trim(),
                             firebaseRtdbUrl: _firebaseUrlCtrl.text.trim(),
                             espDeviceId: _espIdCtrl.text.trim(),
+                            customAudioLabel: _customAudioCtrl.text.trim(),
+                            customAudioSource: _resolveAudioSource(),
                           );
                           widget.onChangeLang(_lang);
                           widget.onChangeLocation(_location);
@@ -630,7 +748,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             label: _draft.vaultUnlocked ? (tr ? 'Açık ✓' : 'Open ✓') : (tr ? 'Aç →' : 'Open →'),
             active: _draft.vaultUnlocked,
             color: const Color(0xFFF59E0B),
-            onTap: () => _toggleExpand(id),
+            onTap: _openVaultCenter,
           ),
         );
       case SettingsItemId.googleHome:
@@ -644,7 +762,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             label: _draft.googleHomeLinked ? (tr ? 'Bağlı ✓' : 'Linked ✓') : (tr ? 'Yönet →' : 'Manage →'),
             active: _draft.googleHomeLinked,
             color: const Color(0xFF38BDF8),
-            onTap: () => _toggleExpand(id),
+            onTap: _openGoogleHome,
           ),
         );
       case SettingsItemId.smartDisplay:
@@ -801,71 +919,60 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     final tr = _lang == LangCode.tr;
     switch (id) {
       case SettingsItemId.vault:
-        if (!_draft.vaultUnlocked) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                tr ? 'Kasa PIN kodunu girin (Varsayılan: 1234)' : 'Enter vault PIN (Default: 1234)',
-                style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.70)),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: _DarkTextField(
-                      controller: _pinInputCtrl,
-                      hint: 'PIN',
-                      obscure: true,
-                      keyboardType: TextInputType.number,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: () {
-                      _hapticTap();
-                      if (_pinInputCtrl.text.trim() == _draft.vaultPin) {
-                        setState(() {
-                          _draft = _draft.copyWith(vaultUnlocked: true);
-                          _statusBanner = tr ? 'Şifreli kasa açıldı.' : 'Vault unlocked.';
-                        });
-                      } else {
-                        setState(() => _statusBanner = tr ? 'Hatalı PIN kodu.' : 'Incorrect PIN.');
-                      }
-                    },
-                    child: Text(tr ? 'Kilidi Aç' : 'Unlock'),
-                  ),
-                ],
-              ),
-            ],
-          );
-        }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _DarkTextField(controller: _tgTokenCtrl, hint: 'Telegram Bot Token'),
-            const SizedBox(height: 8),
-            _DarkTextField(controller: _tgChatCtrl, hint: 'Telegram Chat ID'),
-            const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            Text(
+              tr
+                  ? 'Telegram acil bildirim botu anahtarları, emniyet parametreleri ve alarm kontakları AES-256 CBC şifreleme ve PBKDF2 anahtar türetme ile saklanır.'
+                  : 'Telegram alert bot keys, safety parameters, and alarm contacts are stored with PBKDF2 + AES-256 encryption.',
+              style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.72), height: 1.4),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
               children: [
-                TextButton(
-                  onPressed: () => setState(() => _draft = _draft.copyWith(vaultUnlocked: false)),
-                  child: Text(tr ? 'Kasayı Kilitle' : 'Lock Vault'),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF59E0B).withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.35)),
+                  ),
+                  child: Text(
+                    tr ? '✓ PIN Koruması Devrede' : '✓ PIN Protection Active',
+                    style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFFFCD34D)),
+                  ),
                 ),
-                FilledButton.tonal(
-                  onPressed: () {
-                    _hapticTap();
-                    setState(() {
-                      _statusBanner = _tgTokenCtrl.text.trim().isEmpty
-                          ? (tr ? 'Önce Bot Token girin.' : 'Enter Bot Token first.')
-                          : (tr ? 'Telegram test bildirimi kuyruğa alındı.' : 'Telegram test alert queued.');
-                    });
-                  },
-                  child: Text(tr ? 'Test Bildirimi' : 'Test Alert'),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.35)),
+                  ),
+                  child: Text(
+                    tr ? '✓ 256-Bit Donanım Seviyesi Şifreleme' : '✓ 256-Bit Hardware Encryption',
+                    style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFF6EE7B7)),
+                  ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _openVaultCenter,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFF59E0B),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 11),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              icon: const Icon(Icons.lock_open_rounded, size: 17),
+              label: Text(
+                tr ? 'Şifreli Kasa ve Bildirim Merkezini Aç' : 'Open Encrypted Vault & Alerts Center',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
             ),
           ],
         );
@@ -874,42 +981,741 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _draft.googleHomeLinked,
-              title: Text(
-                tr ? 'Google Home Sesli Köprü' : 'Google Home Voice Bridge',
-                style: const TextStyle(fontSize: 12.5, color: Colors.white),
+            Text(
+              tr
+                  ? 'Google Home ekosistemi ve Google Asistan ile sesli kombi kontrolü sağlayın. Firebase Realtime Database köprüsü üzerinden çift yönlü telemetri senkronizasyonu yapılır.'
+                  : 'Control your boiler via Google Home & Google Assistant with bidirectional Firebase Realtime Database sync.',
+              style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.72), height: 1.4),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF38BDF8).withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(13),
+                border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.28)),
               ),
-              subtitle: Text(
-                '${tr ? 'Oda' : 'Room'}: ${_draft.googleHomeRoom}',
-                style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.55)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    tr ? '🎙️ Örnek Sesli Komutlar:' : '🎙️ Sample Voice Commands:',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF7DD3FC)),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    tr
+                        ? '• "Hey Google, ${_draft.googleHomeRoom.toLowerCase()} termostatını 22.5 derece yap"'
+                        : '• "Hey Google, set ${_draft.googleHomeRoom.toLowerCase()} thermostat to 22.5 degrees"',
+                    style: const TextStyle(fontSize: 11, color: Colors.white70),
+                  ),
+                  Text(
+                    tr ? '• "Hey Google, kombi açık mı?"' : '• "Hey Google, is the boiler on?"',
+                    style: const TextStyle(fontSize: 11, color: Colors.white70),
+                  ),
+                ],
               ),
-              onChanged: (v) {
-                _hapticTap();
-                setState(() => _draft = _draft.copyWith(googleHomeLinked: v));
-              },
+            ),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: _openGoogleHome,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0284C7),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 11),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              icon: const Icon(Icons.home_outlined, size: 17),
+              label: Text(
+                tr ? 'Google Home & Asistan Entegrasyonunu Yönet' : 'Manage Google Home & Assistant Integration',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
             ),
           ],
         );
 
       case SettingsItemId.smartDisplay:
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        final displayModes = [
+          (
+            SmartDisplayMode.aod,
+            'Always-On Display (AOD)',
+            tr ? 'Siyah Ekran + Büyük Saat + Donma Koruması' : 'Black OLED + Clock + Anti-Burn-In',
+            Icons.nights_stay_outlined,
+          ),
+          (
+            SmartDisplayMode.silentVideoMp3,
+            tr ? 'Sessiz Video + MP3' : 'Silent Video + MP3',
+            tr ? 'Canlı arka plan + ortam müziği' : 'Live background + ambient audio',
+            Icons.music_video_outlined,
+          ),
+          (
+            SmartDisplayMode.liveNature,
+            tr ? 'Canlı Video / Doğa' : 'Live Video / Nature',
+            tr ? 'Şömine & canlı doğa döngüsü' : 'Fireplace & live nature loop',
+            Icons.local_fire_department_outlined,
+          ),
+          (
+            SmartDisplayMode.slideshow,
+            tr ? 'Slayt Gösterisi' : 'Slideshow',
+            tr ? 'Fotoğraflar arası otomatik geçiş' : 'Automatic photo transitions',
+            Icons.collections_outlined,
+          ),
+          (
+            SmartDisplayMode.singlePhoto,
+            tr ? 'Tekli Görsel' : 'Single Photo',
+            tr ? 'Sakin sabit fotoğraf' : 'Calm static backdrop',
+            Icons.photo_outlined,
+          ),
+        ];
+        const slideDurations = [5, 10, 15, 30];
+        final slideEffects = [
+          (SlideTransitionEffect.fade, 'Fade'),
+          (SlideTransitionEffect.slide, tr ? 'Kayma' : 'Slide'),
+          (SlideTransitionEffect.zoom, 'Zoom'),
+        ];
+        final layoutModes = [
+          (VisualLayoutMode.cover, tr ? 'Tam Ekran' : 'Cover'),
+          (VisualLayoutMode.contain, tr ? 'Sığdır' : 'Contain'),
+          (VisualLayoutMode.framed, tr ? 'Kare Kart' : 'Framed'),
+        ];
+
+        final audioTracks = [
+          (AmbientSoundtrack.fireplaceCrackling, '🔥 ${tr ? 'Şömine' : 'Hearth'}'),
+          (AmbientSoundtrack.nightRain, '🌧️ ${tr ? 'Yağmur' : 'Rain'}'),
+          (AmbientSoundtrack.cozyJazzLofi, '🎷 Lo-Fi'),
+          (AmbientSoundtrack.deepSpace, '🌌 ${tr ? 'Uzay' : 'Space'}'),
+          (AmbientSoundtrack.forestBreeze, '🌲 ${tr ? 'Orman' : 'Forest'}'),
+          (AmbientSoundtrack.customMp3, '🎵 ${tr ? 'Özel MP3' : 'Custom MP3'}'),
+        ];
+        final eqStyles = [
+          (EqualizerStyle.bars, '📊 ${tr ? 'Çubuklar' : 'Bars'}', tr ? 'Neon spektrum' : 'Neon spectrum'),
+          (EqualizerStyle.wave, '🌊 ${tr ? 'Dalga' : 'Wave'}', tr ? 'Siber dalga boyu' : 'Cyber waveform'),
+          (EqualizerStyle.pulse, '💓 ${tr ? 'Nabız' : 'Pulse'}', tr ? 'Radyal vuruş' : 'Radial beat'),
+        ];
+        final brightnessPresets = [
+          (20, '🌙 ${tr ? 'Gece' : 'Night'} %20'),
+          (50, '🌇 ${tr ? 'Loş' : 'Dim'} %50'),
+          (85, '☀️ ${tr ? 'Normal' : 'Normal'} %85'),
+          (100, '⚡ ${tr ? 'Tam' : 'Full'} %100'),
+        ];
+        final sleepOptions = [
+          (0, tr ? 'Sürekli Açık' : 'Always On'),
+          (1, tr ? '1 Dk' : '1 Min'),
+          (5, tr ? '5 Dk' : '5 Min'),
+          (15, tr ? '15 Dk' : '15 Min'),
+          (30, tr ? '30 Dk' : '30 Min'),
+        ];
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: Text(
-                tr ? 'Saat ve sıcaklık tam ekran ambiyansını aç' : 'Launch fullscreen ambient clock & temperature',
-                style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.70)),
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                gradient: const LinearGradient(colors: [Color(0xFFEA580C), Color(0xFFB45309)]),
+                boxShadow: [BoxShadow(color: const Color(0xFFEA580C).withValues(alpha: 0.35), blurRadius: 14)],
+              ),
+              child: FilledButton.icon(
+                onPressed: () {
+                  _hapticTap();
+                  if (_audioPreviewPlaying) {
+                    AmbientAudioService.stop();
+                    _audioPreviewPlaying = false;
+                  }
+                  final updated = _draft.copyWith(
+                    customAudioLabel: _customAudioCtrl.text.trim(),
+                    customAudioSource: _resolveAudioSource(),
+                  );
+                  widget.onSaveSettings(updated);
+                  Navigator.of(context).pop();
+                  widget.onOpenAmbient();
+                },
+                icon: const Icon(Icons.play_arrow_rounded, size: 19, color: Colors.white),
+                label: Text(
+                  tr ? 'Smart Display\'i Şimdi Başlat (Tam Ekran)' : 'Launch Smart Display (Fullscreen)',
+                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  shadowColor: Colors.transparent,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
               ),
             ),
-            const SizedBox(width: 8),
-            FilledButton.tonal(
-              onPressed: () {
-                Navigator.of(context).pop();
-                widget.onOpenAmbient();
-              },
-              child: Text(tr ? 'Şimdi Aç' : 'Open Now'),
+            const SizedBox(height: 12),
+            Text(
+              tr ? 'Ekran Modu:' : 'Display Mode:',
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
+            ),
+            const SizedBox(height: 8),
+            GridView.count(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisCount: 2,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+              childAspectRatio: 2.35,
+              children: [
+                for (final m in displayModes)
+                  GestureDetector(
+                    onTap: () {
+                      _hapticTap();
+                      setState(() => _draft = _draft.copyWith(smartDisplayMode: m.$1));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: _draft.smartDisplayMode == m.$1
+                            ? const Color(0xFFF59E0B).withValues(alpha: 0.14)
+                            : Colors.white.withValues(alpha: 0.03),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: _draft.smartDisplayMode == m.$1
+                              ? const Color(0xFFFBBF24)
+                              : Colors.white.withValues(alpha: 0.10),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(m.$4, size: 14, color: const Color(0xFFFBBF24)),
+                              const SizedBox(width: 5),
+                              Expanded(
+                                child: Text(
+                                  m.$2,
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (_draft.smartDisplayMode == m.$1)
+                                const Icon(Icons.check_rounded, size: 13, color: Color(0xFFFBBF24)),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            m.$3,
+                            style: TextStyle(fontSize: 9.5, color: Colors.white.withValues(alpha: 0.55)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: const Color(0xFF7C3AED).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.30)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    tr ? 'Slayt Süresi & Geçiş Efekti' : 'Slide Duration & Transition',
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFC4B5FD)),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      for (final sec in slideDurations) ...[
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              _hapticTap();
+                              setState(() => _draft = _draft.copyWith(slideDurationSeconds: sec));
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(right: 4),
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: _draft.slideDurationSeconds == sec
+                                    ? const Color(0xFF9333EA)
+                                    : Colors.white.withValues(alpha: 0.06),
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              child: Text(
+                                '${sec}s',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      for (final eff in slideEffects) ...[
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              _hapticTap();
+                              setState(() => _draft = _draft.copyWith(slideEffect: eff.$1));
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(right: 4),
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: _draft.slideEffect == eff.$1
+                                    ? const Color(0xFF9333EA)
+                                    : Colors.white.withValues(alpha: 0.06),
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              child: Text(
+                                eff.$2,
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.03),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    tr ? 'Görsel Yerleşim Modu' : 'Visual Layout Mode',
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF93C5FD)),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      for (final lay in layoutModes) ...[
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              _hapticTap();
+                              setState(() => _draft = _draft.copyWith(smartDisplayLayout: lay.$1));
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(right: 4),
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: _draft.smartDisplayLayout == lay.$1
+                                    ? const Color(0xFF2563EB).withValues(alpha: 0.45)
+                                    : Colors.white.withValues(alpha: 0.05),
+                                borderRadius: BorderRadius.circular(9),
+                                border: Border.all(
+                                  color: _draft.smartDisplayLayout == lay.$1
+                                      ? const Color(0xFF60A5FA)
+                                      : Colors.transparent,
+                                ),
+                              ),
+                              child: Text(
+                                lay.$2,
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // Ambient Audio, Volume, External MP3 & Track Marquee
+            Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0EA5E9).withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.28)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    tr ? '🎵 Varsayılan Temalar & Ambiyans Sesleri' : '🎵 Ambient Soundtracks & External MP3',
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF7DD3FC)),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final track in audioTracks)
+                        GestureDetector(
+                          onTap: () {
+                            _hapticTap();
+                            setState(() => _draft = _draft.copyWith(ambientSoundtrack: track.$1));
+                            if (_audioPreviewPlaying) {
+                              AmbientAudioService.start(
+                                track: track.$1,
+                                customSource: _resolveAudioSource(),
+                                volume: _draft.ambientVolume,
+                              );
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: _draft.ambientSoundtrack == track.$1
+                                  ? const Color(0xFF0284C7).withValues(alpha: 0.48)
+                                  : Colors.white.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: _draft.ambientSoundtrack == track.$1
+                                    ? const Color(0xFF38BDF8)
+                                    : Colors.white.withValues(alpha: 0.10),
+                              ),
+                            ),
+                            child: Text(
+                              track.$2,
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (_draft.ambientSoundtrack == AmbientSoundtrack.customMp3) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _DarkTextField(
+                            controller: _customAudioCtrl,
+                            hint: tr ? 'MP3 URL veya dosya adı' : 'MP3 URL or filename',
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.tonalIcon(
+                          onPressed: _pickLocalMp3,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.30),
+                            foregroundColor: const Color(0xFF7DD3FC),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                          ),
+                          icon: const Icon(Icons.audio_file_outlined, size: 16),
+                          label: Text(
+                            tr ? 'MP3 Seç' : 'Pick MP3',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          tr ? 'Ortam Sesi Seviyesi' : 'Ambient Audio Volume',
+                          style: const TextStyle(fontSize: 11.5, color: Colors.white70),
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: _toggleAudioPreview,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _audioPreviewPlaying
+                                ? const Color(0xFFEF4444).withValues(alpha: 0.25)
+                                : const Color(0xFF0284C7).withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(9),
+                            border: Border.all(
+                              color: _audioPreviewPlaying ? const Color(0xFFFCA5A5) : const Color(0xFF38BDF8),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _audioPreviewPlaying ? Icons.stop_rounded : Icons.volume_up_rounded,
+                                size: 13,
+                                color: Colors.white,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _audioPreviewPlaying ? (tr ? 'Durdur' : 'Stop') : (tr ? 'Sesi Dinle' : 'Test Audio'),
+                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '%${(_draft.ambientVolume * 100).round()}',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF7DD3FC)),
+                      ),
+                    ],
+                  ),
+                  Slider(
+                    value: _draft.ambientVolume,
+                    min: 0.0,
+                    max: 1.0,
+                    divisions: 20,
+                    activeColor: const Color(0xFF38BDF8),
+                    onChanged: (v) {
+                      setState(() => _draft = _draft.copyWith(ambientVolume: v));
+                      if (_audioPreviewPlaying) {
+                        AmbientAudioService.setVolume(v);
+                      }
+                    },
+                  ),
+                  _MiniToggleTile(
+                    label: tr ? 'Üst Kayan Yazı Şarkı İsmi' : 'Top Marquee Track Name',
+                    value: _draft.marqueeTrackEnabled,
+                    activeColor: const Color(0xFF38BDF8),
+                    onTap: () {
+                      _hapticTap();
+                      setState(() => _draft = _draft.copyWith(marqueeTrackEnabled: !_draft.marqueeTrackEnabled));
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // Live Music Equalizer Mode + 3 Visual Types
+            Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10B981).withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.28)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _MiniToggleTile(
+                    label: tr ? '🎚️ Canlı Müzik Ekolayzır Modu' : '🎚️ Live Music Equalizer Mode',
+                    value: _draft.equalizerEnabled,
+                    activeColor: const Color(0xFF10B981),
+                    onTap: () {
+                      _hapticTap();
+                      setState(() => _draft = _draft.copyWith(equalizerEnabled: !_draft.equalizerEnabled));
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    tr ? 'Ekolayzır Görsel Tipi:' : 'Equalizer Visual Style:',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.72)),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      for (final eq in eqStyles) ...[
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              _hapticTap();
+                              setState(() => _draft = _draft.copyWith(equalizerStyle: eq.$1, equalizerEnabled: true));
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(right: 5),
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: _draft.equalizerStyle == eq.$1 && _draft.equalizerEnabled
+                                    ? const Color(0xFF10B981).withValues(alpha: 0.22)
+                                    : Colors.white.withValues(alpha: 0.04),
+                                borderRadius: BorderRadius.circular(11),
+                                border: Border.all(
+                                  color: _draft.equalizerStyle == eq.$1 && _draft.equalizerEnabled
+                                      ? const Color(0xFF34D399)
+                                      : Colors.white.withValues(alpha: 0.10),
+                                ),
+                              ),
+                              child: Column(
+                                children: [
+                                  Text(
+                                    eq.$2,
+                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    eq.$3,
+                                    style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.62)),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // Built-in Display Brightness Slider + Live Preview + 4 Presets
+            Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.035),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        tr ? '☀️ Dahili Ekran Aydınlık Ayarı' : '☀️ Built-In Display Brightness',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFFCD34D)),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: (1.0 - (_draft.displayBrightness / 100.0)) * 0.72),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.45)),
+                        ),
+                        child: Text(
+                          '21:45 · ${_liveTargetTemp.toStringAsFixed(1)}° (%${_draft.displayBrightness})',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white.withValues(alpha: 0.35 + (_draft.displayBrightness / 100.0) * 0.65),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Slider(
+                    value: _draft.displayBrightness.toDouble(),
+                    min: 10,
+                    max: 100,
+                    divisions: 18,
+                    activeColor: const Color(0xFFF59E0B),
+                    onChanged: (v) => setState(() => _draft = _draft.copyWith(displayBrightness: v.round())),
+                  ),
+                  Row(
+                    children: [
+                      for (final bp in brightnessPresets) ...[
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              _hapticTap();
+                              setState(() => _draft = _draft.copyWith(displayBrightness: bp.$1));
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(right: 4),
+                              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 3),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: _draft.displayBrightness == bp.$1
+                                    ? const Color(0xFFF59E0B).withValues(alpha: 0.25)
+                                    : Colors.white.withValues(alpha: 0.05),
+                                borderRadius: BorderRadius.circular(9),
+                                border: Border.all(
+                                  color: _draft.displayBrightness == bp.$1
+                                      ? const Color(0xFFFBBF24)
+                                      : Colors.transparent,
+                                ),
+                              ),
+                              child: Text(
+                                bp.$2,
+                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            // Screen Sleep / Auto-Off Timeout + OLED Pixel Protection
+            Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.03),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    tr ? '⏱️ Ekran Uyku / Kapanma Süresi' : '⏱️ Display Sleep Timeout',
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.white),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final sl in sleepOptions)
+                        GestureDetector(
+                          onTap: () {
+                            _hapticTap();
+                            setState(() => _draft = _draft.copyWith(displaySleepMinutes: sl.$1));
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: _draft.displaySleepMinutes == sl.$1
+                                  ? const Color(0xFFF59E0B).withValues(alpha: 0.26)
+                                  : Colors.white.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(9),
+                              border: Border.all(
+                                color: _draft.displaySleepMinutes == sl.$1
+                                    ? const Color(0xFFFBBF24)
+                                    : Colors.white.withValues(alpha: 0.10),
+                              ),
+                            ),
+                            child: Text(
+                              sl.$2,
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  _MiniToggleTile(
+                    label: tr ? '🛡️ OLED Piksel Koruma (60 sn Kaydırma)' : '🛡️ OLED Pixel Protection (60s Drift)',
+                    value: _draft.oledPixelShiftEnabled,
+                    activeColor: const Color(0xFF10B981),
+                    onTap: () {
+                      _hapticTap();
+                      setState(() => _draft = _draft.copyWith(oledPixelShiftEnabled: !_draft.oledPixelShiftEnabled));
+                    },
+                  ),
+                ],
+              ),
             ),
           ],
         );
@@ -940,12 +1746,219 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
 
       case SettingsItemId.haptic:
       case SettingsItemId.bootCeremony:
-      case SettingsItemId.termoBot:
         return Text(
           tr
               ? 'Üstteki hızlı anahtar ile özelliği dilediğiniz zaman açıp kapatabilir, Ayarları Kaydet ile cihaza yazabilirsiniz.'
               : 'Use the toggle above and tap Save Settings to store this preference on device.',
           style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.65)),
+        );
+
+      case SettingsItemId.termoBot:
+        const idleOptions = [(15, '15 sn'), (30, '30 sn'), (60, '1 dk'), (120, '2 dk'), (300, '5 dk')];
+        final bgOptions = [
+          (ScreensaverBackdrop.oledBlack, tr ? 'Saf OLED Siyah' : 'Pure OLED Black', tr ? 'Tam karanlık' : 'True dark', const Color(0xFF18181B)),
+          (ScreensaverBackdrop.termoLab, 'Termo Lab', tr ? 'Siber mavi grid' : 'Cyber blue grid', const Color(0xFF0C4A6E)),
+          (ScreensaverBackdrop.warmHearth, tr ? 'Sıcak Köşe' : 'Warm Hearth', tr ? 'Köz ve şömine' : 'Embers & hearth', const Color(0xFF7C2D12)),
+          (ScreensaverBackdrop.nightNebula, 'Gece Nebula', tr ? 'Derin obsidyen' : 'Deep obsidian', const Color(0xFF3B0764)),
+          (ScreensaverBackdrop.custom, tr ? 'Özel / Cihaz' : 'Custom / Accent', tr ? 'Tema rengi' : 'Accent color', widget.accentColor),
+        ];
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            OutlinedButton.icon(
+              onPressed: () {
+                _hapticTap();
+                widget.onSaveSettings(_draft);
+                Navigator.of(context).pop();
+                widget.onOpenScreensaverPreview();
+              },
+              icon: const Icon(Icons.play_arrow_rounded, size: 18, color: Color(0xFFFBBF24)),
+              label: Text(
+                tr ? 'Ekran Koruyucuyu Şimdi Başlat (Önizle)' : 'Launch Screensaver Preview',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
+              ),
+              style: OutlinedButton.styleFrom(
+                backgroundColor: Colors.white.withValues(alpha: 0.05),
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              tr ? 'Maskot Karakteri Seçimi:' : 'Mascot Character:',
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 84,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: MascotCharacter.values.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, idx) {
+                  final ch = MascotCharacter.values[idx];
+                  final meta = MascotMeta.of(ch);
+                  final selected = _draft.mascotCharacter == ch;
+                  return GestureDetector(
+                    onTap: () {
+                      _hapticTap();
+                      setState(() => _draft = _draft.copyWith(mascotCharacter: ch));
+                    },
+                    child: Container(
+                      width: 86,
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: selected ? const Color(0xFFF59E0B).withValues(alpha: 0.16) : Colors.white.withValues(alpha: 0.04),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: selected ? const Color(0xFFF59E0B) : Colors.white.withValues(alpha: 0.10),
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(meta.icon, size: 22, color: meta.color),
+                          const SizedBox(height: 4),
+                          Text(meta.name, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
+                          Text(
+                            tr ? meta.roleTr : meta.roleEn,
+                            style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.55)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              tr ? 'Otomatik Devreye Girme Süresi (Boşta Kalma):' : 'Idle Timeout:',
+              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.80)),
+            ),
+            const SizedBox(height: 7),
+            Row(
+              children: [
+                for (final opt in idleOptions) ...[
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        _hapticTap();
+                        setState(() => _draft = _draft.copyWith(screensaverIdleSeconds: opt.$1));
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.only(right: 4),
+                        padding: const EdgeInsets.symmetric(vertical: 7),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _draft.screensaverIdleSeconds == opt.$1
+                              ? const Color(0xFFF59E0B).withValues(alpha: 0.22)
+                              : Colors.white.withValues(alpha: 0.04),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: _draft.screensaverIdleSeconds == opt.$1
+                                ? const Color(0xFFF59E0B)
+                                : Colors.white.withValues(alpha: 0.10),
+                          ),
+                        ),
+                        child: Text(
+                          opt.$2,
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              tr ? 'Ekran Koruyucu Arka Planı (Önizlemeli):' : 'Screensaver Backdrop:',
+              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.80)),
+            ),
+            const SizedBox(height: 7),
+            SizedBox(
+              height: 78,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: bgOptions.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, idx) {
+                  final bg = bgOptions[idx];
+                  final selected = _draft.screensaverBackdrop == bg.$1;
+                  return GestureDetector(
+                    onTap: () {
+                      _hapticTap();
+                      setState(() => _draft = _draft.copyWith(screensaverBackdrop: bg.$1));
+                    },
+                    child: Container(
+                      width: 96,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: bg.$4.withValues(alpha: 0.45),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: selected ? const Color(0xFFFBBF24) : Colors.white.withValues(alpha: 0.12),
+                          width: selected ? 1.6 : 1.0,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            bg.$2,
+                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            bg.$3,
+                            style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.65)),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _MiniToggleTile(
+                    label: tr ? 'Arka Plan Blur' : 'Blur Background',
+                    value: _draft.screensaverBlurBg,
+                    activeColor: const Color(0xFFF59E0B),
+                    onTap: () {
+                      _hapticTap();
+                      setState(() => _draft = _draft.copyWith(screensaverBlurBg: !_draft.screensaverBlurBg));
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _MiniToggleTile(
+                    label: tr ? 'Maskot Sesleri' : 'Mascot Sounds',
+                    value: _draft.mascotSoundsEnabled,
+                    activeColor: const Color(0xFF10B981),
+                    onTap: () {
+                      _hapticTap();
+                      setState(() => _draft = _draft.copyWith(mascotSoundsEnabled: !_draft.mascotSoundsEnabled));
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ],
         );
 
       case SettingsItemId.aiPhoneCall:
@@ -1111,6 +2124,65 @@ class _DarkTextField extends StatelessWidget {
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniToggleTile extends StatelessWidget {
+  final String label;
+  final bool value;
+  final Color activeColor;
+  final VoidCallback onTap;
+
+  const _MiniToggleTile({
+    required this.label,
+    required this.value,
+    required this.activeColor,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: value ? activeColor.withValues(alpha: 0.45) : Colors.white.withValues(alpha: 0.10),
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Colors.white),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: value ? activeColor : Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Text(
+                value ? 'Açık' : 'Kapalı',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: value ? Colors.white : Colors.white60,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

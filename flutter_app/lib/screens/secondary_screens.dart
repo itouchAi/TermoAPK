@@ -6,6 +6,9 @@ class WeatherScreen extends StatefulWidget {
   final String locationName;
   final ThemePaletteSpec palette;
   final VoidCallback onApplyEcoCompensation;
+  final bool weatherAlertsEnabled;
+  final ValueChanged<bool>? onToggleWeatherAlerts;
+  final ValueChanged<String>? onChangeLocation;
 
   const WeatherScreen({
     super.key,
@@ -13,6 +16,9 @@ class WeatherScreen extends StatefulWidget {
     required this.locationName,
     required this.palette,
     required this.onApplyEcoCompensation,
+    this.weatherAlertsEnabled = true,
+    this.onToggleWeatherAlerts,
+    this.onChangeLocation,
   });
 
   @override
@@ -21,172 +27,511 @@ class WeatherScreen extends StatefulWidget {
 
 class _WeatherScreenState extends State<WeatherScreen> {
   int _selectedDay = 0;
-  bool _autoCompensate = true;
+  bool _hourlyExpanded = false;
+  String? _toastMsg;
 
-  static const _forecast = [
-    ('Bugün', 'Today', '18 Kas', 'Parçalı Bulutlu', 'Partly Cloudy', 19, 12, '—', Icons.wb_cloudy_outlined),
-    ('Yarın', 'Tomorrow', '19 Kas', 'Güneşli', 'Sunny', 21, 13, '—', Icons.wb_sunny_outlined),
-    ('Cmt', 'Sat', '20 Kas', 'Sağanak Yağış', 'Showers', 15, 9, '%75', Icons.umbrella_outlined),
-    ('Paz', 'Sun', '21 Kas', 'Çok Bulutlu', 'Cloudy', 14, 8, '%30', Icons.cloud_outlined),
-    ('Pzt', 'Mon', '22 Kas', 'Açık & Serin', 'Clear', 17, 10, '—', Icons.wb_twilight_rounded),
-  ];
+  static const _locations = ['Ev · İstanbul', 'Ev (Kadıköy)', 'Yazlık · İzmir', 'Ofis · Ankara'];
 
-  @override
-  Widget build(BuildContext context) {
-    final isLandscape = MediaQuery.of(context).size.width > MediaQuery.of(context).size.height;
-    final p = widget.palette;
-    final skyAccent = p.isLight ? const Color(0xFF0284C7) : const Color(0xFF7DD3FC);
-
-    final summaryCard = Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: p.cardBg,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: p.cardBorder),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(widget.locationName, style: TextStyle(fontSize: 12, color: skyAccent, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 2),
-                  Text(
-                    widget.lang == LangCode.tr ? 'Dış Ortam & Hava Tahmini' : 'Outdoor Weather',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: p.textPrimary),
-                  ),
-                ],
-              ),
-              Text(
-                '18.5°C',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w700,
-                  color: p.textPrimary,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Icon(Icons.water_drop_outlined, size: 14, color: skyAccent),
-              const SizedBox(width: 4),
-              Text('%62', style: TextStyle(fontSize: 12, color: p.textSecondary)),
-              const SizedBox(width: 12),
-              Icon(Icons.air_rounded, size: 14, color: skyAccent),
-              const SizedBox(width: 4),
-              Text('14 km/s', style: TextStyle(fontSize: 12, color: p.textSecondary)),
-            ],
-          ),
-          Divider(height: 22, color: p.cardBorder),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                widget.lang == LangCode.tr ? 'Dış Isı Kompanzasyonu' : 'Weather Compensation',
-                style: TextStyle(fontSize: 12, color: p.textSecondary),
-              ),
-              TextButton(
-                onPressed: () {
-                  setState(() => _autoCompensate = !_autoCompensate);
-                  widget.onApplyEcoCompensation();
-                },
-                style: TextButton.styleFrom(
-                  backgroundColor: _autoCompensate
-                      ? const Color(0xFF0EA5E9).withValues(alpha: 0.22)
-                      : p.cardBg,
-                  foregroundColor: _autoCompensate ? skyAccent : p.textSecondary,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                child: Text(
-                  _autoCompensate
-                      ? (widget.lang == LangCode.tr ? 'Aktif' : 'Active')
-                      : (widget.lang == LangCode.tr ? 'Kapalı' : 'Off'),
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-
-    final forecastCard = Container(
-      decoration: BoxDecoration(
-        color: p.cardBg,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: p.cardBorder),
-      ),
-      child: Column(
-        children: [
-          for (int i = 0; i < _forecast.length; i++) ...[
-            if (i > 0) Divider(height: 1, color: p.cardBorder),
-            InkWell(
-              onTap: () => setState(() => _selectedDay = i),
-              borderRadius: BorderRadius.circular(14),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-                color: _selectedDay == i ? const Color(0xFF38BDF8).withValues(alpha: 0.14) : Colors.transparent,
-                child: Row(
-                  children: [
-                    Icon(_forecast[i].$9, size: 19, color: skyAccent),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${widget.lang == LangCode.tr ? _forecast[i].$1 : _forecast[i].$2} · ${_forecast[i].$3}',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.textPrimary),
-                          ),
-                          Text(
-                            widget.lang == LangCode.tr ? _forecast[i].$4 : _forecast[i].$5,
-                            style: TextStyle(fontSize: 11, color: p.textSecondary),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Text(_forecast[i].$8, style: TextStyle(fontSize: 12, color: skyAccent)),
-                    const SizedBox(width: 12),
-                    Text('${_forecast[i].$6}°', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.textPrimary)),
-                    const SizedBox(width: 8),
-                    Text('${_forecast[i].$7}°', style: TextStyle(fontSize: 12, color: p.textSecondary)),
-                  ],
-                ),
+  void _showPrecautionsModal(bool tr, ThemePaletteSpec p) {
+    showDialog<void>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: p.sheetBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: Row(
+          children: [
+            const Icon(Icons.shield_outlined, color: Color(0xFFF59E0B), size: 22),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                tr ? 'Akıllı Tedbir & Kompanzasyon' : 'Smart Weather Precautions',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: p.textPrimary),
               ),
             ),
           ],
+        ),
+        content: Text(
+          tr
+              ? 'Yarın ve Pazartesi için %90 üzeri yağış ve gece 11-13°C ısı düşüşü öngörülüyor. Kombi su sıcaklığı modülasyon eğrisi +%6 ön ısıtmaya ve Eko dengelemeye ayarlanabilir.'
+              : 'Over 90% rain and 11-13°C night drop expected. Boiler modulation curve can apply +6% pre-heat and Eco compensation.',
+          style: TextStyle(fontSize: 13, color: p.textSecondary, height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(),
+            child: Text(tr ? 'Kapat' : 'Close'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.white),
+            onPressed: () {
+              Navigator.of(dCtx).pop();
+              widget.onApplyEcoCompensation();
+              setState(() {
+                _toastMsg = tr ? 'Eko dış ısı kompanzasyonu uygulandı.' : 'Eco weather compensation applied.';
+              });
+            },
+            child: Text(tr ? 'Eko Önlemi Uygula' : 'Apply Eco Mode'),
+          ),
         ],
       ),
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    final isLandscape = width > MediaQuery.of(context).size.height;
+    final wideRow = width >= 660;
+    final tr = widget.lang == LangCode.tr;
+    final p = widget.palette;
+    final days = DailyWeatherForecast.sample5Days;
+    final activeDay = days[_selectedDay];
+    final skyAccent = p.isLight ? const Color(0xFF0284C7) : const Color(0xFF7DD3FC);
+    final amberAccent = const Color(0xFFF59E0B);
+
+    Widget buildDayCard(int i) {
+      final day = days[i];
+      final selected = i == _selectedDay;
+      return GestureDetector(
+        onTap: () {
+          setState(() {
+            if (_selectedDay == i) {
+              _hourlyExpanded = !_hourlyExpanded;
+            } else {
+              _selectedDay = i;
+              _hourlyExpanded = true;
+            }
+          });
+        },
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: selected
+                ? LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      const Color(0xFFEA580C).withValues(alpha: 0.72),
+                      const Color(0xFF7C2D12).withValues(alpha: 0.65),
+                    ],
+                  )
+                : null,
+            color: selected ? null : p.cardBg,
+            border: Border.all(
+              color: selected ? amberAccent : p.cardBorder,
+              width: selected ? 1.4 : 1.0,
+            ),
+            boxShadow: selected
+                ? [BoxShadow(color: amberAccent.withValues(alpha: 0.25), blurRadius: 16)]
+                : null,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Flexible(
+                    child: Text(
+                      tr ? day.dayTr : day.dayEn,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: selected ? Colors.white : p.textPrimary,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (selected) ...[
+                    const SizedBox(width: 4),
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFFBBF24)),
+                    ),
+                  ],
+                ],
+              ),
+              Text(
+                day.dateLabel,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: selected ? Colors.white70 : p.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Icon(day.icon, size: 24, color: selected ? Colors.white : skyAccent),
+              const SizedBox(height: 8),
+              Text(
+                tr ? day.conditionTr : day.conditionEn,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: selected ? Colors.white.withValues(alpha: 0.90) : p.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    '${day.highTemp}°',
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      color: selected ? Colors.white : p.textPrimary,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${day.lowTemp}°',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: selected ? Colors.white70 : p.textSecondary,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: selected ? Colors.white : amberAccent.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  day.rainChance,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: selected ? const Color(0xFF9A3412) : amberAccent,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       child: Center(
         child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: isLandscape ? 920 : 440),
-          child: isLandscape
-              ? Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          constraints: BoxConstraints(maxWidth: isLandscape ? 920 : 460),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.wb_sunny_outlined, size: 17, color: Color(0xFFFBBF24)),
+                        const SizedBox(width: 7),
+                        Flexible(
+                          child: Text(
+                            tr ? 'Bölgesel Hava Durumu & 5 Günlük Tahmin' : 'Regional Weather & 5-Day Forecast',
+                            style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: p.textPrimary),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    tr ? 'Saatlik için güne dokunun' : 'Tap day for hourly',
+                    style: TextStyle(fontSize: 10.5, color: p.textSecondary),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+
+              // Top Location, Alerts & Current Weather Strip
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  PopupMenuButton<String>(
+                    color: p.sheetBg,
+                    onSelected: (loc) => widget.onChangeLocation?.call(loc),
+                    itemBuilder: (_) => [
+                      for (final loc in _locations)
+                        PopupMenuItem(
+                          value: loc,
+                          child: Text(loc, style: TextStyle(color: p.textPrimary, fontSize: 13)),
+                        ),
+                    ],
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: p.cardBg,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: p.cardBorder),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.location_on_outlined, size: 14, color: Color(0xFFF43F5E)),
+                          const SizedBox(width: 5),
+                          Text(
+                            widget.locationName,
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.textPrimary),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: p.textSecondary),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      GestureDetector(
+                        onTap: () => widget.onToggleWeatherAlerts?.call(!widget.weatherAlertsEnabled),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: widget.weatherAlertsEnabled
+                                ? amberAccent.withValues(alpha: 0.16)
+                                : p.cardBg,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: widget.weatherAlertsEnabled ? amberAccent.withValues(alpha: 0.50) : p.cardBorder,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.notifications_active_outlined,
+                                size: 13,
+                                color: widget.weatherAlertsEnabled ? amberAccent : p.textSecondary,
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                widget.weatherAlertsEnabled
+                                    ? (tr ? 'Hava Bildirimleri Açık' : 'Weather Alerts On')
+                                    : (tr ? 'Bildirimler Kapalı' : 'Alerts Off'),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: widget.weatherAlertsEnabled ? amberAccent : p.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        '17.7°C',
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w700,
+                          color: p.textPrimary,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text('%58 · 15 km/s', style: TextStyle(fontSize: 11, color: skyAccent)),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              // 5-Day Horizontal Cards
+              if (wideRow)
+                Row(
                   children: [
-                    Expanded(flex: 5, child: summaryCard),
-                    const SizedBox(width: 14),
-                    Expanded(flex: 7, child: forecastCard),
+                    for (int i = 0; i < days.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 8),
+                      Expanded(child: buildDayCard(i)),
+                    ],
                   ],
                 )
-              : Column(
+              else
+                SizedBox(
+                  height: 162,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: days.length,
+                    separatorBuilder: (_, __) => const SizedBox(width: 8),
+                    itemBuilder: (_, i) => SizedBox(width: 114, child: buildDayCard(i)),
+                  ),
+                ),
+
+              // Hourly Forecast Drawer / Panel on Day Tap
+              AnimatedCrossFade(
+                duration: const Duration(milliseconds: 220),
+                crossFadeState: _hourlyExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                firstChild: const SizedBox.shrink(),
+                secondChild: Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: p.cardBg,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: amberAccent.withValues(alpha: 0.40)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            '${tr ? activeDay.dayTr : activeDay.dayEn} (${activeDay.dateLabel}) · ${tr ? 'Saat Bazlı Tahmin' : 'Hourly Forecast'}',
+                            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: p.textPrimary),
+                          ),
+                          GestureDetector(
+                            onTap: () => setState(() => _hourlyExpanded = false),
+                            child: Icon(Icons.keyboard_arrow_up_rounded, color: p.textSecondary, size: 20),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 98,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: activeDay.hourly.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 8),
+                          itemBuilder: (_, hi) {
+                            final h = activeDay.hourly[hi];
+                            return Container(
+                              width: 88,
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: p.scaffoldBg.withValues(alpha: 0.45),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: p.cardBorder),
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(h.hour, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: p.textSecondary)),
+                                  Icon(h.icon, size: 18, color: skyAccent),
+                                  Text(
+                                    '${h.temp}°C',
+                                    style: TextStyle(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: p.textPrimary,
+                                      fontFeatures: const [FontFeature.tabularFigures()],
+                                    ),
+                                  ),
+                                  Text(
+                                    '${h.rainChance} · ${h.windKmh}',
+                                    style: TextStyle(fontSize: 9.5, color: p.textSecondary),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // Bottom 3-Hour Notification & Smart Precautions Banner
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: amberAccent.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: amberAccent.withValues(alpha: 0.35)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    summaryCard,
-                    const SizedBox(height: 12),
-                    forecastCard,
+                    Row(
+                      children: [
+                        Icon(Icons.warning_amber_rounded, size: 18, color: amberAccent),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                tr
+                                    ? '3 Saatlik Bildirim & Akıllı Tedbir Sistemi Devrede'
+                                    : '3-Hour Alert & Smart Precaution Active',
+                                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: amberAccent),
+                              ),
+                              Text(
+                                tr
+                                    ? 'Önümüzdeki günlerde yağış ve ani ısı düşüşü bekleniyor. Tedbirler hazır.'
+                                    : 'Rain and sudden temperature drop ahead. Smart precautions ready.',
+                                style: TextStyle(fontSize: 10.5, color: p.textSecondary),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        FilledButton(
+                          onPressed: () => _showPrecautionsModal(tr, p),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: amberAccent,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          child: Text(tr ? 'Önlemleri Gör' : 'View Precautions', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton(
+                          onPressed: () {
+                            setState(() {
+                              _toastMsg = tr
+                                  ? 'Test bildirimi gönderildi: Yarın yağış & %90 nem uyarısı.'
+                                  : 'Test alert sent: Rain & 90% humidity advisory.';
+                            });
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: p.textPrimary,
+                            side: BorderSide(color: p.cardBorder),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          child: Text(tr ? 'Test Bildirimi' : 'Test Alert', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                        ),
+                      ],
+                    ),
+                    if (_toastMsg != null) ...[
+                      const SizedBox(height: 6),
+                      Text(_toastMsg!, style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.w600)),
+                    ],
                   ],
                 ),
+              ),
+            ],
+          ),
         ),
       ),
     );
