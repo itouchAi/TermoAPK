@@ -107,9 +107,8 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     _hapticTap();
     setState(() {
       final list = List<SettingsItemId>.from(_draft.menuOrder);
-      if (newIdx > oldIdx) newIdx -= 1;
       final item = list.removeAt(oldIdx);
-      list.insert(newIdx, item);
+      list.insert(newIdx.clamp(0, list.length), item);
       _draft = _draft.copyWith(menuOrder: list);
     });
   }
@@ -334,7 +333,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 child: ReorderableListView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
                   buildDefaultDragHandles: false,
-                  onReorder: _moveItem,
+                  onReorderItem: _moveItem,
                   header: _buildLocationLanguageBar(),
                   itemCount: _draft.menuOrder.length,
                   itemBuilder: (context, idx) {

@@ -747,7 +747,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           children: [
                             Switch(
                               value: slot.enabled,
-                              activeColor: const Color(0xFF10B981),
+                              activeThumbColor: const Color(0xFF10B981),
                               onChanged: (v) => widget.onUpdateSlot(slot.id, enabled: v),
                             ),
                             const SizedBox(width: 6),
