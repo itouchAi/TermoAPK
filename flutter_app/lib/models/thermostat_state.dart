@@ -599,6 +599,12 @@ enum ScreensaverBackdrop {
   custom,
 }
 
+enum BootCeremonyStyle {
+  thermalPulse,
+  precisionSweep,
+  minimalRadar,
+}
+
 class HourlyWeatherSlot {
   final String hour;
   final int temp;
@@ -774,6 +780,9 @@ class SystemSettingsState {
   final bool hapticEnabled;
   final int hapticStrength;
   final bool bootCeremonyEnabled;
+  final BootCeremonyStyle bootCeremonyStyle;
+  final int bootCeremonyDurationMs;
+  final bool bootSoundChimeEnabled;
   final bool termoBotEnabled;
   final MascotCharacter mascotCharacter;
   final int screensaverIdleSeconds;
@@ -819,6 +828,9 @@ class SystemSettingsState {
     required this.hapticEnabled,
     required this.hapticStrength,
     required this.bootCeremonyEnabled,
+    required this.bootCeremonyStyle,
+    required this.bootCeremonyDurationMs,
+    required this.bootSoundChimeEnabled,
     required this.termoBotEnabled,
     required this.mascotCharacter,
     required this.screensaverIdleSeconds,
@@ -879,6 +891,9 @@ class SystemSettingsState {
         hapticEnabled: true,
         hapticStrength: 80,
         bootCeremonyEnabled: true,
+        bootCeremonyStyle: BootCeremonyStyle.thermalPulse,
+        bootCeremonyDurationMs: 1800,
+        bootSoundChimeEnabled: true,
         termoBotEnabled: true,
         mascotCharacter: MascotCharacter.termoBot,
         screensaverIdleSeconds: 30,
@@ -949,6 +964,9 @@ class SystemSettingsState {
     bool? hapticEnabled,
     int? hapticStrength,
     bool? bootCeremonyEnabled,
+    BootCeremonyStyle? bootCeremonyStyle,
+    int? bootCeremonyDurationMs,
+    bool? bootSoundChimeEnabled,
     bool? termoBotEnabled,
     MascotCharacter? mascotCharacter,
     int? screensaverIdleSeconds,
@@ -994,6 +1012,9 @@ class SystemSettingsState {
       hapticEnabled: hapticEnabled ?? this.hapticEnabled,
       hapticStrength: (hapticStrength ?? this.hapticStrength).clamp(40, 100),
       bootCeremonyEnabled: bootCeremonyEnabled ?? this.bootCeremonyEnabled,
+      bootCeremonyStyle: bootCeremonyStyle ?? this.bootCeremonyStyle,
+      bootCeremonyDurationMs: (bootCeremonyDurationMs ?? this.bootCeremonyDurationMs).clamp(900, 3500),
+      bootSoundChimeEnabled: bootSoundChimeEnabled ?? this.bootSoundChimeEnabled,
       termoBotEnabled: termoBotEnabled ?? this.termoBotEnabled,
       mascotCharacter: mascotCharacter ?? this.mascotCharacter,
       screensaverIdleSeconds: screensaverIdleSeconds ?? this.screensaverIdleSeconds,
@@ -1040,6 +1061,9 @@ class SystemSettingsState {
         'hapticEnabled': hapticEnabled,
         'hapticStrength': hapticStrength,
         'bootCeremonyEnabled': bootCeremonyEnabled,
+        'bootCeremonyStyle': bootCeremonyStyle.name,
+        'bootCeremonyDurationMs': bootCeremonyDurationMs,
+        'bootSoundChimeEnabled': bootSoundChimeEnabled,
         'termoBotEnabled': termoBotEnabled,
         'mascotCharacter': mascotCharacter.name,
         'screensaverIdleSeconds': screensaverIdleSeconds,
@@ -1136,6 +1160,9 @@ class SystemSettingsState {
       hapticEnabled: (map['hapticEnabled'] as bool?) ?? defaults.hapticEnabled,
       hapticStrength: (map['hapticStrength'] as int?) ?? defaults.hapticStrength,
       bootCeremonyEnabled: (map['bootCeremonyEnabled'] as bool?) ?? defaults.bootCeremonyEnabled,
+      bootCeremonyStyle: _parseEnum(map['bootCeremonyStyle'] as String?, BootCeremonyStyle.values, defaults.bootCeremonyStyle),
+      bootCeremonyDurationMs: (map['bootCeremonyDurationMs'] as int?) ?? defaults.bootCeremonyDurationMs,
+      bootSoundChimeEnabled: (map['bootSoundChimeEnabled'] as bool?) ?? defaults.bootSoundChimeEnabled,
       termoBotEnabled: (map['termoBotEnabled'] as bool?) ?? defaults.termoBotEnabled,
       mascotCharacter: _parseEnum(map['mascotCharacter'] as String?, MascotCharacter.values, defaults.mascotCharacter),
       screensaverIdleSeconds: (map['screensaverIdleSeconds'] as int?) ?? defaults.screensaverIdleSeconds,

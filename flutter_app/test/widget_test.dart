@@ -61,6 +61,9 @@ void main() {
       notifyChimeEnabled: false,
       lastNotificationAt: '21:45',
       hapticStrength: 95,
+      bootCeremonyStyle: BootCeremonyStyle.precisionSweep,
+      bootCeremonyDurationMs: 2400,
+      bootSoundChimeEnabled: false,
       mascotCharacter: MascotCharacter.mirnav,
       screensaverIdleSeconds: 120,
       screensaverBackdrop: ScreensaverBackdrop.termoLab,
@@ -87,11 +90,17 @@ void main() {
     expect(restored.notifyChimeEnabled, isFalse);
     expect(restored.lastNotificationAt, '21:45');
     expect(restored.hapticStrength, 95);
+    expect(restored.bootCeremonyStyle, BootCeremonyStyle.precisionSweep);
+    expect(restored.bootCeremonyDurationMs, 2400);
+    expect(restored.bootSoundChimeEnabled, isFalse);
     expect(restored.mascotCharacter, MascotCharacter.mirnav);
     expect(restored.screensaverIdleSeconds, 120);
     expect(restored.screensaverBackdrop, ScreensaverBackdrop.termoLab);
     expect(restored.screensaverBlurBg, isTrue);
     expect(restored.mascotSoundsEnabled, isFalse);
+
+    final clamped = initial.copyWith(bootCeremonyDurationMs: 9000);
+    expect(clamped.bootCeremonyDurationMs, 3500);
   });
 
   test('DailyWeatherForecast.sample5Days includes 5 days with hourly slots', () {

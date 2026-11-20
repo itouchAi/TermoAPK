@@ -25,6 +25,7 @@ Future<void> showSystemSettingsSheet({
   required ValueChanged<SystemSettingsState> onSaveSettings,
   required VoidCallback onOpenAmbient,
   required VoidCallback onOpenScreensaverPreview,
+  required VoidCallback onReplayBootCeremony,
   required VoidCallback onResetTelemetryHistory,
 }) {
   return showModalBottomSheet<void>(
@@ -45,6 +46,7 @@ Future<void> showSystemSettingsSheet({
       onSaveSettings: onSaveSettings,
       onOpenAmbient: onOpenAmbient,
       onOpenScreensaverPreview: onOpenScreensaverPreview,
+      onReplayBootCeremony: onReplayBootCeremony,
       onResetTelemetryHistory: onResetTelemetryHistory,
     ),
   );
@@ -64,6 +66,7 @@ class _SystemSettingsModal extends StatefulWidget {
   final ValueChanged<SystemSettingsState> onSaveSettings;
   final VoidCallback onOpenAmbient;
   final VoidCallback onOpenScreensaverPreview;
+  final VoidCallback onReplayBootCeremony;
   final VoidCallback onResetTelemetryHistory;
 
   const _SystemSettingsModal({
@@ -80,6 +83,7 @@ class _SystemSettingsModal extends StatefulWidget {
     required this.onSaveSettings,
     required this.onOpenAmbient,
     required this.onOpenScreensaverPreview,
+    required this.onReplayBootCeremony,
     required this.onResetTelemetryHistory,
   });
 
@@ -2134,11 +2138,171 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
         );
 
       case SettingsItemId.bootCeremony:
-        return Text(
-          tr
-              ? 'Üstteki hızlı anahtar ile özelliği dilediğiniz zaman açıp kapatabilir, Ayarları Kaydet ile cihaza yazabilirsiniz.'
-              : 'Use the toggle above and tap Save Settings to store this preference on device.',
-          style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.65)),
+        final bootStyles = [
+          (BootCeremonyStyle.thermalPulse, tr ? 'Termal Nabız' : 'Thermal Pulse', Icons.waves_rounded),
+          (BootCeremonyStyle.precisionSweep, tr ? 'Kadran Tarama' : 'Dial Sweep', Icons.speed_rounded),
+          (BootCeremonyStyle.minimalRadar, tr ? 'Minimal Radar' : 'Minimal Radar', Icons.radar_rounded),
+        ];
+        final secLabel = '${(_draft.bootCeremonyDurationMs / 1000.0).toStringAsFixed(1)} sn';
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                _InfoBadge(
+                  text: '⏱️ ${tr ? 'Süre' : 'Duration'}: $secLabel',
+                  color: const Color(0xFFF97316),
+                ),
+                _InfoBadge(
+                  text: _draft.bootCeremonyEnabled
+                      ? (tr ? 'Açılışta Aktif' : 'Active on Launch')
+                      : (tr ? 'Açılışta Kapalı' : 'Disabled on Launch'),
+                  color: _draft.bootCeremonyEnabled ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              tr ? 'Kalibrasyon Animasyon Stili:' : 'Calibration Animation Style:',
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFF97316)),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                for (int i = 0; i < bootStyles.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 6),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        _hapticTap();
+                        setState(() => _draft = _draft.copyWith(bootCeremonyStyle: bootStyles[i].$1));
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                        decoration: BoxDecoration(
+                          color: _draft.bootCeremonyStyle == bootStyles[i].$1
+                              ? const Color(0xFFF97316).withValues(alpha: 0.18)
+                              : Colors.white.withValues(alpha: 0.04),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: _draft.bootCeremonyStyle == bootStyles[i].$1
+                                ? const Color(0xFFF97316)
+                                : Colors.white.withValues(alpha: 0.10),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Icon(
+                              bootStyles[i].$3,
+                              size: 18,
+                              color: _draft.bootCeremonyStyle == bootStyles[i].$1
+                                  ? const Color(0xFFFDBA74)
+                                  : Colors.white70,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              bootStyles[i].$2,
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                                color: _draft.bootCeremonyStyle == bootStyles[i].$1 ? Colors.white : Colors.white70,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  tr ? 'Seremoni Süresi' : 'Ceremony Duration',
+                  style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.80)),
+                ),
+                Text(
+                  secLabel,
+                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFFDBA74)),
+                ),
+              ],
+            ),
+            Slider(
+              value: _draft.bootCeremonyDurationMs.toDouble(),
+              min: 900,
+              max: 3500,
+              divisions: 13,
+              activeColor: const Color(0xFFF97316),
+              onChanged: (v) {
+                setState(() => _draft = _draft.copyWith(bootCeremonyDurationMs: v.round()));
+              },
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.music_note_outlined, size: 17, color: Color(0xFFF97316)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          tr ? 'Kalibrasyon Tamamlama Sesi' : 'Calibration Completion Chime',
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Colors.white),
+                        ),
+                        Text(
+                          tr ? 'Kadran hazır olduğunda kısa harmonik ton çalar' : 'Plays short harmonic chime when dial is ready',
+                          style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.55)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: _draft.bootSoundChimeEnabled,
+                    activeThumbColor: const Color(0xFFF97316),
+                    onChanged: (v) {
+                      _hapticTap();
+                      setState(() => _draft = _draft.copyWith(bootSoundChimeEnabled: v));
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () {
+                _hapticTap();
+                widget.onSaveSettings(_draft);
+                Navigator.of(context).pop();
+                widget.onReplayBootCeremony();
+              },
+              icon: const Icon(Icons.replay_rounded, size: 18, color: Color(0xFFF97316)),
+              label: Text(
+                tr ? 'Seremoniyi Şimdi Başlat (Önizle)' : 'Replay Boot Ceremony Now',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFFDBA74)),
+              ),
+              style: OutlinedButton.styleFrom(
+                backgroundColor: const Color(0xFFF97316).withValues(alpha: 0.14),
+                side: BorderSide(color: const Color(0xFFF97316).withValues(alpha: 0.45)),
+                padding: const EdgeInsets.symmetric(vertical: 11),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ],
         );
 
       case SettingsItemId.termoBot:

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,6 +15,7 @@ import 'services/ambient_audio_service.dart';
 import 'services/firebase_sync_service.dart';
 import 'services/hardware_service.dart';
 import 'services/notification_service.dart';
+import 'widgets/boot_ceremony_overlay.dart';
 import 'widgets/flow_tab_bar.dart';
 import 'widgets/overlays.dart';
 import 'widgets/termo_bot.dart';
@@ -83,6 +85,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   Timer? _clockTimer;
   Timer? _idleTimer;
   Timer? _automationTimer;
+  DateTime? _lastWheelNavAt;
+  bool _activeTabCanVertScroll = false;
 
   @override
   void initState() {
@@ -201,9 +205,6 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
     if (bootOn && mounted) {
       setState(() => _showBootCeremony = true);
-      Future.delayed(const Duration(milliseconds: 1100), () {
-        if (mounted) setState(() => _showBootCeremony = false);
-      });
     }
   }
 
@@ -312,12 +313,40 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     if (idx < 0) return;
     _triggerHaptic();
     _resetIdleTimer();
-    setState(() => _activeTab = tab);
+    setState(() {
+      _activeTab = tab;
+      _activeTabCanVertScroll = false;
+    });
     _pageController.animateToPage(
       idx,
       duration: const Duration(milliseconds: 380),
       curve: Curves.easeOutCubic,
     );
+  }
+
+  void _handlePagePointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    if (_ambientMode || _screensaverPreview || _showBootCeremony || _voiceOpen) return;
+    final now = DateTime.now();
+    if (_lastWheelNavAt != null && now.difference(_lastWheelNavAt!).inMilliseconds < 240) {
+      return;
+    }
+    final dx = event.scrollDelta.dx;
+    final dy = event.scrollDelta.dy;
+    var dir = 0;
+    if (dx.abs() > dy.abs() && dx.abs() >= 6.0) {
+      dir = dx > 0 ? 1 : -1;
+    } else if (dy.abs() >= 8.0 && (_activeTab == TabId.termo || !_activeTabCanVertScroll)) {
+      dir = dy > 0 ? 1 : -1;
+    }
+    if (dir == 0) return;
+    final ordered = _visual.orderedTabs;
+    final cur = ordered.indexWhere((t) => t.id == _activeTab);
+    final nextIdx = cur + dir;
+    if (nextIdx >= 0 && nextIdx < ordered.length) {
+      _lastWheelNavAt = now;
+      _selectTab(ordered[nextIdx].id);
+    }
   }
 
   void _changeTarget(double next) {
@@ -705,6 +734,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                            _termoBotIdle = false;
                                            _screensaverPreview = true;
                                          }),
+                                         onReplayBootCeremony: () => setState(() {
+                                           _showBootCeremony = true;
+                                         }),
                                          onResetTelemetryHistory: () {
                                            setState(() {
                                              _schedule = ThermostatMath.defaultSchedule;
@@ -723,44 +755,82 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                            ),
                          ),
 
-                         // Frameless Horizontal Page Carousel synchronized with orderedTabs
+                         // Frameless Wheel-Arc Horizontal Carousel (supports touch, mouse drag & mouse wheel)
                          Expanded(
                            child: Padding(
                              padding: EdgeInsets.only(bottom: (compactLandscape ? 66.0 : 76.0) + media.padding.bottom),
-                             child: PageView.builder(
-                               controller: _pageController,
-                               itemCount: orderedTabs.length,
-                               onPageChanged: (idx) {
-                                 if (idx >= 0 && idx < orderedTabs.length) {
-                                   setState(() => _activeTab = orderedTabs[idx].id);
-                                 }
-                               },
-                               itemBuilder: (context, idx) {
-                                 final meta = orderedTabs[idx];
-                                 return AnimatedBuilder(
-                                   animation: _pageController,
-                                   builder: (context, child) {
-                                     double currentPage = orderedTabs.indexWhere((t) => t.id == _activeTab).toDouble();
-                                     if (_pageController.hasClients && _pageController.position.haveDimensions) {
-                                       currentPage = _pageController.page ?? currentPage;
+                             child: Listener(
+                               behavior: HitTestBehavior.translucent,
+                               onPointerSignal: _handlePagePointerSignal,
+                               child: NotificationListener<ScrollMetricsNotification>(
+                                 onNotification: (notification) {
+                                   if (notification.depth > 0 && notification.metrics.axis == Axis.vertical) {
+                                     final canScroll = notification.metrics.maxScrollExtent > 4.0;
+                                     if (canScroll != _activeTabCanVertScroll) {
+                                       _activeTabCanVertScroll = canScroll;
                                      }
-                                     final delta = (currentPage - idx).abs().clamp(0.0, 1.0);
-                                     if (delta < 0.005) {
-                                       return child!;
-                                     }
-                                     final opacity = (1.0 - delta * 0.55).clamp(0.35, 1.0);
-                                     final scale = (1.0 - delta * 0.04).clamp(0.95, 1.0);
-                                     return Opacity(
-                                       opacity: opacity,
-                                       child: Transform.scale(
-                                         scale: scale,
-                                         child: child,
-                                       ),
-                                     );
-                                   },
-                                   child: _buildTabPage(meta.id, boiler, activeColor, palette),
-                                 );
-                               },
+                                   }
+                                   return false;
+                                 },
+                                 child: ScrollConfiguration(
+                                   behavior: const _UniversalFlowScrollBehavior(),
+                                   child: PageView.builder(
+                                     controller: _pageController,
+                                     physics: const BouncingScrollPhysics(
+                                       parent: AlwaysScrollableScrollPhysics(),
+                                     ),
+                                     itemCount: orderedTabs.length,
+                                     onPageChanged: (idx) {
+                                       if (idx >= 0 && idx < orderedTabs.length) {
+                                         setState(() {
+                                           _activeTab = orderedTabs[idx].id;
+                                           _activeTabCanVertScroll = false;
+                                         });
+                                       }
+                                     },
+                                     itemBuilder: (context, idx) {
+                                       final meta = orderedTabs[idx];
+                                       return AnimatedBuilder(
+                                         animation: _pageController,
+                                         builder: (context, child) {
+                                           double currentPage = orderedTabs.indexWhere((t) => t.id == _activeTab).toDouble();
+                                           if (_pageController.hasClients && _pageController.position.haveDimensions) {
+                                             currentPage = _pageController.page ?? currentPage;
+                                           }
+                                           final signedDelta = currentPage - idx;
+                                           final absDelta = signedDelta.abs().clamp(0.0, 1.0);
+                                           if (absDelta < 0.004) {
+                                             return child!;
+                                           }
+                                           final opacity = (1.0 - absDelta * 0.48).clamp(0.32, 1.0);
+                                           final scale = (1.0 - absDelta * 0.07).clamp(0.92, 1.0);
+                                           final wheelArcY = absDelta * absDelta * 22.0;
+                                           final tiltY = (signedDelta * 0.24).clamp(-0.35, 0.35);
+                                           final perspective = Matrix4.identity()
+                                             ..setEntry(3, 2, 0.0011)
+                                             ..rotateY(tiltY);
+
+                                           return Opacity(
+                                             opacity: opacity,
+                                             child: Transform.translate(
+                                               offset: Offset(0, wheelArcY),
+                                               child: Transform(
+                                                 alignment: signedDelta > 0 ? Alignment.centerRight : Alignment.centerLeft,
+                                                 transform: perspective,
+                                                 child: Transform.scale(
+                                                   scale: scale,
+                                                   child: child,
+                                                 ),
+                                               ),
+                                             ),
+                                           );
+                                         },
+                                         child: _buildTabPage(meta.id, boiler, activeColor, palette),
+                                       );
+                                     },
+                                   ),
+                                 ),
+                               ),
                              ),
                            ),
                          ),
@@ -830,36 +900,24 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                  ),
                ),
 
-            // Boot Calibration Ceremony
+            // Interactive Multi-Stage Boot Calibration Ceremony
             if (_showBootCeremony)
               Positioned.fill(
-                child: Container(
-                  color: const Color(0xFF040406),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: activeColor,
-                          boxShadow: [BoxShadow(color: activeColor.withValues(alpha: 0.55), blurRadius: 28)],
-                        ),
-                        child: const Icon(Icons.local_fire_department_rounded, color: Colors.white, size: 34),
-                      ),
-                      const SizedBox(height: 18),
-                      const Text(
-                        'Termostat Flow',
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: Colors.white),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        _lang == LangCode.tr ? 'Sistem kalibre ediliyor...' : 'Calibrating thermostat...',
-                        style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.55)),
-                      ),
-                    ],
-                  ),
+                child: BootCeremonyOverlay(
+                  style: _settings.bootCeremonyStyle,
+                  durationMs: _settings.bootCeremonyDurationMs,
+                  soundChimeEnabled: _settings.bootSoundChimeEnabled,
+                  hapticEnabled: _settings.hapticEnabled,
+                  hapticStrength: _settings.hapticStrength,
+                  roomTemp: _roomTemp,
+                  targetTemp: _targetTemp,
+                  boiler: boiler,
+                  locationName: _locationName,
+                  accentColor: activeColor,
+                  lang: _lang,
+                  onComplete: () {
+                    if (mounted) setState(() => _showBootCeremony = false);
+                  },
                 ),
               ),
           ],
@@ -867,6 +925,19 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       ),
     );
   }
+}
+
+class _UniversalFlowScrollBehavior extends MaterialScrollBehavior {
+  const _UniversalFlowScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => const {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.trackpad,
+        PointerDeviceKind.stylus,
+        PointerDeviceKind.invertedStylus,
+      };
 }
 
 class _TopActionButton extends StatelessWidget {
