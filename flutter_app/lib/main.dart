@@ -879,6 +879,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                  character: _settings.mascotCharacter,
                  backdrop: _settings.screensaverBackdrop,
                  blurBackground: _settings.screensaverBlurBg,
+                 customBgSource: _settings.screensaverCustomBgSource,
                  soundsEnabled: _settings.mascotSoundsEnabled,
                  hapticEnabled: _settings.hapticEnabled,
                  hapticStrength: _settings.hapticStrength,

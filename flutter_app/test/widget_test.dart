@@ -5,6 +5,7 @@ import 'package:termostat_flow/services/ambient_audio_service.dart';
 import 'package:termostat_flow/services/hardware_service.dart';
 import 'package:termostat_flow/services/notification_service.dart';
 import 'package:termostat_flow/services/vault_crypto_service.dart';
+import 'package:termostat_flow/widgets/termo_bot.dart';
 
 void main() {
   test('ThermostatMath snaps temperatures to 0.5C bounds', () {
@@ -69,6 +70,8 @@ void main() {
       screensaverBackdrop: ScreensaverBackdrop.termoLab,
       screensaverBlurBg: true,
       mascotSoundsEnabled: false,
+      screensaverCustomBgSource: 'https://example.com/hearth.jpg',
+      screensaverCustomBgLabel: 'example.com',
     );
     final restored = SystemSettingsState.fromJson(initial.toJson());
     expect(restored.smartDisplayMode, SmartDisplayMode.liveNature);
@@ -98,6 +101,8 @@ void main() {
     expect(restored.screensaverBackdrop, ScreensaverBackdrop.termoLab);
     expect(restored.screensaverBlurBg, isTrue);
     expect(restored.mascotSoundsEnabled, isFalse);
+    expect(restored.screensaverCustomBgSource, 'https://example.com/hearth.jpg');
+    expect(restored.screensaverCustomBgLabel, 'example.com');
 
     final clamped = initial.copyWith(bootCeremonyDurationMs: 9000);
     expect(clamped.bootCeremonyDurationMs, 3500);
@@ -201,6 +206,15 @@ void main() {
       expect(String.fromCharCodes(awakeBytes.sublist(8, 12)), 'WAVE');
       expect(String.fromCharCodes(sleepyBytes.sublist(0, 4)), 'RIFF');
       expect(String.fromCharCodes(sleepyBytes.sublist(8, 12)), 'WAVE');
+    }
+  });
+
+  test('MascotBehavior covers 6 modes and all 3D mascot asset paths exist cleanly', () {
+    expect(MascotBehavior.values.length, 6);
+    for (final mascot in MascotCharacter.values) {
+      final meta = MascotMeta.of(mascot);
+      expect(meta.assetPath.startsWith('assets/mascots/'), isTrue);
+      expect(meta.assetPath.endsWith('.jpg'), isTrue);
     }
   });
 

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -105,10 +106,12 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
   bool _notificationStatusIsSuccess = true;
   HapticCapabilityInfo? _hapticCap;
   int? _lastTestedHapticMs;
+  MascotBehavior _previewBehavior = MascotBehavior.idle;
 
   final _firebaseUrlCtrl = TextEditingController();
   final _espIdCtrl = TextEditingController();
   final _customAudioCtrl = TextEditingController();
+  final _screensaverBgUrlCtrl = TextEditingController();
 
   static const _locations = ['Ev · İstanbul', 'Yazlık · İzmir', 'Ofis · Ankara'];
 
@@ -122,6 +125,9 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     _firebaseUrlCtrl.text = _draft.firebaseRtdbUrl;
     _espIdCtrl.text = _draft.espDeviceId;
     _customAudioCtrl.text = _draft.customAudioLabel;
+    if (_draft.screensaverCustomBgSource.startsWith('http')) {
+      _screensaverBgUrlCtrl.text = _draft.screensaverCustomBgSource;
+    }
     HardwareService.detectHapticCapability().then((info) {
       if (mounted) setState(() => _hapticCap = info);
     });
@@ -135,6 +141,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     _firebaseUrlCtrl.dispose();
     _espIdCtrl.dispose();
     _customAudioCtrl.dispose();
+    _screensaverBgUrlCtrl.dispose();
     super.dispose();
   }
 
@@ -2312,7 +2319,15 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           (ScreensaverBackdrop.termoLab, 'Termo Lab', tr ? 'Siber mavi grid' : 'Cyber blue grid', const Color(0xFF0C4A6E)),
           (ScreensaverBackdrop.warmHearth, tr ? 'Sıcak Köşe' : 'Warm Hearth', tr ? 'Köz ve şömine' : 'Embers & hearth', const Color(0xFF7C2D12)),
           (ScreensaverBackdrop.nightNebula, 'Gece Nebula', tr ? 'Derin obsidyen' : 'Deep obsidian', const Color(0xFF3B0764)),
-          (ScreensaverBackdrop.custom, tr ? 'Özel / Cihaz' : 'Custom / Accent', tr ? 'Tema rengi' : 'Accent color', widget.accentColor),
+          (ScreensaverBackdrop.custom, tr ? 'Özel / Cihaz' : 'Custom / Accent', tr ? 'Resim & URL' : 'Image & URL', widget.accentColor),
+        ];
+        final behaviorOptions = [
+          (MascotBehavior.idle, tr ? 'Boşta' : 'Idle', Icons.circle, const Color(0xFF22C55E)),
+          (MascotBehavior.patrol, tr ? 'Gezinme' : 'Patrol', Icons.directions_walk_rounded, const Color(0xFF38BDF8)),
+          (MascotBehavior.knock, tr ? 'Tık Tık' : 'Knock', Icons.touch_app_rounded, const Color(0xFFFBBF24)),
+          (MascotBehavior.think, tr ? 'Düşünme' : 'Think', Icons.lightbulb_outline_rounded, const Color(0xFFF59E0B)),
+          (MascotBehavior.read, tr ? 'Kitap' : 'Read', Icons.menu_book_rounded, const Color(0xFFA78BFA)),
+          (MascotBehavior.deepSleep, tr ? 'Derin Uyku' : 'Deep Sleep', Icons.nightlight_round, const Color(0xFF60A5FA)),
         ];
         final activeMascotMeta = MascotMeta.of(_draft.mascotCharacter);
 
@@ -2359,12 +2374,12 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             ),
             const SizedBox(height: 12),
             Text(
-              tr ? 'Maskot Karakteri Seçimi:' : 'Mascot Character:',
+              tr ? 'Maskot Karakteri Seçimi (3D Unreal):' : 'Mascot Character (3D Unreal):',
               style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
             ),
             const SizedBox(height: 8),
             SizedBox(
-              height: 92,
+              height: 102,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: MascotCharacter.values.length,
@@ -2382,7 +2397,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                       }
                     },
                     child: Container(
-                      width: 88,
+                      width: 92,
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
                       decoration: BoxDecoration(
                         color: selected ? meta.color.withValues(alpha: 0.18) : Colors.white.withValues(alpha: 0.04),
@@ -2394,7 +2409,12 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          MascotAvatar(character: ch, size: 34, happy: selected),
+                          MascotAvatar(
+                            character: ch,
+                            size: 44,
+                            happy: selected,
+                            showBehaviorOverlay: false,
+                          ),
                           const SizedBox(height: 5),
                           Text(meta.name, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
                           Text(
@@ -2536,6 +2556,242 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 10),
+            // Custom wallpaper upload (device image + https URL)
+            Row(
+              children: [
+                Expanded(
+                  flex: 11,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      _hapticTap();
+                      try {
+                        final res = await FilePicker.platform.pickFiles(
+                          type: FileType.image,
+                          withData: true,
+                        );
+                        if (res != null && res.files.isNotEmpty) {
+                          final file = res.files.first;
+                          if (file.bytes != null && file.bytes!.isNotEmpty) {
+                            final ext = (file.extension ?? 'jpg').toLowerCase();
+                            final mime = ext == 'png'
+                                ? 'image/png'
+                                : (ext == 'webp' ? 'image/webp' : 'image/jpeg');
+                            final dataUri = 'data:$mime;base64,${base64Encode(file.bytes!)}';
+                            if (!mounted) return;
+                            setState(() {
+                              _screensaverBgUrlCtrl.clear();
+                              _draft = _draft.copyWith(
+                                screensaverBackdrop: ScreensaverBackdrop.custom,
+                                screensaverCustomBgSource: dataUri,
+                                screensaverCustomBgLabel: file.name,
+                              );
+                              _statusBanner = tr ? 'Duvar kağıdı seçildi: ${file.name}' : 'Wallpaper selected: ${file.name}';
+                            });
+                          }
+                        }
+                      } catch (_) {
+                        if (mounted) {
+                          setState(() {
+                            _statusBanner = tr ? 'Görsel seçilemedi.' : 'Could not pick image.';
+                          });
+                        }
+                      }
+                    },
+                    icon: const Icon(Icons.upload_rounded, size: 16),
+                    label: Text(
+                      tr ? 'Cihazdan Resim / Duvar Kağıdı Seç' : 'Pick Wallpaper Image',
+                      style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF4F6BFF),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  flex: 10,
+                  child: TextField(
+                    controller: _screensaverBgUrlCtrl,
+                    style: const TextStyle(fontSize: 11, color: Colors.white),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: tr ? 'Veya Görsel URL (https://..)' : 'Or Image URL (https://..)',
+                      hintStyle: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.45)),
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.05),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                ElevatedButton(
+                  onPressed: () {
+                    _hapticTap();
+                    final url = _screensaverBgUrlCtrl.text.trim();
+                    if (url.startsWith('http://') || url.startsWith('https://')) {
+                      final host = Uri.tryParse(url)?.host ?? 'URL';
+                      setState(() {
+                        _draft = _draft.copyWith(
+                          screensaverBackdrop: ScreensaverBackdrop.custom,
+                          screensaverCustomBgSource: url,
+                          screensaverCustomBgLabel: host.isNotEmpty ? host : 'Özel URL',
+                        );
+                        _statusBanner = tr ? 'Özel görsel URL uygulandı.' : 'Custom wallpaper URL applied.';
+                      });
+                    } else if (url.isEmpty && _draft.screensaverCustomBgSource.isNotEmpty) {
+                      setState(() {
+                        _draft = _draft.copyWith(
+                          screensaverCustomBgSource: '',
+                          screensaverCustomBgLabel: '',
+                        );
+                        _statusBanner = tr ? 'Özel duvar kağıdı temizlendi.' : 'Custom wallpaper cleared.';
+                      });
+                    } else {
+                      setState(() {
+                        _statusBanner = tr ? 'Geçerli bir https:// URL girin.' : 'Enter a valid https:// URL.';
+                      });
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFF59E0B),
+                    foregroundColor: const Color(0xFF18181B),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(
+                    tr ? 'Uygula' : 'Apply',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ],
+            ),
+            if (_draft.screensaverCustomBgSource.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Text(
+                      '✓ ${_draft.screensaverCustomBgLabel.isNotEmpty ? _draft.screensaverCustomBgLabel : (tr ? 'Özel duvar kağıdı aktif' : 'Custom wallpaper active')}',
+                      style: const TextStyle(fontSize: 10.5, color: Color(0xFF34D399), fontWeight: FontWeight.w600),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () {
+                      _hapticTap();
+                      _screensaverBgUrlCtrl.clear();
+                      setState(() {
+                        _draft = _draft.copyWith(
+                          screensaverCustomBgSource: '',
+                          screensaverCustomBgLabel: '',
+                        );
+                      });
+                    },
+                    child: Text(
+                      tr ? 'Kaldır' : 'Clear',
+                      style: const TextStyle(fontSize: 10.5, color: Color(0xFFF87171), fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 12),
+            // Live Preview & 6-Behavior Test Stage
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  tr ? '✨ Canlı Önizleme & Davranış Testi' : '✨ Live Preview & Behavior Test',
+                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
+                ),
+                Text(
+                  tr ? "Dokununca 1.5 sn'de uyanır" : 'Wakes in 1.5s on tap',
+                  style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.52)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            MascotBehaviorStage(
+              character: _draft.mascotCharacter,
+              behavior: _previewBehavior,
+              backdrop: _draft.screensaverBackdrop,
+              blurBackground: _draft.screensaverBlurBg,
+              customBgSource: _draft.screensaverCustomBgSource,
+              customBgLabel: _draft.screensaverCustomBgLabel,
+              soundsEnabled: _draft.mascotSoundsEnabled,
+              hapticEnabled: _draft.hapticEnabled,
+              hapticStrength: _draft.hapticStrength,
+              accentColor: widget.accentColor,
+              lang: _lang,
+              onWakeToIdle: () {
+                if (mounted) setState(() => _previewBehavior = MascotBehavior.idle);
+              },
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 34,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: behaviorOptions.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 6),
+                itemBuilder: (_, idx) {
+                  final b = behaviorOptions[idx];
+                  final active = _previewBehavior == b.$1;
+                  return GestureDetector(
+                    onTap: () {
+                      _hapticTap();
+                      setState(() => _previewBehavior = b.$1);
+                      if (_draft.mascotSoundsEnabled) {
+                        AmbientAudioService.playMascotSound(
+                          _draft.mascotCharacter,
+                          sleepy: b.$1 == MascotBehavior.deepSleep,
+                        );
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: active ? b.$4.withValues(alpha: 0.24) : Colors.white.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: active ? b.$4 : Colors.white.withValues(alpha: 0.14),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(b.$3, size: 13, color: active ? b.$4 : Colors.white.withValues(alpha: 0.7)),
+                          const SizedBox(width: 5),
+                          Text(
+                            b.$2,
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              color: active ? Colors.white : Colors.white.withValues(alpha: 0.78),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
             ),
           ],
         );

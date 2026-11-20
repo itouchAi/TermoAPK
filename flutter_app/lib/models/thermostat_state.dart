@@ -591,6 +591,15 @@ enum MascotCharacter {
   ela,
 }
 
+enum MascotBehavior {
+  idle,
+  patrol,
+  knock,
+  think,
+  read,
+  deepSleep,
+}
+
 enum ScreensaverBackdrop {
   oledBlack,
   termoLab,
@@ -789,6 +798,8 @@ class SystemSettingsState {
   final ScreensaverBackdrop screensaverBackdrop;
   final bool screensaverBlurBg;
   final bool mascotSoundsEnabled;
+  final String screensaverCustomBgSource;
+  final String screensaverCustomBgLabel;
   final bool aiPhoneCallEnabled;
   final int aiCallRingSeconds;
   final String espDeviceId;
@@ -837,6 +848,8 @@ class SystemSettingsState {
     required this.screensaverBackdrop,
     required this.screensaverBlurBg,
     required this.mascotSoundsEnabled,
+    required this.screensaverCustomBgSource,
+    required this.screensaverCustomBgLabel,
     required this.aiPhoneCallEnabled,
     required this.aiCallRingSeconds,
     required this.espDeviceId,
@@ -900,6 +913,8 @@ class SystemSettingsState {
         screensaverBackdrop: ScreensaverBackdrop.oledBlack,
         screensaverBlurBg: false,
         mascotSoundsEnabled: true,
+        screensaverCustomBgSource: '',
+        screensaverCustomBgLabel: '',
         aiPhoneCallEnabled: true,
         aiCallRingSeconds: 10,
         espDeviceId: 'ESP32-KOMBI-01',
@@ -973,6 +988,8 @@ class SystemSettingsState {
     ScreensaverBackdrop? screensaverBackdrop,
     bool? screensaverBlurBg,
     bool? mascotSoundsEnabled,
+    String? screensaverCustomBgSource,
+    String? screensaverCustomBgLabel,
     bool? aiPhoneCallEnabled,
     int? aiCallRingSeconds,
     String? espDeviceId,
@@ -1021,6 +1038,8 @@ class SystemSettingsState {
       screensaverBackdrop: screensaverBackdrop ?? this.screensaverBackdrop,
       screensaverBlurBg: screensaverBlurBg ?? this.screensaverBlurBg,
       mascotSoundsEnabled: mascotSoundsEnabled ?? this.mascotSoundsEnabled,
+      screensaverCustomBgSource: screensaverCustomBgSource ?? this.screensaverCustomBgSource,
+      screensaverCustomBgLabel: screensaverCustomBgLabel ?? this.screensaverCustomBgLabel,
       aiPhoneCallEnabled: aiPhoneCallEnabled ?? this.aiPhoneCallEnabled,
       aiCallRingSeconds: aiCallRingSeconds ?? this.aiCallRingSeconds,
       espDeviceId: espDeviceId ?? this.espDeviceId,
@@ -1070,6 +1089,8 @@ class SystemSettingsState {
         'screensaverBackdrop': screensaverBackdrop.name,
         'screensaverBlurBg': screensaverBlurBg,
         'mascotSoundsEnabled': mascotSoundsEnabled,
+        'screensaverCustomBgSource': screensaverCustomBgSource,
+        'screensaverCustomBgLabel': screensaverCustomBgLabel,
         'aiPhoneCallEnabled': aiPhoneCallEnabled,
         'aiCallRingSeconds': aiCallRingSeconds,
         'espDeviceId': espDeviceId,
@@ -1169,6 +1190,8 @@ class SystemSettingsState {
       screensaverBackdrop: _parseEnum(map['screensaverBackdrop'] as String?, ScreensaverBackdrop.values, defaults.screensaverBackdrop),
       screensaverBlurBg: (map['screensaverBlurBg'] as bool?) ?? defaults.screensaverBlurBg,
       mascotSoundsEnabled: (map['mascotSoundsEnabled'] as bool?) ?? defaults.mascotSoundsEnabled,
+      screensaverCustomBgSource: (map['screensaverCustomBgSource'] as String?) ?? defaults.screensaverCustomBgSource,
+      screensaverCustomBgLabel: (map['screensaverCustomBgLabel'] as String?) ?? defaults.screensaverCustomBgLabel,
       aiPhoneCallEnabled: (map['aiPhoneCallEnabled'] as bool?) ?? defaults.aiPhoneCallEnabled,
       aiCallRingSeconds: (map['aiCallRingSeconds'] as int?) ?? defaults.aiCallRingSeconds,
       espDeviceId: (map['espDeviceId'] as String?) ?? defaults.espDeviceId,
