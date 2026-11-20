@@ -914,6 +914,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                   boiler: boiler,
                   locationName: _locationName,
                   accentColor: activeColor,
+                  palette: palette,
                   lang: _lang,
                   onComplete: () {
                     if (mounted) setState(() => _showBootCeremony = false);
