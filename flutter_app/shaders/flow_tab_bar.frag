@@ -99,13 +99,13 @@ vec3 bg(vec2 p, vec2 uv) {
   c += mix(darkMist, dayMist, day) * smoothstep(0.32, 0.86, n) * mix(0.75, 0.45, day);
 
   vec2 fd = (uv - uFocal) * vec2(aspect, 1.0);
-  c += uAcc * exp(-dot(fd, fd) / (2.0 * 0.32 * 0.32)) * mix(0.17, 0.12, day);
+  c += uAcc * exp(-dot(fd, fd) / (2.0 * 0.38 * 0.38)) * mix(0.24, 0.15, day);
 
-  vec2 d2 = (uv - vec2(1.0 - uFocal.x, 0.82)) * vec2(aspect, 1.0);
-  c += uAcc.zxy * exp(-dot(d2, d2) / (2.0 * 0.42 * 0.42)) * 0.06;
+  vec2 d2 = (uv - vec2(1.0 - uFocal.x, 0.80)) * vec2(aspect, 1.0);
+  c += uAcc.zxy * exp(-dot(d2, d2) / (2.0 * 0.44 * 0.44)) * 0.08;
 
   vec2 d = p - vec2(uB.x, 650.0);
-  c += uAcc * exp(-dot(d * vec2(1.0, 1.5), d * vec2(1.0, 1.5)) / (2.0 * 230.0 * 230.0)) * mix(0.42, 0.25, day);
+  c += uAcc * exp(-dot(d * vec2(1.0, 1.5), d * vec2(1.0, 1.5)) / (2.0 * 230.0 * 230.0)) * mix(0.44, 0.25, day);
   return c;
 }
 

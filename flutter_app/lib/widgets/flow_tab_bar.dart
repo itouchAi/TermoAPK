@@ -347,11 +347,18 @@ class _FlowShaderPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final prog = program;
     if (prog == null) {
+      canvas.drawRect(Offset.zero & size, Paint()..color = palette.scaffoldBg);
+      final focalAlign = isLandscape ? const Alignment(-0.42, -0.08) : const Alignment(0.0, -0.14);
       final fallbackPaint = Paint()
         ..shader = RadialGradient(
-          center: isLandscape ? const Alignment(-0.45, -0.1) : const Alignment(0, -0.15),
-          radius: 1.0,
-          colors: [flow.acc.toColor(palette.isLight ? 0.16 : 0.24), palette.scaffoldBg],
+          center: focalAlign,
+          radius: 0.95,
+          colors: [
+            flow.acc.toColor(palette.isLight ? 0.20 : 0.32),
+            flow.acc.toColor(palette.isLight ? 0.08 : 0.10),
+            Colors.transparent,
+          ],
+          stops: const [0.0, 0.48, 1.0],
         ).createShader(Offset.zero & size);
       canvas.drawRect(Offset.zero & size, fallbackPaint);
       return;
@@ -374,7 +381,7 @@ class _FlowShaderPainter extends CustomPainter {
     shader.setFloat(13, flow.tapAge);
     shader.setFloat(14, 0.0);
     shader.setFloat(15, flow.sw);
-    shader.setFloat(16, isLandscape ? 0.28 : 0.50);
+    shader.setFloat(16, isLandscape ? 0.27 : 0.50);
     shader.setFloat(17, isLandscape ? 0.46 : 0.44);
     shader.setFloat(18, palette.daylightMix);
     shader.setFloat(19, palette.tactileWarmth);

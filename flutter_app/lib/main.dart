@@ -59,7 +59,7 @@ class TermostatHomeShell extends StatefulWidget {
 class _TermostatHomeShellState extends State<TermostatHomeShell> {
   static const _storageKey = 'termostat_flow_flutter_v2';
 
-  final PageController _pageController = PageController(viewportFraction: 0.91);
+  final PageController _pageController = PageController(viewportFraction: 1.0);
   TabId _activeTab = TabId.termo;
   final double _roomTemp = 21.8;
   double _targetTemp = 22.5;
@@ -542,8 +542,16 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                           height: compactLandscape ? 42 : 52,
                           padding: const EdgeInsets.symmetric(horizontal: 14),
                           decoration: BoxDecoration(
-                            color: palette.scaffoldBg.withValues(alpha: palette.isLight ? 0.55 : 0.35),
-                            border: Border(bottom: BorderSide(color: palette.cardBorder)),
+                            color: palette.isLight
+                                ? Colors.white.withValues(alpha: 0.42)
+                                : const Color(0xFF040406).withValues(alpha: 0.22),
+                            border: Border(
+                              bottom: BorderSide(
+                                color: palette.isLight
+                                    ? palette.cardBorder
+                                    : Colors.white.withValues(alpha: 0.08),
+                              ),
+                            ),
                           ),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -715,157 +723,44 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                            ),
                          ),
 
-                         // 3D Perspective Card Carousel synchronized with orderedTabs
+                         // Frameless Horizontal Page Carousel synchronized with orderedTabs
                          Expanded(
                            child: Padding(
                              padding: EdgeInsets.only(bottom: (compactLandscape ? 66.0 : 76.0) + media.padding.bottom),
-                             child: Stack(
-                               children: [
-                                 PageView.builder(
-                                   controller: _pageController,
-                                   clipBehavior: Clip.none,
-                                   itemCount: orderedTabs.length,
-                                   onPageChanged: (idx) {
-                                     if (idx >= 0 && idx < orderedTabs.length) {
-                                       setState(() => _activeTab = orderedTabs[idx].id);
+                             child: PageView.builder(
+                               controller: _pageController,
+                               itemCount: orderedTabs.length,
+                               onPageChanged: (idx) {
+                                 if (idx >= 0 && idx < orderedTabs.length) {
+                                   setState(() => _activeTab = orderedTabs[idx].id);
+                                 }
+                               },
+                               itemBuilder: (context, idx) {
+                                 final meta = orderedTabs[idx];
+                                 return AnimatedBuilder(
+                                   animation: _pageController,
+                                   builder: (context, child) {
+                                     double currentPage = orderedTabs.indexWhere((t) => t.id == _activeTab).toDouble();
+                                     if (_pageController.hasClients && _pageController.position.haveDimensions) {
+                                       currentPage = _pageController.page ?? currentPage;
                                      }
-                                   },
-                                   itemBuilder: (context, idx) {
-                                     final meta = orderedTabs[idx];
-                                     return AnimatedBuilder(
-                                       animation: _pageController,
-                                       builder: (context, child) {
-                                         double currentPage = orderedTabs.indexWhere((t) => t.id == _activeTab).toDouble();
-                                         if (_pageController.hasClients && _pageController.position.haveDimensions) {
-                                           currentPage = _pageController.page ?? currentPage;
-                                         }
-                                         final delta = currentPage - idx;
-                                         final absDelta = delta.abs().clamp(0.0, 1.5);
-                                         final scale = (1.0 - absDelta * 0.09).clamp(0.86, 1.0);
-                                         final opacity = (1.0 - absDelta * 0.42).clamp(0.38, 1.0);
-                                         final tiltY = (delta * 0.34).clamp(-0.62, 0.62);
-                                         final perspective = Matrix4.identity()
-                                           ..setEntry(3, 2, 0.0012)
-                                           ..rotateY(tiltY);
-
-                                         return Opacity(
-                                           opacity: opacity,
-                                           child: Transform(
-                                             alignment: delta > 0 ? Alignment.centerRight : Alignment.centerLeft,
-                                             transform: perspective,
-                                             child: Transform.scale(
-                                               scale: scale,
-                                               child: Container(
-                                                 margin: EdgeInsets.symmetric(
-                                                   horizontal: isLandscape ? 8 : 4,
-                                                   vertical: compactLandscape ? 4 : 8,
-                                                 ),
-                                                 decoration: BoxDecoration(
-                                                   borderRadius: BorderRadius.circular(24),
-                                                   color: palette.isLight
-                                                       ? Colors.white.withValues(alpha: 0.72)
-                                                       : const Color(0xFF0E1018).withValues(alpha: 0.90),
-                                                   border: Border.all(
-                                                     color: absDelta < 0.25
-                                                         ? activeColor.withValues(alpha: 0.28)
-                                                         : palette.cardBorder,
-                                                   ),
-                                                   boxShadow: [
-                                                     BoxShadow(
-                                                       color: Colors.black.withValues(alpha: palette.isLight ? 0.14 : 0.50),
-                                                       blurRadius: 24,
-                                                       offset: const Offset(0, 10),
-                                                     ),
-                                                   ],
-                                                 ),
-                                                 child: ClipRRect(
-                                                   borderRadius: BorderRadius.circular(24),
-                                                   child: Column(
-                                                     children: [
-                                                       Container(
-                                                         height: compactLandscape ? 32 : 38,
-                                                         padding: const EdgeInsets.symmetric(horizontal: 14),
-                                                         decoration: BoxDecoration(
-                                                           color: palette.cardBg,
-                                                           border: Border(bottom: BorderSide(color: palette.cardBorder)),
-                                                         ),
-                                                         child: Row(
-                                                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                                           children: [
-                                                             Flexible(
-                                                               child: Row(
-                                                                 children: [
-                                                                   Icon(_iconForTab(meta.id), size: 15, color: meta.color),
-                                                                   const SizedBox(width: 7),
-                                                                   Flexible(
-                                                                     child: Text(
-                                                                       _cardTitleForTab(meta.id, _lang),
-                                                                       style: TextStyle(
-                                                                         fontSize: 12.5,
-                                                                         fontWeight: FontWeight.w700,
-                                                                         color: palette.textPrimary,
-                                                                       ),
-                                                                       overflow: TextOverflow.ellipsis,
-                                                                     ),
-                                                                   ),
-                                                                 ],
-                                                               ),
-                                                             ),
-                                                             Text(
-                                                               _lang == LangCode.tr ? '‹ Kaydırın ›' : '‹ Swipe ›',
-                                                               style: TextStyle(fontSize: 10.5, color: palette.textSecondary),
-                                                             ),
-                                                           ],
-                                                         ),
-                                                       ),
-                                                       Expanded(child: child!),
-                                                     ],
-                                                   ),
-                                                 ),
-                                               ),
-                                             ),
-                                           ),
-                                         );
-                                       },
-                                       child: _buildTabPage(meta.id, boiler, activeColor, palette),
+                                     final delta = (currentPage - idx).abs().clamp(0.0, 1.0);
+                                     if (delta < 0.005) {
+                                       return child!;
+                                     }
+                                     final opacity = (1.0 - delta * 0.55).clamp(0.35, 1.0);
+                                     final scale = (1.0 - delta * 0.04).clamp(0.95, 1.0);
+                                     return Opacity(
+                                       opacity: opacity,
+                                       child: Transform.scale(
+                                         scale: scale,
+                                         child: child,
+                                       ),
                                      );
                                    },
-                                 ),
-
-                                 // Wide/Tablet Side Carousel Arrow Buttons
-                                 if (media.size.width >= 680) ...[
-                                   Positioned(
-                                     left: 10,
-                                     top: 0,
-                                     bottom: 0,
-                                     child: Center(
-                                       child: _CarouselNavButton(
-                                         icon: Icons.chevron_left_rounded,
-                                         palette: palette,
-                                         onTap: () {
-                                           final cur = orderedTabs.indexWhere((t) => t.id == _activeTab);
-                                           if (cur > 0) _selectTab(orderedTabs[cur - 1].id);
-                                         },
-                                       ),
-                                     ),
-                                   ),
-                                   Positioned(
-                                     right: 10,
-                                     top: 0,
-                                     bottom: 0,
-                                     child: Center(
-                                       child: _CarouselNavButton(
-                                         icon: Icons.chevron_right_rounded,
-                                         palette: palette,
-                                         onTap: () {
-                                           final cur = orderedTabs.indexWhere((t) => t.id == _activeTab);
-                                           if (cur < orderedTabs.length - 1) _selectTab(orderedTabs[cur + 1].id);
-                                         },
-                                       ),
-                                     ),
-                                   ),
-                                 ],
-                               ],
+                                   child: _buildTabPage(meta.id, boiler, activeColor, palette),
+                                 );
+                               },
                              ),
                            ),
                          ),
@@ -990,74 +885,24 @@ class _TopActionButton extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
         padding: const EdgeInsets.symmetric(horizontal: 8),
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: palette.cardBg,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: palette.cardBorder),
-        ),
-        child: child,
-      ),
-    );
-  }
-}
-
-IconData _iconForTab(TabId id) {
-  switch (id) {
-    case TabId.termo:
-      return Icons.home_outlined;
-    case TabId.hava:
-      return Icons.wb_sunny_outlined;
-    case TabId.rapor:
-      return Icons.bar_chart_rounded;
-    case TabId.prog:
-      return Icons.schedule_rounded;
-  }
-}
-
-String _cardTitleForTab(TabId id, LangCode lang) {
-  final tr = lang == LangCode.tr;
-  switch (id) {
-    case TabId.termo:
-      return tr ? 'Termostat & Kombi Ana Kontrol' : 'Thermostat & Boiler Control';
-    case TabId.hava:
-      return tr ? 'Hava Durumu & Bölgesel Tahmin' : 'Weather & Regional Forecast';
-    case TabId.rapor:
-      return tr ? '24s Tüketim & Kombi Sensörleri' : '24h Usage & Boiler Sensors';
-    case TabId.prog:
-      return tr ? 'Akıllı Zaman Programı & Tasarruf' : 'Smart Schedule & Savings';
-  }
-}
-
-class _CarouselNavButton extends StatelessWidget {
-  final IconData icon;
-  final ThemePaletteSpec palette;
-  final VoidCallback onTap;
-
-  const _CarouselNavButton({
-    required this.icon,
-    required this.palette,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: palette.sheetBg.withValues(alpha: 0.85),
-          border: Border.all(color: palette.cardBorder),
+          color: palette.isLight ? palette.cardBg : Colors.white.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(11),
+          border: Border.all(
+            color: palette.isLight ? palette.cardBorder : Colors.white.withValues(alpha: 0.11),
+          ),
           boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 12),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: palette.isLight ? 0.08 : 0.28),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
           ],
         ),
-        child: Icon(icon, color: palette.textPrimary, size: 22),
+        child: child,
       ),
     );
   }

@@ -65,20 +65,30 @@ class _RotaryDialState extends State<RotaryDial> {
             width: widget.sizePx,
             height: widget.sizePx,
             child: Stack(
+              clipBehavior: Clip.none,
               alignment: Alignment.center,
               children: [
-                // Ambient radial glow
-                Container(
-                  width: widget.sizePx * 0.88,
-                  height: widget.sizePx * 0.88,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        widget.accentColor.withValues(alpha: isLight ? 0.24 : 0.20),
-                        widget.accentColor.withValues(alpha: 0.05),
-                        Colors.transparent,
-                      ],
+                // Wide feathered atmospheric radial aura behind the dial
+                OverflowBox(
+                  maxWidth: widget.sizePx * 1.48,
+                  maxHeight: widget.sizePx * 1.48,
+                  child: IgnorePointer(
+                    child: Container(
+                      width: widget.sizePx * 1.42,
+                      height: widget.sizePx * 1.42,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          center: const Alignment(0, -0.05),
+                          radius: 0.5,
+                          colors: [
+                            widget.accentColor.withValues(alpha: isLight ? 0.20 : 0.25),
+                            widget.accentColor.withValues(alpha: isLight ? 0.08 : 0.09),
+                            Colors.transparent,
+                          ],
+                          stops: const [0.0, 0.48, 1.0],
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -91,11 +101,11 @@ class _RotaryDialState extends State<RotaryDial> {
                     accentColor: widget.accentColor,
                     unlitTickColor: isLight
                         ? const Color(0xFF0F172A).withValues(alpha: 0.14)
-                        : Colors.white.withValues(alpha: 0.14),
+                        : Colors.white.withValues(alpha: 0.16),
                   ),
                 ),
 
-                // Inner dial face
+                // Inner sculpted 3D dial face
                 Container(
                   width: innerDiameter,
                   height: innerDiameter,
@@ -110,106 +120,123 @@ class _RotaryDialState extends State<RotaryDial> {
                       width: isTactile ? 2.0 : 1.0,
                       color: isTactile
                           ? const Color(0xFFD97706).withValues(alpha: 0.35)
-                          : widget.palette.cardBorder,
+                          : (isLight ? widget.palette.cardBorder : Colors.white.withValues(alpha: 0.10)),
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: isLight ? 0.18 : 0.72),
-                        blurRadius: isLight ? 22 : 30,
-                        offset: const Offset(0, 12),
+                        color: Colors.black.withValues(alpha: isLight ? 0.20 : 0.78),
+                        blurRadius: isLight ? 24 : 36,
+                        offset: const Offset(0, 18),
                       ),
                       BoxShadow(
-                        color: widget.accentColor.withValues(alpha: 0.16),
-                        blurRadius: 24,
+                        color: widget.accentColor.withValues(alpha: isLight ? 0.16 : 0.22),
+                        blurRadius: 28,
                       ),
                     ],
                   ),
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      // Rotating glowing indicator pill
-                      Transform.rotate(
-                        angle: activeAngleDeg * math.pi / 180.0,
-                        child: Transform.translate(
-                          offset: Offset(0, -knobRadius),
-                          child: Container(
-                            width: 6,
-                            height: 15,
-                            decoration: BoxDecoration(
-                              color: widget.accentColor,
-                              borderRadius: BorderRadius.circular(99),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: widget.accentColor,
-                                  blurRadius: 12,
-                                ),
-                              ],
+                  child: ClipOval(
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // 3D top specular highlight & bottom concave inner shadow
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: CustomPaint(
+                              painter: _DialBevelPainter(isLight: isLight),
                             ),
                           ),
                         ),
-                      ),
 
-                      Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            widget.lang == LangCode.tr ? 'HEDEF TERMOSTAT' : 'TARGET THERMOSTAT',
-                            style: TextStyle(
-                              fontSize: widget.compact ? 9 : 10,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 1.4,
-                              color: widget.palette.textSecondary,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '${widget.targetTemp.toStringAsFixed(1)}°',
-                            style: TextStyle(
-                              fontSize: widget.compact ? 30 : 42,
-                              fontWeight: FontWeight.w700,
-                              height: 1.05,
-                              color: widget.palette.textPrimary,
-                              fontFeatures: const [FontFeature.tabularFigures()],
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            widget.modeName,
-                            style: TextStyle(
-                              fontSize: widget.compact ? 9 : 11,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1.0,
-                              color: widget.accentColor,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.local_fire_department_rounded,
-                                size: 12,
-                                color: widget.boiler.isHeating
-                                    ? widget.accentColor
-                                    : widget.palette.textSecondary,
+                        // Rotating glowing indicator pill
+                        Transform.rotate(
+                          angle: activeAngleDeg * math.pi / 180.0,
+                          child: Transform.translate(
+                            offset: Offset(0, -knobRadius),
+                            child: Container(
+                              width: 6,
+                              height: 15,
+                              decoration: BoxDecoration(
+                                color: Color.lerp(widget.accentColor, Colors.white, 0.28),
+                                borderRadius: BorderRadius.circular(99),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.white.withValues(alpha: 0.75),
+                                    blurRadius: 4,
+                                  ),
+                                  BoxShadow(
+                                    color: widget.accentColor,
+                                    blurRadius: 14,
+                                    spreadRadius: 1,
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 4),
-                              Text(
-                                widget.lang == LangCode.tr
-                                    ? widget.boiler.statusTextTr
-                                    : widget.boiler.statusTextEn,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w500,
-                                  color: widget.palette.textSecondary,
-                                  fontFeatures: const [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ),
+
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              widget.lang == LangCode.tr ? 'HEDEF TERMOSTAT' : 'TARGET THERMOSTAT',
+                              style: TextStyle(
+                                fontSize: widget.compact ? 9 : 10,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 1.4,
+                                color: widget.palette.textSecondary,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${widget.targetTemp.toStringAsFixed(1)}°',
+                              style: TextStyle(
+                                fontSize: widget.compact ? 30 : 44,
+                                fontWeight: FontWeight.w700,
+                                height: 1.05,
+                                letterSpacing: -0.5,
+                                color: widget.palette.textPrimary,
+                                fontFeatures: const [FontFeature.tabularFigures()],
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              widget.modeName,
+                              style: TextStyle(
+                                fontSize: widget.compact ? 9 : 11,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.0,
+                                color: widget.accentColor,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.local_fire_department_outlined,
+                                  size: 12,
+                                  color: widget.boiler.isHeating
+                                      ? widget.accentColor
+                                      : widget.palette.textSecondary,
                                 ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ],
+                                const SizedBox(width: 4),
+                                Text(
+                                  widget.lang == LangCode.tr
+                                      ? widget.boiler.statusTextTr
+                                      : widget.boiler.statusTextEn,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w500,
+                                    color: widget.palette.textSecondary,
+                                    fontFeatures: const [FontFeature.tabularFigures()],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -277,25 +304,113 @@ class _StepperButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isLight = palette.isLight;
     return Opacity(
       opacity: enabled ? 1.0 : 0.35,
-      child: Material(
-        color: palette.cardBg,
-        shape: CircleBorder(
-          side: BorderSide(color: palette.cardBorder),
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isLight ? palette.cardBg : Colors.white.withValues(alpha: 0.065),
+          border: Border.all(
+            color: isLight ? palette.cardBorder : Colors.white.withValues(alpha: 0.13),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isLight ? 0.12 : 0.48),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: enabled ? onTap : null,
-          child: SizedBox(
-            width: size,
-            height: size,
-            child: Icon(icon, color: palette.textPrimary, size: 18),
+        child: ClipOval(
+          child: CustomPaint(
+            painter: _CircleTopRimPainter(isLight: isLight),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: enabled ? onTap : null,
+                child: Center(
+                  child: Icon(icon, color: palette.textPrimary, size: 18),
+                ),
+              ),
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+class _DialBevelPainter extends CustomPainter {
+  final bool isLight;
+
+  const _DialBevelPainter({required this.isLight});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    // Bottom concave shading (simulates CSS inset 0 -10px 24px rgba(0,0,0,0.65))
+    final bottomShade = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Colors.transparent,
+          Colors.transparent,
+          Colors.black.withValues(alpha: isLight ? 0.08 : 0.56),
+        ],
+        stops: const [0.0, 0.58, 1.0],
+      ).createShader(rect);
+    canvas.drawOval(rect, bottomShade);
+
+    // Top specular rim arc (simulates CSS inset 0 1px 1px rgba(255,255,255,0.16))
+    final arcRect = Rect.fromLTWH(0.8, 0.8, size.width - 1.6, size.height - 1.6);
+    final rimPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.center,
+        colors: [
+          Colors.white.withValues(alpha: isLight ? 0.85 : 0.18),
+          Colors.transparent,
+        ],
+      ).createShader(rect);
+    canvas.drawArc(arcRect, -math.pi * 0.88, math.pi * 0.76, false, rimPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _DialBevelPainter oldDelegate) => oldDelegate.isLight != isLight;
+}
+
+class _CircleTopRimPainter extends CustomPainter {
+  final bool isLight;
+
+  const _CircleTopRimPainter({required this.isLight});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final arcRect = Rect.fromLTWH(0.8, 0.8, size.width - 1.6, size.height - 1.6);
+    final rimPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.center,
+        colors: [
+          Colors.white.withValues(alpha: isLight ? 0.70 : 0.18),
+          Colors.transparent,
+        ],
+      ).createShader(rect);
+    canvas.drawArc(arcRect, -math.pi * 0.85, math.pi * 0.70, false, rimPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _CircleTopRimPainter oldDelegate) => oldDelegate.isLight != isLight;
 }
 
 class _TickRingPainter extends CustomPainter {
