@@ -41,3 +41,5 @@ jobs:
           path: flutter_app/build/web
       - id: deployment
         uses: actions/deploy-pages@v4
+        
+        flutter build web --release --pwa-strategy=none --base-href "/${{ github.event.repository.name }}/"
