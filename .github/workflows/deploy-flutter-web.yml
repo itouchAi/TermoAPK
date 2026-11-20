@@ -35,11 +35,10 @@ jobs:
           flutter create . --platforms=web
           flutter pub get
           flutter build web --release --base-href "/${{ github.event.repository.name }}/"
+          rm -f build/web/flutter_service_worker.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: flutter_app/build/web
       - id: deployment
         uses: actions/deploy-pages@v4
-flutter build web --release --base-href "/${{ github.event.repository.name }}/"
-rm -f build/web/flutter_service_worker.js
