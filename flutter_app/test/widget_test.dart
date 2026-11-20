@@ -191,6 +191,19 @@ void main() {
     expect(freezeGuard.freezeRisk, isTrue);
   });
 
+  test('AmbientAudioService generates valid mascot WAV audio for all characters and sleepy mode', () {
+    for (final mascot in MascotCharacter.values) {
+      final awakeBytes = AmbientAudioService.generateMascotSoundWavBytes(mascot);
+      final sleepyBytes = AmbientAudioService.generateMascotSoundWavBytes(mascot, sleepy: true);
+      expect(awakeBytes.length, greaterThan(44));
+      expect(sleepyBytes.length, greaterThan(44));
+      expect(String.fromCharCodes(awakeBytes.sublist(0, 4)), 'RIFF');
+      expect(String.fromCharCodes(awakeBytes.sublist(8, 12)), 'WAVE');
+      expect(String.fromCharCodes(sleepyBytes.sublist(0, 4)), 'RIFF');
+      expect(String.fromCharCodes(sleepyBytes.sublist(8, 12)), 'WAVE');
+    }
+  });
+
   test('HardwareService scales haptic vibration amplitude within valid 1-255 bounds', () {
     expect(HardwareService.scaledAmplitude(200, 100), 200);
     expect(HardwareService.scaledAmplitude(200, 50), 100);

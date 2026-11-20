@@ -200,4 +200,95 @@ class AmbientAudioService {
       await _chimePlayer.play(BytesSource(generateChimeWavBytes(urgent: urgent)));
     } catch (_) {}
   }
+
+  /// Generates a character-specific offline 16-bit PCM WAV chirp/purr/chime
+  /// for each virtual assistant mascot (works 100% offline on Android & Web).
+  static Uint8List generateMascotSoundWavBytes(
+    MascotCharacter character, {
+    bool sleepy = false,
+  }) {
+    const sampleRate = 22050;
+    const totalMs = 360;
+    const numSamples = (sampleRate * totalMs) ~/ 1000;
+    const dataSize = numSamples * 2;
+    final buffer = ByteData(44 + dataSize);
+
+    void writeAscii(int offset, String text) {
+      for (int i = 0; i < text.length; i++) {
+        buffer.setUint8(offset + i, text.codeUnitAt(i));
+      }
+    }
+
+    writeAscii(0, 'RIFF');
+    buffer.setUint32(4, 36 + dataSize, Endian.little);
+    writeAscii(8, 'WAVE');
+    writeAscii(12, 'fmt ');
+    buffer.setUint32(16, 16, Endian.little);
+    buffer.setUint16(20, 1, Endian.little);
+    buffer.setUint16(22, 1, Endian.little);
+    buffer.setUint32(24, sampleRate, Endian.little);
+    buffer.setUint32(28, sampleRate * 2, Endian.little);
+    buffer.setUint16(32, 2, Endian.little);
+    buffer.setUint16(34, 16, Endian.little);
+    writeAscii(36, 'data');
+    buffer.setUint32(40, dataSize, Endian.little);
+
+    for (int i = 0; i < numSamples; i++) {
+      final p = i / numSamples;
+      final t = i / sampleRate;
+      final env = math.sin(p * math.pi);
+      double sample = 0.0;
+
+      if (sleepy) {
+        final f = 360.0 - p * 140.0;
+        sample = math.sin(2 * math.pi * f * t) * env * 0.30;
+      } else {
+        switch (character) {
+          case MascotCharacter.termoBot:
+            // Retro dual-step robot bleep
+            final f = p < 0.45 ? 660.0 : 990.0;
+            sample = (math.sin(2 * math.pi * f * t) + 0.25 * math.sin(6 * math.pi * f * t)) * env * 0.34;
+            break;
+          case MascotCharacter.mirnav:
+            // Soft rising cat chirp + gentle 26Hz purr LFO
+            final purr = 0.7 + 0.3 * math.sin(2 * math.pi * 26.0 * t);
+            final f = 440.0 + math.sin(p * math.pi) * 260.0;
+            sample = math.sin(2 * math.pi * f * t) * env * purr * 0.38;
+            break;
+          case MascotCharacter.puki:
+            // Playful quick double-hop bunny boing
+            final hopEnv = math.sin((p * 2.0 % 1.0) * math.pi);
+            final f = 580.0 + p * 380.0;
+            sample = math.sin(2 * math.pi * f * t) * hopEnv * 0.38;
+            break;
+          case MascotCharacter.mert:
+            // Warm friendly male assistant two-tone fifth
+            final f = p < 0.5 ? 392.0 : 523.25;
+            sample = (math.sin(2 * math.pi * f * t) * 0.75 + math.sin(4 * math.pi * f * t) * 0.20) * env * 0.36;
+            break;
+          case MascotCharacter.ela:
+            // Bright soft bell harmonic chord
+            final f = p < 0.5 ? 659.25 : 880.0;
+            sample = (math.sin(2 * math.pi * f * t) + 0.35 * math.sin(2 * math.pi * 1318.5 * t)) * env * 0.32;
+            break;
+        }
+      }
+
+      final pcm = (sample * 18000).round().clamp(-32767, 32767);
+      buffer.setInt16(44 + i * 2, pcm, Endian.little);
+    }
+    return buffer.buffer.asUint8List();
+  }
+
+  static Future<void> playMascotSound(
+    MascotCharacter character, {
+    bool sleepy = false,
+  }) async {
+    try {
+      await _chimePlayer.stop();
+      await _chimePlayer.setReleaseMode(ReleaseMode.release);
+      await _chimePlayer.setVolume(0.65);
+      await _chimePlayer.play(BytesSource(generateMascotSoundWavBytes(character, sleepy: sleepy)));
+    } catch (_) {}
+  }
 }

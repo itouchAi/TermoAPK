@@ -2314,10 +2314,30 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           (ScreensaverBackdrop.nightNebula, 'Gece Nebula', tr ? 'Derin obsidyen' : 'Deep obsidian', const Color(0xFF3B0764)),
           (ScreensaverBackdrop.custom, tr ? 'Özel / Cihaz' : 'Custom / Accent', tr ? 'Tema rengi' : 'Accent color', widget.accentColor),
         ];
+        final activeMascotMeta = MascotMeta.of(_draft.mascotCharacter);
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                _InfoBadge(
+                  text: '${activeMascotMeta.name} (${tr ? activeMascotMeta.roleTr : activeMascotMeta.roleEn})',
+                  color: activeMascotMeta.color,
+                ),
+                _InfoBadge(
+                  text: tr ? 'Bekleme: ${_draft.screensaverIdleSeconds} sn' : 'Idle: ${_draft.screensaverIdleSeconds}s',
+                  color: const Color(0xFFF59E0B),
+                ),
+                _InfoBadge(
+                  text: _draft.screensaverBlurBg ? (tr ? 'Cam Blur: Açık' : 'Glass Blur: On') : (tr ? 'Cam Blur: Kapalı' : 'Glass Blur: Off'),
+                  color: _draft.screensaverBlurBg ? const Color(0xFF38BDF8) : const Color(0xFF9CA3AF),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
             OutlinedButton.icon(
               onPressed: () {
                 _hapticTap();
@@ -2344,7 +2364,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             ),
             const SizedBox(height: 8),
             SizedBox(
-              height: 84,
+              height: 92,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: MascotCharacter.values.length,
@@ -2357,26 +2377,29 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                     onTap: () {
                       _hapticTap();
                       setState(() => _draft = _draft.copyWith(mascotCharacter: ch));
+                      if (_draft.mascotSoundsEnabled) {
+                        AmbientAudioService.playMascotSound(ch);
+                      }
                     },
                     child: Container(
-                      width: 86,
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                      width: 88,
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
                       decoration: BoxDecoration(
-                        color: selected ? const Color(0xFFF59E0B).withValues(alpha: 0.16) : Colors.white.withValues(alpha: 0.04),
+                        color: selected ? meta.color.withValues(alpha: 0.18) : Colors.white.withValues(alpha: 0.04),
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(
-                          color: selected ? const Color(0xFFF59E0B) : Colors.white.withValues(alpha: 0.10),
+                          color: selected ? meta.color : Colors.white.withValues(alpha: 0.10),
                         ),
                       ),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(meta.icon, size: 22, color: meta.color),
-                          const SizedBox(height: 4),
+                          MascotAvatar(character: ch, size: 34, happy: selected),
+                          const SizedBox(height: 5),
                           Text(meta.name, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
                           Text(
                             tr ? meta.roleTr : meta.roleEn,
-                            style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.55)),
+                            style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.58)),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -2504,7 +2527,11 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                     activeColor: const Color(0xFF10B981),
                     onTap: () {
                       _hapticTap();
-                      setState(() => _draft = _draft.copyWith(mascotSoundsEnabled: !_draft.mascotSoundsEnabled));
+                      final next = !_draft.mascotSoundsEnabled;
+                      setState(() => _draft = _draft.copyWith(mascotSoundsEnabled: next));
+                      if (next) {
+                        AmbientAudioService.playMascotSound(_draft.mascotCharacter);
+                      }
                     },
                   ),
                 ),

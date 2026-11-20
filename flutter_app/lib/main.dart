@@ -198,6 +198,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           }
         });
         _syncPageIndexToActiveTab(jump: true);
+        _resetIdleTimer();
       } catch (_) {
         // Ignore malformed stored state
       }
@@ -520,8 +521,18 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     final isEco = _visual.performanceMode == PerformanceMode.ecoBattery;
 
     return Listener(
-      onPointerDown: (_) => _resetIdleTimer(),
-      onPointerMove: (_) => _resetIdleTimer(),
+      onPointerDown: (_) {
+        if (!_termoBotIdle) _resetIdleTimer();
+      },
+      onPointerUp: (_) {
+        if (_termoBotIdle) {
+          Future.microtask(() {
+            if (mounted && _termoBotIdle) _resetIdleTimer();
+          });
+        } else {
+          _resetIdleTimer();
+        }
+      },
       child: Scaffold(
         backgroundColor: palette.scaffoldBg,
         body: Stack(
@@ -847,10 +858,19 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                isSleeping: _termoBotIdle,
                character: _settings.mascotCharacter,
                soundsEnabled: _settings.mascotSoundsEnabled,
+               hapticEnabled: _settings.hapticEnabled,
+               hapticStrength: _settings.hapticStrength,
+               roomTemp: _roomTemp,
+               targetTemp: _targetTemp,
+               boiler: boiler,
                lang: _lang,
                accentColor: activeColor,
                bottomOffset: (compactLandscape ? 72.0 : 88.0) + media.padding.bottom,
                onWake: _resetIdleTimer,
+               onOpenScreensaver: () => setState(() {
+                 _termoBotIdle = false;
+                 _screensaverPreview = true;
+               }),
              ),
 
              // Fullscreen Screensaver Preview Overlay
@@ -860,8 +880,12 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                  backdrop: _settings.screensaverBackdrop,
                  blurBackground: _settings.screensaverBlurBg,
                  soundsEnabled: _settings.mascotSoundsEnabled,
+                 hapticEnabled: _settings.hapticEnabled,
+                 hapticStrength: _settings.hapticStrength,
                  roomTemp: _roomTemp,
                  targetTemp: _targetTemp,
+                 boiler: boiler,
+                 locationName: _locationName,
                  accentColor: activeColor,
                  lang: _lang,
                  onExit: () {
