@@ -41,7 +41,5 @@ jobs:
           path: flutter_app/build/web
       - id: deployment
         uses: actions/deploy-pages@v4
-
-        flutter build web --release --base-href "/${{ github.event.repository.name }}/"
+flutter build web --release --base-href "/${{ github.event.repository.name }}/"
 rm -f build/web/flutter_service_worker.js
-        
