@@ -80,14 +80,14 @@ class AiCallService {
           );
         }
         if (isCold && !nextBoiler.isHeating) {
-          return const AiCallTriggerDecision(
+          return AiCallTriggerDecision(
             shouldCall: true,
             reason: AiCallReason.coldRoom,
             urgent: safety.freezeRisk,
           );
         }
         if (isHot && nextBoiler.isHeating) {
-          return const AiCallTriggerDecision(
+          return AiCallTriggerDecision(
             shouldCall: true,
             reason: AiCallReason.hotRoom,
             urgent: safety.overheat,

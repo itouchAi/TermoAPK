@@ -156,9 +156,20 @@ class VoiceSpeechService {
           'name': chosen['name'] ?? '',
           'locale': chosen['locale'] ?? (lang == LangCode.tr ? 'tr-TR' : 'en-US'),
         });
-        await _tts.setPitch(female ? 1.06 : 0.88);
+        await _tts.setPitch(female ? 1.05 : 0.88);
       } else {
-        await _tts.setPitch(female ? 1.24 : 0.78);
+        final langPrefix = lang == LangCode.tr ? 'tr' : 'en';
+        final fallbackVoice = _cachedVoices?.firstWhere(
+          (v) => (v['locale'] ?? '').toLowerCase().startsWith(langPrefix),
+          orElse: () => const <String, String>{},
+        );
+        if (fallbackVoice != null && (fallbackVoice['name'] ?? '').isNotEmpty) {
+          await _tts.setVoice({
+            'name': fallbackVoice['name']!,
+            'locale': fallbackVoice['locale'] ?? (lang == LangCode.tr ? 'tr-TR' : 'en-US'),
+          });
+        }
+        await _tts.setPitch(female ? 1.28 : 0.74);
       }
     } catch (_) {
       // Safe fallback in headless unit tests
@@ -215,6 +226,7 @@ class VoiceSpeechService {
     final preferred = lang == LangCode.tr
         ? (kIsWeb ? 'tr-TR' : 'tr_TR')
         : (kIsWeb ? 'en-US' : 'en_US');
+    if (kIsWeb) return preferred;
     try {
       final locales = await _stt.locales();
       final prefix = lang == LangCode.tr ? 'tr' : 'en';

@@ -10,6 +10,8 @@ import 'package:termostat_flow/services/voice_speech_service.dart';
 import 'package:termostat_flow/widgets/termo_bot.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('ThermostatMath snaps temperatures to 0.5C bounds', () {
     expect(ThermostatMath.snapTemperature(22.34), 22.5);
     expect(ThermostatMath.snapTemperature(5.0), ThermostatMath.minTemp);
