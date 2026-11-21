@@ -362,4 +362,32 @@ void main() {
     expect(String.fromCharCodes(voiceCue.sublist(0, 4)), 'RIFF');
     expect(String.fromCharCodes(voiceCue.sublist(8, 12)), 'WAVE');
   });
+
+  test('ThermostatMath.parseVoiceCommand handles boiler shutoff, relative deltas, and modes', () {
+    final off = ThermostatMath.parseVoiceCommand('kombiyi kapat', currentTargetTemp: 23.0);
+    expect(off.handled, isTrue);
+    expect(off.newTargetTemp, ThermostatMath.minTemp);
+
+    final up5 = ThermostatMath.parseVoiceCommand('kombiyi 5 derece arttır', currentTargetTemp: 20.0);
+    expect(up5.handled, isTrue);
+    expect(up5.newTargetTemp, 25.0);
+
+    final down2 = ThermostatMath.parseVoiceCommand('2 derece azalt', currentTargetTemp: 22.5);
+    expect(down2.handled, isTrue);
+    expect(down2.newTargetTemp, 20.5);
+
+    final wordUp = ThermostatMath.parseVoiceCommand('beş derece yükselt', currentTargetTemp: 19.0);
+    expect(wordUp.handled, isTrue);
+    expect(wordUp.newTargetTemp, 24.0);
+
+    final eco = ThermostatMath.parseVoiceCommand('eko mod');
+    expect(eco.handled, isTrue);
+    expect(eco.newTargetTemp, 20.0);
+    expect(eco.newPreset, PresetId.eko);
+
+    final boost = ThermostatMath.parseVoiceCommand('boost modunu aktif et');
+    expect(boost.handled, isTrue);
+    expect(boost.newTargetTemp, 25.0);
+    expect(boost.newPreset, PresetId.boost);
+  });
 }

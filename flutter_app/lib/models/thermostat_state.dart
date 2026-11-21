@@ -414,39 +414,126 @@ abstract final class ThermostatMath {
     );
   }
 
-  static VoiceCommandResult parseVoiceCommand(String raw) {
+  static double? _extractSignedOrUnsignedDeltaNumber(String text) {
+    final numMatch = RegExp(r'(\d+(?:[.,]\d)?)').firstMatch(text);
+    if (numMatch != null) {
+      return double.tryParse(numMatch.group(1)!.replaceAll(',', '.'));
+    }
+    const wordMap = <String, double>{
+      'yarım': 0.5,
+      'half': 0.5,
+      'bir': 1.0,
+      'one': 1.0,
+      'iki': 2.0,
+      'two': 2.0,
+      'üç': 3.0,
+      'three': 3.0,
+      'dört': 4.0,
+      'four': 4.0,
+      'beş': 5.0,
+      'five': 5.0,
+      'altı': 6.0,
+      'six': 6.0,
+      'yedi': 7.0,
+      'seven': 7.0,
+      'sekiz': 8.0,
+      'eight': 8.0,
+      'dokuz': 9.0,
+      'nine': 9.0,
+      'on': 10.0,
+      'ten': 10.0,
+    };
+    final tokens = text.split(RegExp(r'[\s.,!?°]+'));
+    for (final tok in tokens) {
+      if (wordMap.containsKey(tok)) {
+        return wordMap[tok];
+      }
+    }
+    return null;
+  }
+
+  static VoiceCommandResult parseVoiceCommand(
+    String raw, {
+    double currentTargetTemp = 22.5,
+  }) {
     final text = raw.trim().toLowerCase();
     if (text.isEmpty) {
       return const VoiceCommandResult(
         handled: false,
-        replyTr: 'Bir komut yazın veya aşağıdan seçin.',
-        replyEn: 'Type or pick a command below.',
+        replyTr: 'Bir komut söyleyin, yazın veya aşağıdan seçin.',
+        replyEn: 'Speak, type, or pick a command below.',
       );
     }
 
-    final tempMatch = RegExp(r'(\d{2}(?:[.,]\d)?)').firstMatch(text);
-    if (tempMatch != null &&
-        (text.contains('derece') ||
-            text.contains('yap') ||
-            text.contains('ayar') ||
-            text.contains('temp') ||
-            text.contains('set') ||
-            text.contains('°'))) {
-      final parsed = double.tryParse(tempMatch.group(1)!.replaceAll(',', '.'));
-      if (parsed != null) {
-        final snapped = snapTemperature(parsed);
-        final preset = findMatchingPreset(snapped);
-        return VoiceCommandResult(
-          handled: true,
-          newTargetTemp: snapped,
-          newPreset: preset?.id,
-          navigateTab: TabId.termo,
-          replyTr: 'Hedef sıcaklık ${snapped.toStringAsFixed(1)}°C olarak ayarlandı.',
-          replyEn: 'Target temperature set to ${snapped.toStringAsFixed(1)}°C.',
-        );
-      }
+    // 1) Boiler shutoff / standby commands ("kombiyi kapat", "ısıtmayı kapat", "turn off")
+    if (text.contains('kapat') ||
+        text.contains('durdur') ||
+        text.contains('kapa') ||
+        text.contains('turn off') ||
+        text.contains('boiler off') ||
+        text.contains('stop heating')) {
+      return const VoiceCommandResult(
+        handled: true,
+        newTargetTemp: minTemp,
+        newPreset: null,
+        navigateTab: TabId.termo,
+        replyTr: 'Kombi kapatıldı ve bekleme moduna (10.0°C) alındı.',
+        replyEn: 'Boiler turned off and placed in standby (10.0°C).',
+      );
     }
 
+    // 2) Relative adjustments ("kombiyi 5 derece arttır", "2 derece azalt", "düşür", "yükselt")
+    final hasIncrease = text.contains('arttır') ||
+        text.contains('artır') ||
+        text.contains('yükselt') ||
+        text.contains('çoğalt') ||
+        text.contains('aç ') ||
+        text.contains('increase') ||
+        text.contains('raise') ||
+        text.contains('up');
+    final hasDecrease = text.contains('azalt') ||
+        text.contains('düşür') ||
+        text.contains('indir') ||
+        text.contains('kıs') ||
+        text.contains('decrease') ||
+        text.contains('lower') ||
+        text.contains('down');
+
+    if (hasIncrease || hasDecrease) {
+      final rawDelta = _extractSignedOrUnsignedDeltaNumber(text) ?? 1.0;
+      final delta = rawDelta.clamp(0.5, 15.0);
+      final next = snapTemperature(currentTargetTemp + (hasDecrease ? -delta : delta));
+      final preset = findMatchingPreset(next);
+      return VoiceCommandResult(
+        handled: true,
+        newTargetTemp: next,
+        newPreset: preset?.id,
+        navigateTab: TabId.termo,
+        replyTr: hasDecrease
+            ? 'Sıcaklık ${delta.toStringAsFixed(1)}°C azaltılarak ${next.toStringAsFixed(1)}°C yapıldı.'
+            : 'Sıcaklık ${delta.toStringAsFixed(1)}°C arttırılarak ${next.toStringAsFixed(1)}°C yapıldı.',
+        replyEn: hasDecrease
+            ? 'Temperature lowered by ${delta.toStringAsFixed(1)}°C to ${next.toStringAsFixed(1)}°C.'
+            : 'Temperature raised by ${delta.toStringAsFixed(1)}°C to ${next.toStringAsFixed(1)}°C.',
+      );
+    }
+
+    // 3) Boiler turn-on command ("kombiyi aç", "ısıtmayı başlat", "turn on")
+    if ((text.contains('kombi') && text.contains('aç')) ||
+        (text.contains('ısıt') && (text.contains('aç') || text.contains('başlat'))) ||
+        text.contains('turn on') ||
+        text.contains('start heating')) {
+      return const VoiceCommandResult(
+        handled: true,
+        newTargetTemp: 23.0,
+        newPreset: PresetId.konfor,
+        navigateTab: TabId.termo,
+        replyTr: 'Kombi açıldı ve hedef sıcaklık 23.0°C olarak ayarlandı.',
+        replyEn: 'Boiler turned on and target set to 23.0°C.',
+      );
+    }
+
+    // 4) Preset modes ("eko", "konfor", "gece", "boost")
     if (text.contains('eko') || text.contains('eco')) {
       return const VoiceCommandResult(
         handled: true,
@@ -477,7 +564,7 @@ abstract final class ThermostatMath {
         replyEn: 'Night mode (18.5°C) activated.',
       );
     }
-    if (text.contains('boost') || text.contains('hızlı') || text.contains('yüksek')) {
+    if (text.contains('boost') || text.contains('hızlı') || text.contains('yüksek') || text.contains('turbo')) {
       return const VoiceCommandResult(
         handled: true,
         newTargetTemp: 25.0,
@@ -487,6 +574,26 @@ abstract final class ThermostatMath {
         replyEn: 'Boost mode (25.0°C) activated.',
       );
     }
+
+    // 5) Explicit target temperature ("24 derece yap", "23.5", "22°")
+    final tempMatch = RegExp(r'(\d{2}(?:[.,]\d)?)').firstMatch(text);
+    if (tempMatch != null) {
+      final parsed = double.tryParse(tempMatch.group(1)!.replaceAll(',', '.'));
+      if (parsed != null && parsed >= 5.0 && parsed <= 40.0) {
+        final snapped = snapTemperature(parsed);
+        final preset = findMatchingPreset(snapped);
+        return VoiceCommandResult(
+          handled: true,
+          newTargetTemp: snapped,
+          newPreset: preset?.id,
+          navigateTab: TabId.termo,
+          replyTr: 'Hedef sıcaklık ${snapped.toStringAsFixed(1)}°C olarak ayarlandı.',
+          replyEn: 'Target temperature set to ${snapped.toStringAsFixed(1)}°C.',
+        );
+      }
+    }
+
+    // 6) Tab navigation
     if (text.contains('hava') || text.contains('weather')) {
       return const VoiceCommandResult(
         handled: true,
@@ -514,8 +621,8 @@ abstract final class ThermostatMath {
 
     return const VoiceCommandResult(
       handled: false,
-      replyTr: 'Anlaşılamadı. Örnek: "23 derece yap", "Eko mod" veya "Hava durumu".',
-      replyEn: 'Not recognized. Try "Set 23°", "Eco mode", or "Weather".',
+      replyTr: 'Anlaşılamadı. Örnek: "Kombiyi kapat", "5 derece arttır", "Eko mod" veya "24 derece yap".',
+      replyEn: 'Not recognized. Try "Turn off boiler", "Raise 5 degrees", "Eco mode", or "Set 24°".',
     );
   }
 }

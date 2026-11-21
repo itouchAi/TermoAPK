@@ -16,6 +16,7 @@ import 'services/ambient_audio_service.dart';
 import 'services/firebase_sync_service.dart';
 import 'services/hardware_service.dart';
 import 'services/notification_service.dart';
+import 'services/voice_speech_service.dart';
 import 'widgets/ai_phone_call_overlay.dart';
 import 'widgets/boot_ceremony_overlay.dart';
 import 'widgets/flow_tab_bar.dart';
@@ -315,6 +316,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     _pageController.dispose();
     AmbientAudioService.stop();
     AmbientAudioService.stopRingtone();
+    VoiceSpeechService.stopSpeaking();
+    VoiceSpeechService.stopListening();
     HardwareService.exitSmartDisplayHardware();
     super.dispose();
   }
@@ -608,8 +611,12 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                   context: context,
                   lang: _lang,
                   accentColor: activeColor,
+                  currentTargetTemp: _targetTemp,
+                  ttsEnabled: _settings.aiCallVoiceBriefEnabled,
                   onExecute: (res) {
-                    if (res.newTargetTemp != null) _changeTarget(res.newTargetTemp!);
+                    if (res.newTargetTemp != null) {
+                      _changeTarget(res.newTargetTemp!, suppressAiCall: true);
+                    }
                     if (res.navigateTab != null) _selectTab(res.navigateTab!);
                   },
                 );

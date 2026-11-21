@@ -1,23 +1,47 @@
 import 'package:flutter/material.dart';
 import '../models/thermostat_state.dart';
+import '../services/voice_speech_service.dart';
 
 Future<void> showVoiceCommandSheet({
   required BuildContext context,
   required LangCode lang,
   required Color accentColor,
+  required double currentTargetTemp,
+  bool ttsEnabled = true,
   required ValueChanged<VoiceCommandResult> onExecute,
 }) {
   final controller = TextEditingController();
   String? feedback;
+  bool listening = false;
+  bool speakingReply = ttsEnabled;
+  var workingTarget = currentTargetTemp;
 
   final presets = lang == LangCode.tr
-      ? ['Sıcaklığı 24 derece yap', 'Eko moda geç', 'Gece modu', 'Hava durumunu aç']
-      : ['Set temperature to 24°', 'Switch to Eco mode', 'Comfort mode', 'Open weather'];
+      ? [
+          'Kombiyi kapat',
+          '5 derece arttır',
+          '2 derece azalt',
+          'Eko moda geç',
+          'Konfor modu',
+          'Gece modu',
+          'Boost modu',
+          'Hava durumunu aç',
+        ]
+      : [
+          'Turn off boiler',
+          'Raise 5 degrees',
+          'Lower 2 degrees',
+          'Switch to Eco mode',
+          'Comfort mode',
+          'Night mode',
+          'Boost mode',
+          'Open weather',
+        ];
 
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
-    backgroundColor: const Color(0xFF111218),
+    backgroundColor: const Color(0xFF0E1118),
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
@@ -25,12 +49,66 @@ Future<void> showVoiceCommandSheet({
       return StatefulBuilder(
         builder: (ctx, setSheetState) {
           void submit(String text) {
-            final res = ThermostatMath.parseVoiceCommand(text);
+            final res = ThermostatMath.parseVoiceCommand(
+              text,
+              currentTargetTemp: workingTarget,
+            );
+            final reply = lang == LangCode.tr ? res.replyTr : res.replyEn;
             setSheetState(() {
-              feedback = lang == LangCode.tr ? res.replyTr : res.replyEn;
+              feedback = reply;
             });
-            if (res.handled) onExecute(res);
+            if (res.handled) {
+              if (res.newTargetTemp != null) {
+                workingTarget = res.newTargetTemp!;
+              }
+              onExecute(res);
+            }
+            if (speakingReply) {
+              VoiceSpeechService.speak(reply, lang: lang);
+            }
             controller.clear();
+          }
+
+          Future<void> toggleMic() async {
+            if (listening) {
+              await VoiceSpeechService.stopListening();
+              if (ctx.mounted) setSheetState(() => listening = false);
+              return;
+            }
+            setSheetState(() {
+              listening = true;
+              feedback = lang == LangCode.tr
+                  ? 'Dinleniyor... ("Kombiyi kapat", "5 derece arttır", "Eko mod")'
+                  : 'Listening... ("Turn off boiler", "Raise 5 degrees", "Eco mode")';
+            });
+            final ok = await VoiceSpeechService.startListening(
+              lang: lang,
+              onResultText: (words) {
+                if (ctx.mounted) {
+                  setSheetState(() => controller.text = words);
+                }
+              },
+              onFinalResult: (words) {
+                if (ctx.mounted) {
+                  setSheetState(() => listening = false);
+                  submit(words);
+                }
+              },
+              onStatusError: (err) {
+                if (ctx.mounted) {
+                  setSheetState(() {
+                    listening = false;
+                    feedback = err;
+                  });
+                }
+              },
+              onDone: () {
+                if (ctx.mounted) setSheetState(() => listening = false);
+              },
+            );
+            if (!ok && ctx.mounted) {
+              setSheetState(() => listening = false);
+            }
           }
 
           return Padding(
@@ -51,31 +129,115 @@ Future<void> showVoiceCommandSheet({
                       Row(
                         children: [
                           CircleAvatar(
-                            radius: 16,
-                            backgroundColor: accentColor.withValues(alpha: 0.2),
-                            child: Icon(Icons.mic_none_rounded, size: 18, color: accentColor),
+                            radius: 17,
+                            backgroundColor: (listening ? const Color(0xFFEF4444) : accentColor)
+                                .withValues(alpha: 0.22),
+                            child: Icon(
+                              listening ? Icons.graphic_eq_rounded : Icons.mic_rounded,
+                              size: 19,
+                              color: listening ? const Color(0xFFF87171) : accentColor,
+                            ),
                           ),
                           const SizedBox(width: 10),
-                          Text(
-                            lang == LangCode.tr ? 'Sesli Komut Asistanı' : 'Voice Command Assistant',
-                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                lang == LangCode.tr ? 'Sesli Komut & Konuşma Asistanı' : 'Voice Command & Speech Assistant',
+                                style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: Colors.white),
+                              ),
+                              Text(
+                                lang == LangCode.tr
+                                    ? 'Hedef: ${workingTarget.toStringAsFixed(1)}°C · Mikrofon + Sesli Yanıt'
+                                    : 'Target: ${workingTarget.toStringAsFixed(1)}°C · Mic + Voice Reply',
+                                style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.56)),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                      IconButton(
-                        onPressed: () => Navigator.of(ctx).pop(),
-                        icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: lang == LangCode.tr ? 'Sesli Yanıt' : 'Voice Reply',
+                            onPressed: () {
+                              setSheetState(() => speakingReply = !speakingReply);
+                              if (!speakingReply) VoiceSpeechService.stopSpeaking();
+                            },
+                            icon: Icon(
+                              speakingReply ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+                              size: 20,
+                              color: speakingReply ? const Color(0xFF34D399) : Colors.white38,
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () => Navigator.of(ctx).pop(),
+                            icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
+
+                  // Big Press-to-Speak Microphone Banner
+                  GestureDetector(
+                    onTap: toggleMic,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: listening
+                            ? const Color(0xFFEF4444).withValues(alpha: 0.20)
+                            : accentColor.withValues(alpha: 0.16),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: listening
+                              ? const Color(0xFFF87171)
+                              : accentColor.withValues(alpha: 0.55),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            listening ? Icons.stop_circle_rounded : Icons.mic_rounded,
+                            size: 24,
+                            color: listening ? const Color(0xFFF87171) : accentColor,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  listening
+                                      ? (lang == LangCode.tr ? 'Dinleniyor... Durdurmak için dokun' : 'Listening... Tap to stop')
+                                      : (lang == LangCode.tr ? 'Mikrofonla Sesli Komut Ver' : 'Speak a Voice Command'),
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white),
+                                ),
+                                Text(
+                                  lang == LangCode.tr
+                                      ? 'Örn: "Kombiyi kapat", "5 derece arttır", "Eko / Konfor / Gece / Boost"'
+                                      : 'e.g. "Turn off boiler", "Raise 5 degrees", "Eco / Comfort / Night / Boost"',
+                                  style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.65)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
                   Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                    spacing: 7,
+                    runSpacing: 7,
                     children: [
                       for (final cmd in presets)
                         ActionChip(
-                          label: Text(cmd, style: const TextStyle(fontSize: 12, color: Colors.white)),
+                          label: Text(cmd, style: const TextStyle(fontSize: 11.5, color: Colors.white)),
                           backgroundColor: Colors.white.withValues(alpha: 0.07),
                           side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
                           onPressed: () => submit(cmd),
@@ -87,10 +249,19 @@ Future<void> showVoiceCommandSheet({
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.06),
+                        color: const Color(0xFF10B981).withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.35)),
                       ),
-                      child: Text(feedback!, style: const TextStyle(fontSize: 12, color: Colors.white)),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.campaign_rounded, size: 16, color: Color(0xFF34D399)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(feedback!, style: const TextStyle(fontSize: 12, color: Colors.white)),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                   const SizedBox(height: 12),
@@ -101,7 +272,7 @@ Future<void> showVoiceCommandSheet({
                           controller: controller,
                           style: const TextStyle(color: Colors.white, fontSize: 14),
                           decoration: InputDecoration(
-                            hintText: lang == LangCode.tr ? 'Örn: 23.5 derece yap...' : 'e.g. Set 23.5°...',
+                            hintText: lang == LangCode.tr ? 'Komut yazın (ör. 5 derece arttır)...' : 'Type command (e.g. Raise 5 degrees)...',
                             hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.4)),
                             filled: true,
                             fillColor: Colors.white.withValues(alpha: 0.06),
@@ -132,5 +303,8 @@ Future<void> showVoiceCommandSheet({
         },
       );
     },
-  );
+  ).whenComplete(() {
+    VoiceSpeechService.stopListening();
+    VoiceSpeechService.stopSpeaking();
+  });
 }

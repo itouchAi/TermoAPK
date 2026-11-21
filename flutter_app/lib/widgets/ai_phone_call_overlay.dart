@@ -6,6 +6,7 @@ import '../services/ai_call_service.dart';
 import '../services/ambient_audio_service.dart';
 import '../services/hardware_service.dart';
 import '../services/notification_service.dart';
+import '../services/voice_speech_service.dart';
 import 'termo_bot.dart';
 
 enum _CallPhase {
@@ -63,6 +64,7 @@ class AiPhoneCallOverlay extends StatefulWidget {
 class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     with SingleTickerProviderStateMixin {
   late final AnimationController _pulseCtrl;
+  final TextEditingController _voiceCmdCtrl = TextEditingController();
   Timer? _tickTimer;
   Timer? _closeDelayTimer;
 
@@ -71,7 +73,10 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
   int _callSeconds = 0;
   int _spokenChars = 0;
   bool _speakerMuted = false;
+  bool _listeningCommand = false;
+  bool _ttsPlaying = false;
   String? _quickActionAck;
+  String? _heardPreview;
 
   @override
   void initState() {
@@ -116,6 +121,18 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     return base;
   }
 
+  void _speakAloud(String text) {
+    if (_speakerMuted) return;
+    setState(() => _ttsPlaying = true);
+    VoiceSpeechService.speak(
+      text,
+      lang: widget.lang,
+      onComplete: () {
+        if (mounted) setState(() => _ttsPlaying = false);
+      },
+    );
+  }
+
   void _onSecondTick() {
     if (!mounted) return;
     if (_phase == _CallPhase.ringing) {
@@ -142,6 +159,8 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
 
   void _handleMissedTimeout() {
     AmbientAudioService.stopRingtone();
+    VoiceSpeechService.stopSpeaking();
+    VoiceSpeechService.stopListening();
     _tickTimer?.cancel();
     if (widget.hapticEnabled) {
       HardwareService.vibrateMs(
@@ -152,6 +171,8 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     setState(() {
       _ringRemaining = 0;
       _phase = _CallPhase.missed;
+      _listeningCommand = false;
+      _ttsPlaying = false;
     });
 
     if (widget.missedAlertEnabled) {
@@ -179,23 +200,34 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
       );
     }
     AmbientAudioService.playCallChime(answered: true);
-    if (widget.voiceBriefEnabled && !_speakerMuted) {
-      Future.delayed(const Duration(milliseconds: 360), () {
-        if (mounted && _phase == _CallPhase.answered && !_speakerMuted) {
-          AmbientAudioService.playVoiceBriefCue();
-        }
-      });
-    }
+
+    final meta = MascotMeta.of(widget.character);
+    final brief = AiCallService.buildVoiceScript(
+      reason: widget.reason,
+      assistantName: meta.name,
+      locationName: widget.locationName,
+      roomTemp: widget.roomTemp,
+      targetTemp: widget.targetTemp,
+      boiler: widget.boiler,
+      safety: widget.safety,
+      lang: widget.lang,
+    );
 
     setState(() {
       _phase = _CallPhase.answered;
       _callSeconds = 0;
       _spokenChars = widget.voiceBriefEnabled ? 34 : 9999;
     });
+
+    if (widget.voiceBriefEnabled && !_speakerMuted) {
+      _speakAloud(brief);
+    }
   }
 
   void _declineOrHangup() {
     AmbientAudioService.stopRingtone();
+    VoiceSpeechService.stopSpeaking();
+    VoiceSpeechService.stopListening();
     _tickTimer?.cancel();
     _closeDelayTimer?.cancel();
     if (widget.hapticEnabled) {
@@ -230,10 +262,84 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
         amplitude: HardwareService.scaledAmplitude(145, widget.hapticStrength),
       );
     }
+    final msg = widget.lang == LangCode.tr ? ackTr : ackEn;
     setState(() {
-      _quickActionAck = widget.lang == LangCode.tr ? ackTr : ackEn;
+      _quickActionAck = msg;
       _spokenChars = 9999;
     });
+    if (!_speakerMuted) {
+      _speakAloud(msg.replaceAll('✓', '').trim());
+    }
+  }
+
+  void _executeSpokenOrTypedCommand(String raw) {
+    final res = ThermostatMath.parseVoiceCommand(
+      raw,
+      currentTargetTemp: widget.targetTemp,
+    );
+    final reply = widget.lang == LangCode.tr ? res.replyTr : res.replyEn;
+    if (res.handled && res.newTargetTemp != null) {
+      widget.onAdjustTargetTemp(res.newTargetTemp!);
+      if (widget.hapticEnabled) {
+        HardwareService.vibrateMs(
+          50,
+          amplitude: HardwareService.scaledAmplitude(155, widget.hapticStrength),
+        );
+      }
+    }
+    setState(() {
+      _heardPreview = raw.trim().isNotEmpty ? '"${raw.trim()}"' : null;
+      _quickActionAck = res.handled ? '✓ $reply' : reply;
+      _spokenChars = 9999;
+    });
+    _voiceCmdCtrl.clear();
+    if (!_speakerMuted) {
+      _speakAloud(reply);
+    }
+  }
+
+  Future<void> _toggleCallMic() async {
+    if (_listeningCommand) {
+      await VoiceSpeechService.stopListening();
+      if (mounted) setState(() => _listeningCommand = false);
+      return;
+    }
+    setState(() {
+      _listeningCommand = true;
+      _ttsPlaying = false;
+      _heardPreview = widget.lang == LangCode.tr ? 'Dinleniyor...' : 'Listening...';
+    });
+    final ok = await VoiceSpeechService.startListening(
+      lang: widget.lang,
+      onResultText: (words) {
+        if (mounted) {
+          setState(() {
+            _heardPreview = '"$words"';
+            _voiceCmdCtrl.text = words;
+          });
+        }
+      },
+      onFinalResult: (words) {
+        if (mounted) {
+          setState(() => _listeningCommand = false);
+          _executeSpokenOrTypedCommand(words);
+        }
+      },
+      onStatusError: (err) {
+        if (mounted) {
+          setState(() {
+            _listeningCommand = false;
+            _quickActionAck = err;
+          });
+        }
+      },
+      onDone: () {
+        if (mounted) setState(() => _listeningCommand = false);
+      },
+    );
+    if (!ok && mounted) {
+      setState(() => _listeningCommand = false);
+    }
   }
 
   @override
@@ -241,7 +347,10 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     _tickTimer?.cancel();
     _closeDelayTimer?.cancel();
     _pulseCtrl.dispose();
+    _voiceCmdCtrl.dispose();
     AmbientAudioService.stopRingtone();
+    VoiceSpeechService.stopSpeaking();
+    VoiceSpeechService.stopListening();
     super.dispose();
   }
 
@@ -265,17 +374,24 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
             : fullScript)
         : '';
 
+    // Solid opaque radial gradient stops so nothing behind the call screen bleeds through
+    final topGlowSolid = Color.alphaBlend(
+      accent.withValues(alpha: 0.22),
+      const Color(0xFF070C14),
+    );
+
     return Positioned.fill(
       child: Material(
-        color: Colors.transparent,
+        color: const Color(0xFF04070D),
         child: Container(
           decoration: BoxDecoration(
+            color: const Color(0xFF04070D),
             gradient: RadialGradient(
               center: const Alignment(0, -0.35),
               radius: 1.2,
               colors: [
-                accent.withValues(alpha: 0.22),
-                const Color(0xFF0A0F1A),
+                topGlowSolid,
+                const Color(0xFF070B12),
                 const Color(0xFF030407),
               ],
             ),
@@ -295,7 +411,7 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.07),
+                              color: Colors.white.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
                             ),
@@ -318,7 +434,7 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                             decoration: BoxDecoration(
-                              color: accent.withValues(alpha: 0.16),
+                              color: accent.withValues(alpha: 0.18),
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(color: accent.withValues(alpha: 0.45)),
                             ),
@@ -343,28 +459,28 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
 
                       Expanded(
                         child: SingleChildScrollView(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
                           child: Column(
                             children: [
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 6),
                               // Pulsing Caller Avatar
                               AnimatedBuilder(
                                 animation: _pulseCtrl,
                                 builder: (_, __) {
                                   final t = _pulseCtrl.value;
                                   return SizedBox(
-                                    width: 158,
-                                    height: 158,
+                                    width: 148,
+                                    height: 148,
                                     child: Stack(
                                       alignment: Alignment.center,
                                       children: [
                                         if (_phase != _CallPhase.missed)
                                           for (int r = 0; r < 2; r++)
                                             Transform.scale(
-                                              scale: 0.88 + (((t + r * 0.5) % 1.0) * 0.55),
+                                              scale: 0.88 + (((t + r * 0.5) % 1.0) * 0.52),
                                               child: Container(
-                                                width: 114,
-                                                height: 114,
+                                                width: 108,
+                                                height: 108,
                                                 decoration: BoxDecoration(
                                                   shape: BoxShape.circle,
                                                   border: Border.all(
@@ -377,10 +493,11 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                               ),
                                             ),
                                         Container(
-                                          width: 106,
-                                          height: 106,
+                                          width: 102,
+                                          height: 102,
                                           decoration: BoxDecoration(
                                             shape: BoxShape.circle,
+                                            color: const Color(0xFF0A0F1A),
                                             border: Border.all(color: accent, width: 2.5),
                                             boxShadow: [
                                               BoxShadow(
@@ -405,7 +522,7 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                   );
                                 },
                               ),
-                              const SizedBox(height: 12),
+                              const SizedBox(height: 10),
                               Text(
                                 '${meta.name} · ${tr ? 'AI Kombi Asistanı' : 'AI Boiler Assistant'}',
                                 textAlign: TextAlign.center,
@@ -423,15 +540,15 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                   color: Colors.white.withValues(alpha: 0.65),
                                 ),
                               ),
-                              const SizedBox(height: 12),
+                              const SizedBox(height: 10),
 
                               // Call Reason Banner
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                 decoration: BoxDecoration(
-                                  color: accent.withValues(alpha: 0.14),
+                                  color: accent.withValues(alpha: 0.16),
                                   borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(color: accent.withValues(alpha: 0.38)),
+                                  border: Border.all(color: accent.withValues(alpha: 0.42)),
                                 ),
                                 child: Text(
                                   reasonText,
@@ -445,15 +562,15 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 14),
+                              const SizedBox(height: 12),
 
                               // Live Telemetry Snapshot Strip
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.05),
+                                  color: const Color(0xFF0D1420),
                                   borderRadius: BorderRadius.circular(18),
-                                  border: Border.all(color: Colors.white.withValues(alpha: 0.11)),
+                                  border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
                                 ),
                                 child: Row(
                                   children: [
@@ -469,7 +586,9 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                     ),
                                     _CallStatTile(
                                       label: tr ? 'ALEV' : 'FLAME',
-                                      value: widget.boiler.isHeating ? '%${widget.boiler.flamePercent}' : (tr ? 'BEKLEME' : 'IDLE'),
+                                      value: widget.boiler.isHeating
+                                          ? '%${widget.boiler.flamePercent}'
+                                          : (tr ? 'KAPALI/BEKLEME' : 'IDLE'),
                                       color: widget.boiler.isHeating ? const Color(0xFFFB923C) : Colors.white54,
                                     ),
                                     _CallStatTile(
@@ -481,16 +600,16 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                 ),
                               ),
 
-                              // Answered Voice Equalizer + Transcript + Interactive Controls
+                              // Answered Voice Equalizer + Transcript + Live Mic Voice Commands
                               if (_phase == _CallPhase.answered) ...[
-                                const SizedBox(height: 14),
+                                const SizedBox(height: 12),
                                 Container(
                                   width: double.infinity,
                                   padding: const EdgeInsets.all(14),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF0F172A).withValues(alpha: 0.85),
+                                    color: const Color(0xFF0D1524),
                                     borderRadius: BorderRadius.circular(18),
-                                    border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.35)),
+                                    border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.42)),
                                   ),
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -512,11 +631,43 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                             ),
                                           ),
                                           GestureDetector(
-                                            onTap: () => setState(() => _speakerMuted = !_speakerMuted),
-                                            child: Icon(
-                                              _speakerMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                                              size: 18,
-                                              color: _speakerMuted ? Colors.white38 : const Color(0xFF34D399),
+                                            onTap: () {
+                                              final nextMuted = !_speakerMuted;
+                                              setState(() => _speakerMuted = nextMuted);
+                                              if (nextMuted) {
+                                                VoiceSpeechService.stopSpeaking();
+                                                setState(() => _ttsPlaying = false);
+                                              } else {
+                                                _speakAloud(fullScript.replaceAll('✓', '').trim());
+                                              }
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white.withValues(alpha: 0.06),
+                                                borderRadius: BorderRadius.circular(10),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    _speakerMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                                                    size: 16,
+                                                    color: _speakerMuted ? Colors.white38 : const Color(0xFF34D399),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    _speakerMuted
+                                                        ? (tr ? 'Sessiz' : 'Muted')
+                                                        : (tr ? 'Sesli' : 'Voice'),
+                                                    style: TextStyle(
+                                                      fontSize: 10.5,
+                                                      fontWeight: FontWeight.w700,
+                                                      color: _speakerMuted ? Colors.white54 : const Color(0xFF6EE7B7),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
                                             ),
                                           ),
                                         ],
@@ -526,12 +677,13 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                         animation: _pulseCtrl,
                                         builder: (_, __) {
                                           final phase = _pulseCtrl.value * math.pi * 2;
+                                          final speaking = !_speakerMuted &&
+                                              (_ttsPlaying || _listeningCommand || _spokenChars < fullScript.length);
                                           return SizedBox(
                                             height: 24,
                                             child: Row(
                                               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                               children: List.generate(18, (idx) {
-                                                final speaking = !_speakerMuted && _spokenChars < fullScript.length;
                                                 final amp = speaking
                                                     ? 0.28 + 0.72 * (0.5 + 0.5 * math.sin(phase * 2.2 + idx * 0.7))
                                                     : 0.20;
@@ -539,7 +691,10 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                                   width: 4,
                                                   height: 4 + amp * 18,
                                                   decoration: BoxDecoration(
-                                                    color: const Color(0xFF10B981).withValues(alpha: 0.85),
+                                                    color: (_listeningCommand
+                                                            ? const Color(0xFFF87171)
+                                                            : const Color(0xFF10B981))
+                                                        .withValues(alpha: 0.85),
                                                     borderRadius: BorderRadius.circular(3),
                                                   ),
                                                 );
@@ -557,10 +712,107 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                           height: 1.45,
                                         ),
                                       ),
+                                      const SizedBox(height: 12),
+
+                                      // In-Call Voice Command Mic + Text Bar
+                                      GestureDetector(
+                                        onTap: _toggleCallMic,
+                                        child: AnimatedContainer(
+                                          duration: const Duration(milliseconds: 200),
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                          decoration: BoxDecoration(
+                                            color: _listeningCommand
+                                                ? const Color(0xFFEF4444).withValues(alpha: 0.22)
+                                                : const Color(0xFF10B981).withValues(alpha: 0.14),
+                                            borderRadius: BorderRadius.circular(13),
+                                            border: Border.all(
+                                              color: _listeningCommand
+                                                  ? const Color(0xFFF87171)
+                                                  : const Color(0xFF10B981).withValues(alpha: 0.48),
+                                            ),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                _listeningCommand ? Icons.stop_circle_rounded : Icons.mic_rounded,
+                                                size: 20,
+                                                color: _listeningCommand
+                                                    ? const Color(0xFFF87171)
+                                                    : const Color(0xFF34D399),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  _listeningCommand
+                                                      ? (_heardPreview ?? (tr ? 'Dinleniyor...' : 'Listening...'))
+                                                      : (tr
+                                                          ? 'Sesle Komut Ver (örn. "Kombiyi kapat", "5 derece arttır")'
+                                                          : 'Speak Command (e.g. "Turn off boiler", "Raise 5°")'),
+                                                  style: const TextStyle(
+                                                    fontSize: 11.5,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: TextField(
+                                              controller: _voiceCmdCtrl,
+                                              style: const TextStyle(fontSize: 12, color: Colors.white),
+                                              decoration: InputDecoration(
+                                                isDense: true,
+                                                hintText: tr
+                                                    ? 'Veya yaz: Kombiyi kapat / Eko / Boost / +5°...'
+                                                    : 'Or type: Boiler off / Eco / Boost...',
+                                                hintStyle: TextStyle(
+                                                  fontSize: 11,
+                                                  color: Colors.white.withValues(alpha: 0.42),
+                                                ),
+                                                filled: true,
+                                                fillColor: Colors.white.withValues(alpha: 0.05),
+                                                contentPadding: const EdgeInsets.symmetric(
+                                                  horizontal: 10,
+                                                  vertical: 9,
+                                                ),
+                                                border: OutlineInputBorder(
+                                                  borderRadius: BorderRadius.circular(11),
+                                                  borderSide: BorderSide(
+                                                    color: Colors.white.withValues(alpha: 0.14),
+                                                  ),
+                                                ),
+                                              ),
+                                              onSubmitted: _executeSpokenOrTypedCommand,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          FilledButton(
+                                            onPressed: () => _executeSpokenOrTypedCommand(_voiceCmdCtrl.text),
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor: const Color(0xFF10B981),
+                                              foregroundColor: Colors.white,
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius: BorderRadius.circular(11),
+                                              ),
+                                            ),
+                                            child: Text(
+                                              tr ? 'Uygula' : 'Apply',
+                                              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ],
                                   ),
                                 ),
-                                const SizedBox(height: 12),
+                                const SizedBox(height: 10),
                                 Row(
                                   children: [
                                     Expanded(
@@ -610,9 +862,9 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                 Container(
                                   padding: const EdgeInsets.all(14),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFF59E0B).withValues(alpha: 0.14),
+                                    color: const Color(0xFF1A140B),
                                     borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.42)),
+                                    border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.45)),
                                   ),
                                   child: Row(
                                     children: [
