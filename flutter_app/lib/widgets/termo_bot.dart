@@ -135,8 +135,13 @@ class ScreensaverCustomWallpaper extends StatelessWidget {
   }
 }
 
-/// Unreal Engine 3D Character Actor with frameless radial feathering, 3D perspective kinematics,
-/// and organic scene-integrated animations (zero circular badge rings or corner pill icons).
+/// Full-body 3D-shaded rigged skeletal Mascot Actor supporting genuine limb, head, eye, and prop kinematics:
+/// - idle: breathing, natural eye blink, subtle hand sway (waves happily on wake)
+/// - patrol: true alternating left/right leg & arm gait + facing turn + bouncing ears/tail
+/// - knock: raises arm & knocks 3 times on glass with impact ripples
+/// - think: tilts head, puts hand up to forehead/temple, looks up at thought cloud
+/// - read: pulls out an open illuminated book in both hands, eyes scan lines & turns page
+/// - deepSleep: lies horizontally on ground, closes both eyelids, dims 50%, breathes deeply with floating z Z z
 class MascotAvatar extends StatelessWidget {
   final MascotCharacter character;
   final double size;
@@ -151,7 +156,7 @@ class MascotAvatar extends StatelessWidget {
   const MascotAvatar({
     super.key,
     required this.character,
-    this.size = 64,
+    this.size = 72,
     this.sleeping = false,
     this.happy = false,
     this.behavior = MascotBehavior.idle,
@@ -164,500 +169,1041 @@ class MascotAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final meta = MascotMeta.of(character);
-    final isSleep = sleeping || behavior == MascotBehavior.deepSleep;
-    final p2 = phase * math.pi * 2;
+    final activeBehavior = sleeping ? MascotBehavior.deepSleep : behavior;
+    final isSleep = activeBehavior == MascotBehavior.deepSleep;
 
-    // 3D kinematic motion parameters per behavior
-    double tx = 0.0;
-    double ty = 0.0;
-    double rotX = 0.0;
-    double rotY = 0.0;
-    double rotZ = 0.0;
-    double scaleX = 1.0;
-    double scaleY = 1.0;
-
-    if (happy) {
-      final bounce = math.sin(phase * math.pi * 8).abs();
-      ty = -bounce * (size * 0.14);
-      scaleX = 1.06 + bounce * 0.06;
-      scaleY = 1.06 + bounce * 0.08;
-      rotZ = math.sin(phase * math.pi * 6) * 0.07;
-    } else if (isSleep) {
-      // Deep rhythmic chest breathing + drowsy head nod
-      final breath = math.sin(p2);
-      ty = size * 0.07 + breath * 1.5;
-      scaleX = 1.0 + breath * 0.024;
-      scaleY = 1.0 - breath * 0.020;
-      rotX = 0.22 + breath * 0.03;
-      rotZ = -0.07 + math.cos(p2) * 0.02;
-    } else {
-      switch (behavior) {
-        case MascotBehavior.idle:
-          final breath = math.sin(p2);
-          ty = breath * (size * 0.025);
-          scaleX = 1.0 + breath * 0.018;
-          scaleY = 1.0 - breath * 0.018;
-          rotY = math.sin(p2 * 0.5) * 0.16;
-          rotZ = math.cos(p2 * 0.5) * 0.035;
-          break;
-        case MascotBehavior.patrol:
-          // Stride step cycle: 4 steps per phase cycle
-          final stepWave = math.sin(p2 * 3.0);
-          final strideHop = stepWave.abs();
-          ty = -strideHop * (size * 0.11);
-          rotZ = stepWave * 0.10 * facingDirection;
-          rotX = -0.10; // forward walk lean
-          rotY = facingDirection >= 0 ? -0.20 : 0.20;
-          scaleY = 0.97 + strideHop * 0.06;
-          scaleX = 1.03 - strideHop * 0.03;
-          break;
-        case MascotBehavior.knock:
-          // Rushes right up to the front glass & taps 3 times cleanly
-          final burst = (phase * 2.0) % 1.0;
-          final hit1 = math.exp(-math.pow((burst - 0.20) * 14, 2));
-          final hit2 = math.exp(-math.pow((burst - 0.38) * 14, 2));
-          final hit3 = math.exp(-math.pow((burst - 0.56) * 14, 2));
-          final knockImpulse = (hit1 + hit2 + hit3).clamp(0.0, 1.0);
-          final rush = 1.14 + knockImpulse * 0.22;
-          scaleX = rush;
-          scaleY = rush;
-          tx = math.sin(burst * math.pi * 6) * knockImpulse * 4.0;
-          ty = -knockImpulse * (size * 0.08);
-          rotX = -0.18 - knockImpulse * 0.10;
-          rotZ = (hit1 - hit2) * 0.09;
-          break;
-        case MascotBehavior.think:
-          // Thoughtful head tilt & curious glance upward
-          final sway = math.sin(p2);
-          ty = -size * 0.03 + sway * 2.5;
-          rotZ = -0.14 + sway * 0.03;
-          rotY = 0.24 + math.cos(p2) * 0.05;
-          rotX = -0.06;
-          scaleX = 1.03;
-          scaleY = 1.03;
-          break;
-        case MascotBehavior.read:
-          // Calm downward bow + horizontal eye-line reading sweep left <-> right
-          final scan = math.sin(p2 * 2.0);
-          ty = size * 0.05 + math.cos(p2) * 1.5;
-          rotX = 0.18;
-          rotY = scan * 0.22;
-          rotZ = scan * 0.03;
-          scaleX = 0.99;
-          scaleY = 0.99;
-          break;
-        case MascotBehavior.deepSleep:
-          break;
-      }
-    }
-
-    final perspective = Matrix4.identity()
-      ..setEntry(3, 2, 0.0022)
-      ..rotateX(rotX)
-      ..rotateY(rotY)
-      ..rotateZ(rotZ);
-
-    final imageCore = Image.asset(
-      meta.assetPath,
-      fit: BoxFit.cover,
-      gaplessPlayback: true,
-      errorBuilder: (_, __, ___) => CustomPaint(
-        painter: _MascotFallbackPainter(
-          character: character,
-          color: meta.color,
-          sleeping: isSleep,
-          happy: happy,
-          phase: phase,
+    if (!frameless) {
+      // Compact rounded studio thumbnail for character selector cards
+      return Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(size * 0.26),
+          border: Border.all(
+            color: happy ? const Color(0xFFFBBF24) : meta.color.withValues(alpha: 0.72),
+            width: 1.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: meta.color.withValues(alpha: 0.28),
+              blurRadius: size * 0.24,
+            ),
+          ],
         ),
-      ),
-    );
-
-    // Frameless uses soft radial feather so dark studio bg melts into the scene (not a circular badge)
-    final characterVisual = frameless
-        ? ShaderMask(
-            shaderCallback: (bounds) => const RadialGradient(
-              center: Alignment(0, -0.04),
-              radius: 0.50,
-              colors: [
-                Colors.white,
-                Colors.white,
-                Color(0x99FFFFFF),
-                Colors.transparent,
-              ],
-              stops: [0.0, 0.56, 0.78, 0.98],
-            ).createShader(bounds),
-            blendMode: BlendMode.dstIn,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                imageCore,
-                if (isSleep)
-                  Container(
-                    color: const Color(0xFF0B1022).withValues(alpha: 0.45),
-                  ),
-                if (happy)
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: RadialGradient(
-                        colors: [
-                          const Color(0xFFFBBF24).withValues(alpha: 0.22),
-                          Colors.transparent,
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          )
-        : Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(size * 0.26),
-              border: Border.all(
-                color: happy ? const Color(0xFFFBBF24) : meta.color.withValues(alpha: 0.72),
-                width: 1.5,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(size * 0.24),
+          child: Image.asset(
+            meta.assetPath,
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            errorBuilder: (_, __, ___) => CustomPaint(
+              painter: _RiggedMascotPainter(
+                character: character,
+                accent: meta.color,
+                behavior: MascotBehavior.idle,
+                happy: happy,
+                phase: phase,
+                facingDirection: 1.0,
+                showProps: false,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: meta.color.withValues(alpha: 0.28),
-                  blurRadius: size * 0.25,
-                ),
-              ],
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(size * 0.24),
-              child: imageCore,
-            ),
-          );
+          ),
+        ),
+      );
+    }
 
     return SizedBox(
       width: size,
       height: size,
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.center,
-        children: [
-          // Soft ambient aura & grounded floor shadow (only when frameless floating actor)
-          if (frameless) ...[
-            Positioned(
-              bottom: -size * 0.06,
-              child: Container(
-                width: size * (behavior == MascotBehavior.patrol ? 0.62 : 0.72),
-                height: size * 0.14,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(999),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: isSleep ? 0.65 : 0.50),
-                      blurRadius: size * 0.14,
-                      spreadRadius: 1,
-                    ),
-                    BoxShadow(
-                      color: meta.color.withValues(alpha: isSleep ? 0.10 : 0.22),
-                      blurRadius: size * 0.22,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            // Floor step glow during patrol
-            if (showBehaviorOverlay && behavior == MascotBehavior.patrol)
-              Positioned(
-                bottom: -size * 0.05,
-                left: facingDirection >= 0 ? -size * 0.26 : null,
-                right: facingDirection < 0 ? -size * 0.26 : null,
-                child: CustomPaint(
-                  size: Size(size * 0.42, size * 0.14),
-                  painter: _FootstepDustPainter(color: meta.color, progress: phase),
-                ),
-              ),
-          ],
-
-          // Animated 3D Character Layer
-          Opacity(
-            opacity: isSleep ? 0.50 : 1.0,
-            child: Transform.translate(
-              offset: Offset(tx, ty),
-              child: Transform.scale(
-                scaleX: scaleX,
-                scaleY: scaleY,
-                child: Transform(
-                  alignment: Alignment.center,
-                  transform: perspective,
-                  child: SizedBox(
-                    width: size,
-                    height: size,
-                    child: characterVisual,
-                  ),
-                ),
-              ),
-            ),
+      child: Opacity(
+        opacity: isSleep ? 0.56 : 1.0,
+        child: CustomPaint(
+          painter: _RiggedMascotPainter(
+            character: character,
+            accent: meta.color,
+            behavior: activeBehavior,
+            happy: happy,
+            phase: phase,
+            facingDirection: facingDirection,
+            showProps: showBehaviorOverlay,
           ),
-
-          // Scene-Integrated Character Acting Props (no rounded badge circles)
-          if (showBehaviorOverlay && isSleep)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: CustomPaint(
-                  painter: _SleepZzzPainter(progress: phase),
-                ),
-              ),
-            ),
-
-          if (showBehaviorOverlay && behavior == MascotBehavior.knock)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: CustomPaint(
-                  painter: _KnockGlassWavePainter(color: meta.color, progress: phase),
-                ),
-              ),
-            ),
-
-          if (showBehaviorOverlay && behavior == MascotBehavior.think)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: CustomPaint(
-                  painter: _ThoughtCloudPainter(color: meta.color, progress: phase),
-                ),
-              ),
-            ),
-
-          if (showBehaviorOverlay && behavior == MascotBehavior.read)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: CustomPaint(
-                  painter: _OpenBook3DPainter(accent: meta.color, progress: phase),
-                ),
-              ),
-            ),
-
-          if (showBehaviorOverlay && happy)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: CustomPaint(
-                  painter: _HappySparklesPainter(color: meta.color, progress: phase),
-                ),
-              ),
-            ),
-        ],
+        ),
       ),
     );
   }
 }
 
-class _FootstepDustPainter extends CustomPainter {
-  final Color color;
-  final double progress;
+class _RiggedMascotPainter extends CustomPainter {
+  final MascotCharacter character;
+  final Color accent;
+  final MascotBehavior behavior;
+  final bool happy;
+  final double phase;
+  final double facingDirection;
+  final bool showProps;
 
-  const _FootstepDustPainter({required this.color, required this.progress});
+  const _RiggedMascotPainter({
+    required this.character,
+    required this.accent,
+    required this.behavior,
+    required this.happy,
+    required this.phase,
+    required this.facingDirection,
+    required this.showProps,
+  });
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    for (int i = 0; i < 3; i++) {
-      final t = (progress * 3.0 + i * 0.33) % 1.0;
-      final r = (1.0 - t) * (size.height * 0.42);
-      final x = size.width * (1.0 - t);
-      final y = size.height * 0.55 - t * 4.0;
-      canvas.drawCircle(
-        Offset(x, y),
-        r,
-        Paint()..color = color.withValues(alpha: (1.0 - t) * 0.34),
-      );
-    }
+  /// Solves a smooth 2-bone limb elbow/knee bend point in 2D space.
+  Offset _solveJoint(Offset root, Offset target, double l1, double l2, double bendSign) {
+    final dx = target.dx - root.dx;
+    final dy = target.dy - root.dy;
+    final dist = math.sqrt(dx * dx + dy * dy).clamp(0.001, l1 + l2 - 0.05);
+    final cosA = ((l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist)).clamp(-1.0, 1.0);
+    final baseAngle = math.atan2(dy, dx);
+    final jointAngle = baseAngle + bendSign * math.acos(cosA);
+    return Offset(
+      root.dx + math.cos(jointAngle) * l1,
+      root.dy + math.sin(jointAngle) * l1,
+    );
+  }
+
+  Paint _limbPaint(Color base, double width, Offset a, Offset b) {
+    return Paint()
+      ..shader = ui.Gradient.linear(
+        a.translate(-width * 0.3, -width * 0.3),
+        b.translate(width * 0.3, width * 0.3),
+        [
+          Color.lerp(base, Colors.white, 0.28)!,
+          base,
+          Color.lerp(base, Colors.black, 0.38)!,
+        ],
+        [0.0, 0.52, 1.0],
+      )
+      ..strokeWidth = width
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+  }
+
+  void _drawCapsuleLimb(Canvas canvas, Offset root, Offset mid, Offset tip, double width, Color base) {
+    canvas.drawLine(root, mid, _limbPaint(base, width, root, mid));
+    canvas.drawLine(mid, tip, _limbPaint(base, width * 0.92, mid, tip));
+    // Subtle joint ball
+    canvas.drawCircle(mid, width * 0.44, Paint()..color = Color.lerp(base, Colors.white, 0.14)!);
+  }
+
+  Paint _spherePaint(Rect rect, Color light, Color mid, Color dark) {
+    return Paint()
+      ..shader = RadialGradient(
+        center: const Alignment(-0.32, -0.38),
+        radius: 0.92,
+        colors: [light, mid, dark],
+        stops: const [0.0, 0.55, 1.0],
+      ).createShader(rect);
   }
 
   @override
-  bool shouldRepaint(covariant _FootstepDustPainter oldDelegate) =>
-      oldDelegate.progress != progress || oldDelegate.color != color;
-}
-
-class _KnockGlassWavePainter extends CustomPainter {
-  final Color color;
-  final double progress;
-
-  const _KnockGlassWavePainter({required this.color, required this.progress});
-
-  @override
   void paint(Canvas canvas, Size size) {
-    final burst = (progress * 2.0) % 1.0;
-    final impactCenter = Offset(size.width * 0.52, size.height * 0.48);
+    final u = size.width / 100.0;
+    final cx = size.width * 0.50;
+    final groundY = size.height * 0.89;
+    final p2 = phase * math.pi * 2;
+    final isSleep = behavior == MascotBehavior.deepSleep;
 
-    // Three expanding crisp screen-glass refraction rings at impact timing
-    final starts = [0.18, 0.36, 0.54];
-    for (final s in starts) {
-      final dt = burst - s;
-      if (dt >= 0 && dt < 0.42) {
-        final k = dt / 0.42;
-        final radius = size.width * (0.14 + k * 0.52);
-        final alpha = (1.0 - k) * 0.65;
-        canvas.drawCircle(
-          impactCenter,
-          radius,
-          Paint()
-            ..color = Colors.white.withValues(alpha: alpha)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2.2 * (1.0 - k * 0.6),
+    // Character color palette (3D shaded tones)
+    late final Color bodyPrimary;
+    late final Color bodyLight;
+    late final Color bodyDark;
+    late final Color headBase;
+    late final Color headLight;
+    late final Color headDark;
+    late final Color limbColor;
+    late final Color handColor;
+    late final Color shoeColor;
+
+    switch (character) {
+      case MascotCharacter.termoBot:
+        bodyPrimary = const Color(0xFF334155);
+        bodyLight = const Color(0xFF94A3B8);
+        bodyDark = const Color(0xFF0F172A);
+        headBase = const Color(0xFF475569);
+        headLight = const Color(0xFFCBD5E1);
+        headDark = const Color(0xFF1E293B);
+        limbColor = const Color(0xFF475569);
+        handColor = const Color(0xFF38BDF8);
+        shoeColor = const Color(0xFF1E293B);
+        break;
+      case MascotCharacter.mirnav:
+        bodyPrimary = const Color(0xFFEA580C);
+        bodyLight = const Color(0xFFFDBA74);
+        bodyDark = const Color(0xFF7C2D12);
+        headBase = const Color(0xFFF97316);
+        headLight = const Color(0xFFFED7AA);
+        headDark = const Color(0xFF9A3412);
+        limbColor = const Color(0xFFEA580C);
+        handColor = const Color(0xFFFFEDD5);
+        shoeColor = const Color(0xFFFFEDD5);
+        break;
+      case MascotCharacter.puki:
+        bodyPrimary = const Color(0xFFFBCFE8);
+        bodyLight = const Color(0xFFFFF1F2);
+        bodyDark = const Color(0xFFBE185D);
+        headBase = const Color(0xFFFCE7F3);
+        headLight = const Color(0xFFFFFFFF);
+        headDark = const Color(0xFFF472B6);
+        limbColor = const Color(0xFFF9A8D4);
+        handColor = const Color(0xFFFFF1F2);
+        shoeColor = const Color(0xFFF472B6);
+        break;
+      case MascotCharacter.mert:
+        bodyPrimary = const Color(0xFF1E3A5F);
+        bodyLight = const Color(0xFF3B82F6);
+        bodyDark = const Color(0xFF0F172A);
+        headBase = const Color(0xFFF3C6A5);
+        headLight = const Color(0xFFFFE4CF);
+        headDark = const Color(0xFFC2855C);
+        limbColor = const Color(0xFF1D4ED8);
+        handColor = const Color(0xFFF3C6A5);
+        shoeColor = const Color(0xFF1E293B);
+        break;
+      case MascotCharacter.ela:
+        bodyPrimary = const Color(0xFF4C1D95);
+        bodyLight = const Color(0xFFA78BFA);
+        bodyDark = const Color(0xFF1E1B4B);
+        headBase = const Color(0xFFF7CEB2);
+        headLight = const Color(0xFFFFEAD9);
+        headDark = const Color(0xFFC98B68);
+        limbColor = const Color(0xFF6D28D9);
+        handColor = const Color(0xFFF7CEB2);
+        shoeColor = const Color(0xFF312E81);
+        break;
+    }
+
+    // ------------------------------------------------------------------
+    // 1. Ground Shadow (wide horizontal oval when lying down in deepSleep)
+    // ------------------------------------------------------------------
+    final shadowWidth = isSleep ? 68 * u : (behavior == MascotBehavior.knock ? 46 * u : 38 * u);
+    final shadowHeight = isSleep ? 9 * u : 7 * u;
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(cx, groundY + 1.5 * u), width: shadowWidth, height: shadowHeight),
+      Paint()
+        ..color = Colors.black.withValues(alpha: isSleep ? 0.52 : 0.45)
+        ..maskFilter = ui.MaskFilter.blur(BlurStyle.normal, 4.0 * u),
+    );
+
+    if (isSleep) {
+      // ================================================================
+      // FULL HORIZONTAL LYING-DOWN SLEEP POSE (Yere uzanıp uyuma + gözler kapalı)
+      // ================================================================
+      final breath = math.sin(p2);
+      final sleepCenterY = groundY - 12 * u;
+
+      canvas.save();
+      // Tail curled peacefully for cat/bunny
+      if (character == MascotCharacter.mirnav) {
+        final tailWave = math.sin(p2) * 3 * u;
+        final tailPath = Path()
+          ..moveTo(cx + 12 * u, sleepCenterY - 2 * u)
+          ..quadraticBezierTo(cx + 28 * u, sleepCenterY - 14 * u + tailWave, cx + 34 * u, sleepCenterY - 3 * u);
+        canvas.drawPath(tailPath, _limbPaint(bodyPrimary, 4.2 * u, Offset(cx + 12 * u, sleepCenterY), Offset(cx + 34 * u, sleepCenterY)));
+      }
+
+      // Relaxed bent legs stretched out to the right on floor
+      final hip = Offset(cx + 8 * u, sleepCenterY);
+      final backKnee = Offset(cx + 20 * u, sleepCenterY + 2.5 * u);
+      final backFoot = Offset(cx + 32 * u, sleepCenterY + 5.5 * u);
+      final frontKnee = Offset(cx + 19 * u, sleepCenterY - 3.5 * u);
+      final frontFoot = Offset(cx + 30 * u, sleepCenterY + 2.0 * u);
+
+      final legTone = (character == MascotCharacter.mert || character == MascotCharacter.ela)
+          ? const Color(0xFF1E293B)
+          : limbColor;
+      _drawCapsuleLimb(canvas, hip, backKnee, backFoot, 5.8 * u, Color.lerp(legTone, Colors.black, 0.2)!);
+      _drawCapsuleLimb(canvas, hip, frontKnee, frontFoot, 6.2 * u, legTone);
+      canvas.drawOval(Rect.fromCenter(center: backFoot, width: 6.5 * u, height: 4.5 * u), Paint()..color = shoeColor);
+      canvas.drawOval(Rect.fromCenter(center: frontFoot, width: 7.0 * u, height: 4.8 * u), Paint()..color = shoeColor);
+
+      // Horizontal torso gently rising & falling with deep breath
+      final chestRect = Rect.fromCenter(
+        center: Offset(cx - 2 * u, sleepCenterY - breath * 1.1 * u),
+        width: 28 * u,
+        height: (16 + breath * 1.4) * u,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(chestRect, Radius.circular(8 * u)),
+        _spherePaint(chestRect, bodyLight, bodyPrimary, bodyDark),
+      );
+
+      // Arm curled under head as a pillow + top arm resting over side
+      final shoulderTop = Offset(cx - 12 * u, sleepCenterY - 4 * u - breath * 0.8 * u);
+      final pillowElbow = Offset(cx - 25 * u, sleepCenterY + 3 * u);
+      final pillowHand = Offset(cx - 20 * u, sleepCenterY - 6 * u);
+      _drawCapsuleLimb(canvas, shoulderTop.translate(0, 5 * u), pillowElbow, pillowHand, 5.0 * u, limbColor);
+      _drawCapsuleLimb(
+        canvas,
+        shoulderTop,
+        Offset(cx - 3 * u, sleepCenterY + 3.5 * u),
+        Offset(cx + 6 * u, sleepCenterY + 2.5 * u),
+        5.2 * u,
+        limbColor,
+      );
+      canvas.drawCircle(Offset(cx + 6.5 * u, sleepCenterY + 2.5 * u), 3.0 * u, Paint()..color = handColor);
+
+      // Head tilted horizontally resting on arm pillow with CLOSED EYES
+      canvas.save();
+      canvas.translate(cx - 21 * u, sleepCenterY - 6 * u);
+      canvas.rotate(-0.22 + breath * 0.02);
+      _drawCharacterHead(
+        canvas: canvas,
+        u: u,
+        headBase: headBase,
+        headLight: headLight,
+        headDark: headDark,
+        eyesClosed: true,
+        eyeLook: Offset.zero,
+        mouthHappy: false,
+        mouthOpen: false,
+        phase: phase,
+      );
+      canvas.restore();
+      canvas.restore();
+
+      // Floating unmirrored "z Z z" above sleeping head
+      if (showProps) {
+        _drawFloatingZzz(canvas, Offset(cx - 18 * u, sleepCenterY - 22 * u), u, phase);
+      }
+      return;
+    }
+
+    // ================================================================
+    // STANDING / WALKING / ACTING KINEMATICS
+    // ================================================================
+    final rushScale = behavior == MascotBehavior.knock
+        ? 1.12 + math.sin((phase * 2.0 % 1.0) * math.pi).abs() * 0.14
+        : (happy ? 1.05 : 1.0);
+
+    // Stride & Posture Calculations
+    double walkCycle = 0.0;
+    double hopY = 0.0;
+    double torsoLean = 0.0;
+    double headTilt = 0.0;
+    Offset eyeLook = Offset.zero;
+    bool eyesClosed = false;
+    bool mouthHappy = happy;
+    bool mouthOpen = false;
+
+    // Book pullout progress (0 -> 1 smoothly pulls book from side up to chest)
+    double bookPull = 0.0;
+    double pageFlip = 0.0;
+
+    switch (behavior) {
+      case MascotBehavior.idle:
+        // Natural standing breath & periodic 150ms blink
+        hopY = math.sin(p2) * 1.4 * u;
+        torsoLean = math.sin(p2 * 0.5) * 0.03;
+        headTilt = math.cos(p2 * 0.5) * 0.04;
+        eyeLook = Offset(math.sin(p2 * 0.5) * 1.4 * u, 0);
+        // Blink twice per phase loop briefly
+        final bMod = (phase * 2.0) % 1.0;
+        eyesClosed = bMod > 0.91 && bMod < 0.97;
+        break;
+
+      case MascotBehavior.patrol:
+        // Crisp 2-step gait cycle
+        walkCycle = p2 * 2.0;
+        hopY = -math.sin(walkCycle).abs() * 5.2 * u;
+        torsoLean = 0.12;
+        headTilt = -0.05;
+        eyeLook = Offset(1.5 * u, 0);
+        mouthHappy = true;
+        break;
+
+      case MascotBehavior.knock:
+        // Rhythmic 3-tap knock impulse
+        final burst = (phase * 2.0) % 1.0;
+        final hit1 = math.exp(-math.pow((burst - 0.22) * 15, 2));
+        final hit2 = math.exp(-math.pow((burst - 0.42) * 15, 2));
+        final hit3 = math.exp(-math.pow((burst - 0.62) * 15, 2));
+        final impulse = (hit1 + hit2 + hit3).clamp(0.0, 1.0);
+        hopY = -impulse * 3.0 * u;
+        torsoLean = 0.10 + impulse * 0.06;
+        headTilt = 0.06;
+        eyeLook = Offset(0.5 * u, -0.3 * u);
+        mouthOpen = impulse > 0.35;
+        break;
+
+      case MascotBehavior.think:
+        hopY = math.sin(p2) * 1.2 * u;
+        torsoLean = -0.06;
+        headTilt = -0.14 + math.sin(p2) * 0.03;
+        eyeLook = Offset(1.2 * u, -1.6 * u);
+        break;
+
+      case MascotBehavior.read:
+        // Book lifts out smoothly in first 25%, then pages flip & eyes track left-right
+        bookPull = (phase < 0.22) ? (phase / 0.22) : 1.0;
+        pageFlip = (math.sin(p2 * 2.0) * 0.5 + 0.5);
+        hopY = 2.0 * u + math.cos(p2) * 0.8 * u;
+        torsoLean = 0.08;
+        headTilt = 0.16 * bookPull;
+        // Eyes scan left-to-right across open pages
+        eyeLook = Offset(math.sin(p2 * 2.0) * 1.9 * u, 1.3 * u);
+        final bMod = (phase * 2.0) % 1.0;
+        eyesClosed = bMod > 0.93;
+        break;
+
+      case MascotBehavior.deepSleep:
+        break;
+    }
+
+    if (happy) {
+      hopY = -math.sin(p2 * 3.0).abs() * 7.5 * u;
+      torsoLean = -0.04;
+      headTilt = math.sin(p2 * 3.0) * 0.08;
+      mouthHappy = true;
+      mouthOpen = true;
+    }
+
+    // Save canvas & apply facingDirection mirror + rush scale from groundY
+    canvas.save();
+    canvas.translate(cx, groundY);
+    canvas.scale(facingDirection * rushScale, rushScale);
+    canvas.translate(-cx, -groundY);
+
+    // Skeleton Anchor Points
+    final hipCenter = Offset(cx, groundY - 26 * u + hopY);
+    final shoulderCenter = Offset(
+      hipCenter.dx + math.sin(torsoLean) * 20 * u,
+      hipCenter.dy - math.cos(torsoLean) * 20 * u,
+    );
+    final headCenter = Offset(
+      shoulderCenter.dx + math.sin(torsoLean + headTilt * 0.4) * 13.5 * u,
+      shoulderCenter.dy - math.cos(torsoLean + headTilt * 0.4) * 13.5 * u,
+    );
+
+    // ------------------------------------------------------------------
+    // 2. Legs & Feet Targets (2-bone articulated thigh -> knee -> ankle)
+    // ------------------------------------------------------------------
+    final legTone = (character == MascotCharacter.mert || character == MascotCharacter.ela)
+        ? const Color(0xFF1E293B)
+        : limbColor;
+
+    late Offset lFootTarget;
+    late Offset rFootTarget;
+    if (behavior == MascotBehavior.patrol) {
+      final swing = math.sin(walkCycle);
+      final lLift = math.max(0.0, math.cos(walkCycle)) * 7.5 * u;
+      final rLift = math.max(0.0, -math.cos(walkCycle)) * 7.5 * u;
+      lFootTarget = Offset(cx - 5.5 * u + swing * 12.0 * u, groundY - 2.5 * u - lLift);
+      rFootTarget = Offset(cx + 5.5 * u - swing * 12.0 * u, groundY - 2.5 * u - rLift);
+    } else if (behavior == MascotBehavior.think) {
+      // One foot slightly tapped forward
+      final footTap = math.sin(p2 * 3.0).abs() * 2.2 * u;
+      lFootTarget = Offset(cx - 6.5 * u, groundY - 2.5 * u);
+      rFootTarget = Offset(cx + 7.5 * u, groundY - 2.5 * u - footTap);
+    } else {
+      lFootTarget = Offset(cx - 6.5 * u, groundY - 2.5 * u);
+      rFootTarget = Offset(cx + 6.5 * u, groundY - 2.5 * u);
+    }
+
+    final lHip = hipCenter.translate(-4.8 * u, 1.5 * u);
+    final rHip = hipCenter.translate(4.8 * u, 1.5 * u);
+    final lKnee = _solveJoint(lHip, lFootTarget, 13.2 * u, 13.2 * u, -1.0);
+    final rKnee = _solveJoint(rHip, rFootTarget, 13.2 * u, 13.2 * u, -1.0);
+
+    // Cat / Bunny animated tail behind body
+    if (character == MascotCharacter.mirnav) {
+      final tailWag = math.sin(p2 * (behavior == MascotBehavior.patrol ? 3.0 : 1.5)) * 6.5 * u;
+      final tailPath = Path()
+        ..moveTo(hipCenter.dx - 4 * u, hipCenter.dy - 1 * u)
+        ..cubicTo(
+          hipCenter.dx - 18 * u,
+          hipCenter.dy - 4 * u + tailWag,
+          hipCenter.dx - 24 * u,
+          hipCenter.dy - 18 * u - tailWag * 0.5,
+          hipCenter.dx - 19 * u,
+          hipCenter.dy - 24 * u + tailWag * 0.4,
         );
+      canvas.drawPath(
+        tailPath,
+        Paint()
+          ..color = bodyPrimary
+          ..strokeWidth = 4.2 * u
+          ..strokeCap = StrokeCap.round
+          ..style = PaintingStyle.stroke,
+      );
+    } else if (character == MascotCharacter.puki) {
+      canvas.drawCircle(
+        hipCenter.translate(-7.5 * u, -1 * u),
+        4.2 * u,
+        Paint()..color = Colors.white.withValues(alpha: 0.94),
+      );
+    }
+
+    // ------------------------------------------------------------------
+    // 3. Arms Targets (2-bone articulated shoulder -> elbow -> hand)
+    // ------------------------------------------------------------------
+    final lShoulder = shoulderCenter.translate(-10.5 * u, 3.0 * u);
+    final rShoulder = shoulderCenter.translate(10.5 * u, 3.0 * u);
+
+    late Offset lHandTarget;
+    late Offset rHandTarget;
+    double lBend = 1.0;
+    double rBend = -1.0;
+
+    if (happy) {
+      // High cheerful wave with right hand!
+      final wave = math.sin(p2 * 4.0) * 6.0 * u;
+      lHandTarget = Offset(lShoulder.dx - 4.0 * u, lShoulder.dy + 16.0 * u);
+      rHandTarget = Offset(rShoulder.dx + 8.0 * u + wave, headCenter.dy - 14.0 * u);
+      rBend = 1.0;
+    } else {
+      switch (behavior) {
+        case MascotBehavior.idle:
+          final sway = math.sin(p2) * 2.5 * u;
+          lHandTarget = Offset(lShoulder.dx - 4.0 * u, hipCenter.dy + 2.0 * u + sway);
+          rHandTarget = Offset(rShoulder.dx + 4.0 * u, hipCenter.dy + 2.0 * u - sway);
+          break;
+        case MascotBehavior.patrol:
+          // Arms swing in opposite phase to legs
+          final armSwing = math.sin(walkCycle);
+          lHandTarget = Offset(lShoulder.dx - armSwing * 11.0 * u, hipCenter.dy - 1.0 * u - armSwing.abs() * 2.0 * u);
+          rHandTarget = Offset(rShoulder.dx + armSwing * 11.0 * u, hipCenter.dy - 1.0 * u - armSwing.abs() * 2.0 * u);
+          lBend = armSwing >= 0 ? 1.0 : -1.0;
+          rBend = armSwing >= 0 ? 1.0 : -1.0;
+          break;
+        case MascotBehavior.knock:
+          // Right arm lifts high and knocks forward 3 times; left rests at side
+          final burst = (phase * 2.0) % 1.0;
+          final hit1 = math.exp(-math.pow((burst - 0.22) * 15, 2));
+          final hit2 = math.exp(-math.pow((burst - 0.42) * 15, 2));
+          final hit3 = math.exp(-math.pow((burst - 0.62) * 15, 2));
+          final punch = (hit1 + hit2 + hit3).clamp(0.0, 1.0);
+          lHandTarget = Offset(lShoulder.dx - 4.5 * u, hipCenter.dy + 1.0 * u);
+          rHandTarget = Offset(
+            cx + 8.0 * u + punch * 8.0 * u,
+            headCenter.dy + 1.0 * u - punch * 4.0 * u,
+          );
+          rBend = 1.0;
+          break;
+        case MascotBehavior.think:
+          // Right hand goes UP to forehead / temple; left arm crosses to hold elbow
+          final scratch = math.sin(p2 * 2.0) * 1.4 * u;
+          rHandTarget = Offset(headCenter.dx + 9.5 * u, headCenter.dy + 1.5 * u + scratch);
+          lHandTarget = Offset(cx + 2.5 * u, shoulderCenter.dy + 11.5 * u);
+          rBend = 1.0;
+          lBend = -1.0;
+          break;
+        case MascotBehavior.read:
+          // Pulls book up with both hands; right hand periodically reaches to turn page
+          final pull = bookPull;
+          final turnAmt = math.max(0.0, math.sin(p2 * 2.0));
+          lHandTarget = Offset(
+            ui.lerpDouble(lShoulder.dx - 3 * u, cx - 8.5 * u, pull)!,
+            ui.lerpDouble(hipCenter.dy + 2 * u, shoulderCenter.dy + 11.5 * u, pull)!,
+          );
+          rHandTarget = Offset(
+            ui.lerpDouble(rShoulder.dx + 4 * u, cx + 8.5 * u - turnAmt * 5.0 * u, pull)!,
+            ui.lerpDouble(hipCenter.dy + 2 * u, shoulderCenter.dy + 11.5 * u - turnAmt * 2.5 * u, pull)!,
+          );
+          lBend = -1.0;
+          rBend = 1.0;
+          break;
+        case MascotBehavior.deepSleep:
+          lHandTarget = Offset.zero;
+          rHandTarget = Offset.zero;
+          break;
+      }
+    }
+
+    final lElbow = _solveJoint(lShoulder, lHandTarget, 10.5 * u, 10.5 * u, lBend);
+    final rElbow = _solveJoint(rShoulder, rHandTarget, 10.5 * u, 10.5 * u, rBend);
+
+    // Draw back leg first
+    _drawCapsuleLimb(canvas, lHip, lKnee, lFootTarget, 5.4 * u, Color.lerp(legTone, Colors.black, 0.14)!);
+    canvas.drawOval(Rect.fromCenter(center: lFootTarget.translate(1.5 * u, 1.5 * u), width: 7.4 * u, height: 4.4 * u), Paint()..color = shoeColor);
+
+    // Draw back arm behind torso
+    _drawCapsuleLimb(canvas, lShoulder, lElbow, lHandTarget, 4.4 * u, Color.lerp(limbColor, Colors.black, 0.12)!);
+    canvas.drawCircle(lHandTarget, 2.8 * u, Paint()..color = handColor);
+
+    // Draw front leg
+    _drawCapsuleLimb(canvas, rHip, rKnee, rFootTarget, 5.6 * u, legTone);
+    canvas.drawOval(Rect.fromCenter(center: rFootTarget.translate(1.5 * u, 1.5 * u), width: 7.6 * u, height: 4.6 * u), Paint()..color = shoeColor);
+
+    // ------------------------------------------------------------------
+    // 4. Torso (3D Radial Lit Capsule + Character Chest Emblem/Scarf/Coil)
+    // ------------------------------------------------------------------
+    canvas.save();
+    canvas.translate(hipCenter.dx, hipCenter.dy);
+    canvas.rotate(torsoLean);
+    final torsoRect = Rect.fromLTWH(-10.5 * u, -21.5 * u, 21.0 * u, 22.5 * u);
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(torsoRect, Radius.circular(8.5 * u)),
+      _spherePaint(torsoRect, bodyLight, bodyPrimary, bodyDark),
+    );
+    // Specular rim highlight on torso edge
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(torsoRect, Radius.circular(8.5 * u)),
+      Paint()
+        ..color = accent.withValues(alpha: 0.42)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.1 * u,
+    );
+
+    if (character == MascotCharacter.termoBot) {
+      // Glowing copper thermal coil core on robot chest
+      canvas.drawCircle(Offset(0, -11.5 * u), 4.6 * u, Paint()..color = const Color(0xFF0F172A));
+      canvas.drawCircle(
+        Offset(0, -11.5 * u),
+        3.5 * u,
+        Paint()
+          ..color = const Color(0xFFF97316)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5 * u,
+      );
+      canvas.drawCircle(Offset(0, -11.5 * u), 1.5 * u, Paint()..color = const Color(0xFF38BDF8));
+    } else if (character == MascotCharacter.mirnav) {
+      // Brass smart-thermostat collar medallion
+      canvas.drawLine(Offset(-7 * u, -19.5 * u), Offset(7 * u, -19.5 * u), Paint()..color = const Color(0xFF1E293B)..strokeWidth = 2.4 * u);
+      canvas.drawCircle(Offset(0, -16.5 * u), 3.1 * u, Paint()..color = const Color(0xFFFBBF24));
+      canvas.drawCircle(Offset(0, -16.5 * u), 1.8 * u, Paint()..color = const Color(0xFF18181B));
+    } else if (character == MascotCharacter.puki) {
+      // Knitted plum scarf & glowing pink heart badge
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(0, -19 * u), width: 17 * u, height: 5.5 * u), Radius.circular(3 * u)),
+        Paint()..color = const Color(0xFF581C87),
+      );
+      canvas.drawCircle(Offset(3.5 * u, -18.8 * u), 2.1 * u, Paint()..color = const Color(0xFFF472B6));
+    } else if (character == MascotCharacter.mert) {
+      // Zip line + cyan smart-home house badge
+      canvas.drawLine(Offset(0, -21 * u), Offset(0, -1 * u), Paint()..color = Colors.white.withValues(alpha: 0.22)..strokeWidth = 1.1 * u);
+      canvas.drawCircle(Offset(4.5 * u, -13.5 * u), 2.3 * u, Paint()..color = const Color(0xFF38BDF8).withValues(alpha: 0.85));
+    } else if (character == MascotCharacter.ela) {
+      // Glowing violet ambient pin
+      canvas.drawCircle(Offset(4.2 * u, -13.5 * u), 2.3 * u, Paint()..color = const Color(0xFFC4B5FD));
+    }
+    canvas.restore();
+
+    // ------------------------------------------------------------------
+    // 5. Head (3D Lit + Expressive Animated Eyes/Eyelids/Ears/Hair)
+    // ------------------------------------------------------------------
+    canvas.save();
+    canvas.translate(headCenter.dx, headCenter.dy);
+    canvas.rotate(headTilt);
+    _drawCharacterHead(
+      canvas: canvas,
+      u: u,
+      headBase: headBase,
+      headLight: headLight,
+      headDark: headDark,
+      eyesClosed: eyesClosed,
+      eyeLook: eyeLook,
+      mouthHappy: mouthHappy,
+      mouthOpen: mouthOpen,
+      phase: phase,
+    );
+    canvas.restore();
+
+    // ------------------------------------------------------------------
+    // 6. Open 3D Book Held In Front When Reading (Kitabı çıkarıp okuma hareketi)
+    // ------------------------------------------------------------------
+    if (behavior == MascotBehavior.read && bookPull > 0.08) {
+      final bookCenter = Offset(cx + 2.5 * u, shoulderCenter.dy + 11.0 * u + (1.0 - bookPull) * 14.0 * u);
+      _drawHeldOpenBook(canvas, bookCenter, u * bookPull, accent, pageFlip);
+    }
+
+    // ------------------------------------------------------------------
+    // 7. Front Arm Drawn Over Chest / Holding Book / Touching Temple / Knocking
+    // ------------------------------------------------------------------
+    _drawCapsuleLimb(canvas, rShoulder, rElbow, rHandTarget, 4.6 * u, limbColor);
+    canvas.drawCircle(rHandTarget, 2.9 * u, Paint()..color = handColor);
+
+    // Knock glass ripples right at knuckle impact point
+    if (showProps && behavior == MascotBehavior.knock) {
+      final burst = (phase * 2.0) % 1.0;
+      for (final start in [0.20, 0.40, 0.60]) {
+        final dt = burst - start;
+        if (dt >= 0 && dt < 0.35) {
+          final k = dt / 0.35;
+          canvas.drawCircle(
+            rHandTarget,
+            (4.0 + k * 18.0) * u,
+            Paint()
+              ..color = Colors.white.withValues(alpha: (1.0 - k) * 0.72)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.6 * u,
+          );
+        }
+      }
+    }
+
+    canvas.restore(); // undo horizontal flip / rush scale before drawing unflipped clouds
+
+    // ------------------------------------------------------------------
+    // 8. Unflipped Scene Effects (Thought Cloud, Sparkles)
+    // ------------------------------------------------------------------
+    if (showProps && behavior == MascotBehavior.think) {
+      final cloudSide = facingDirection >= 0 ? 1.0 : -1.0;
+      final headWorldX = cx + (headCenter.dx - cx) * facingDirection * rushScale;
+      final headWorldY = groundY + (headCenter.dy - groundY) * rushScale;
+      _drawThoughtWisps(canvas, Offset(headWorldX + cloudSide * 18 * u, headWorldY - 12 * u), cloudSide, u, phase, accent);
+    }
+    if (showProps && happy) {
+      _drawHappyStars(canvas, Offset(cx, headCenter.dy), u, phase, accent);
+    }
+  }
+
+  void _drawCharacterHead({
+    required Canvas canvas,
+    required double u,
+    required Color headBase,
+    required Color headLight,
+    required Color headDark,
+    required bool eyesClosed,
+    required Offset eyeLook,
+    required bool mouthHappy,
+    required bool mouthOpen,
+    required double phase,
+  }) {
+    final p2 = phase * math.pi * 2;
+    final earBounce = behavior == MascotBehavior.patrol ? math.sin(p2 * 2.0) * 0.14 : (behavior == MascotBehavior.deepSleep ? 0.35 : 0.0);
+
+    switch (character) {
+      case MascotCharacter.termoBot:
+        // Beacon antenna
+        canvas.drawLine(Offset(0, -13 * u), Offset(0, -19.5 * u), Paint()..color = headLight..strokeWidth = 1.8 * u);
         canvas.drawCircle(
-          impactCenter,
-          radius * 0.72,
+          Offset(0, -20.5 * u),
+          2.4 * u,
+          Paint()..color = behavior == MascotBehavior.deepSleep ? const Color(0xFF64748B) : const Color(0xFFFBBF24),
+        );
+        // 3D Titanium helmet sphere
+        final hRect = Rect.fromCenter(center: Offset.zero, width: 28 * u, height: 24 * u);
+        canvas.drawRRect(RRect.fromRectAndRadius(hRect, Radius.circular(9.5 * u)), _spherePaint(hRect, headLight, headBase, headDark));
+        // Dark sapphire visor glass
+        final visor = RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(0, 0.5 * u), width: 22 * u, height: 15 * u), Radius.circular(6 * u));
+        canvas.drawRRect(visor, Paint()..color = const Color(0xFF06121E));
+        canvas.drawRRect(visor, Paint()..color = accent.withValues(alpha: 0.72)..style = PaintingStyle.stroke..strokeWidth = 1.1 * u);
+        _drawFaceEyesAndMouth(
+          canvas: canvas,
+          u: u,
+          eyeColor: accent,
+          irisColor: accent,
+          eyesClosed: eyesClosed,
+          eyeLook: eyeLook,
+          mouthHappy: mouthHappy,
+          mouthOpen: mouthOpen,
+          isLed: true,
+        );
+        break;
+
+      case MascotCharacter.mirnav:
+        // Pointed 3D Cat Ears
+        for (final sign in [-1.0, 1.0]) {
+          canvas.save();
+          canvas.translate(sign * 8.5 * u, -9.5 * u);
+          canvas.rotate(sign * (0.12 + earBounce));
+          final ear = Path()
+            ..moveTo(-4.5 * u, 2 * u)
+            ..lineTo(0, -8.5 * u)
+            ..lineTo(4.5 * u, 2 * u)
+            ..close();
+          canvas.drawPath(ear, Paint()..color = headBase);
+          final inner = Path()
+            ..moveTo(-2.5 * u, 1.2 * u)
+            ..lineTo(0, -5.5 * u)
+            ..lineTo(2.5 * u, 1.2 * u)
+            ..close();
+          canvas.drawPath(inner, Paint()..color = const Color(0xFFFDA4AF));
+          canvas.restore();
+        }
+        final catRect = Rect.fromCenter(center: Offset.zero, width: 26 * u, height: 23 * u);
+        canvas.drawOval(catRect, _spherePaint(catRect, headLight, headBase, headDark));
+        _drawFaceEyesAndMouth(
+          canvas: canvas,
+          u: u,
+          eyeColor: Colors.white,
+          irisColor: const Color(0xFFD97706),
+          eyesClosed: eyesClosed,
+          eyeLook: eyeLook,
+          mouthHappy: mouthHappy,
+          mouthOpen: mouthOpen,
+          catWhiskers: true,
+        );
+        break;
+
+      case MascotCharacter.puki:
+        // Long floppy articulated bunny ears
+        for (final sign in [-1.0, 1.0]) {
+          canvas.save();
+          canvas.translate(sign * 5.2 * u, -10.5 * u);
+          canvas.rotate(sign * (0.14 + earBounce));
+          final earRect = Rect.fromCenter(center: Offset(0, -7.5 * u), width: 6.5 * u, height: 16.5 * u);
+          canvas.drawOval(earRect, _spherePaint(earRect, headLight, headBase, headDark));
+          canvas.drawOval(Rect.fromCenter(center: Offset(0, -7.0 * u), width: 3.4 * u, height: 11.5 * u), Paint()..color = const Color(0xFFF9A8D4));
+          canvas.restore();
+        }
+        final bunnyRect = Rect.fromCenter(center: Offset.zero, width: 25 * u, height: 22 * u);
+        canvas.drawOval(bunnyRect, _spherePaint(bunnyRect, headLight, headBase, headDark));
+        _drawFaceEyesAndMouth(
+          canvas: canvas,
+          u: u,
+          eyeColor: Colors.white,
+          irisColor: const Color(0xFF4C0519),
+          eyesClosed: eyesClosed,
+          eyeLook: eyeLook,
+          mouthHappy: mouthHappy,
+          mouthOpen: mouthOpen,
+          pinkNose: true,
+        );
+        break;
+
+      case MascotCharacter.mert:
+        final mertRect = Rect.fromCenter(center: Offset.zero, width: 23 * u, height: 24 * u);
+        canvas.drawOval(mertRect, _spherePaint(mertRect, headLight, headBase, headDark));
+        // Sculpted dark hair quiff
+        final hair = Path()
+          ..moveTo(-11.5 * u, -3 * u)
+          ..quadraticBezierTo(-11.5 * u, -15 * u, 0, -14.5 * u)
+          ..quadraticBezierTo(12 * u, -14.5 * u, 11.5 * u, -3 * u)
+          ..quadraticBezierTo(5 * u, -8.5 * u, -11.5 * u, -3 * u)
+          ..close();
+        canvas.drawPath(hair, Paint()..color = const Color(0xFF1E293B));
+        // Glowing blue HUD earpiece
+        canvas.drawCircle(Offset(11.5 * u, 0), 2.3 * u, Paint()..color = const Color(0xFF38BDF8));
+        _drawFaceEyesAndMouth(
+          canvas: canvas,
+          u: u,
+          eyeColor: Colors.white,
+          irisColor: const Color(0xFF1E293B),
+          eyesClosed: eyesClosed,
+          eyeLook: eyeLook,
+          mouthHappy: mouthHappy,
+          mouthOpen: mouthOpen,
+          brows: true,
+        );
+        break;
+
+      case MascotCharacter.ela:
+        // Chestnut bob hair back layer
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(Rect.fromCenter(center: Offset(0, 1.5 * u), width: 28 * u, height: 28 * u), Radius.circular(13 * u)),
+          Paint()..color = const Color(0xFF451A03),
+        );
+        final elaRect = Rect.fromCenter(center: Offset.zero, width: 22.5 * u, height: 23.5 * u);
+        canvas.drawOval(elaRect, _spherePaint(elaRect, headLight, headBase, headDark));
+        // Hair fringe
+        final fringe = Path()
+          ..moveTo(-11.5 * u, -2 * u)
+          ..quadraticBezierTo(-9 * u, -14 * u, 2 * u, -13.5 * u)
+          ..quadraticBezierTo(11.5 * u, -13 * u, 11.5 * u, -1.5 * u)
+          ..quadraticBezierTo(2 * u, -9.5 * u, -11.5 * u, -2 * u)
+          ..close();
+        canvas.drawPath(fringe, Paint()..color = const Color(0xFF5D2A0C));
+        _drawFaceEyesAndMouth(
+          canvas: canvas,
+          u: u,
+          eyeColor: Colors.white,
+          irisColor: const Color(0xFF5D2A0C),
+          eyesClosed: eyesClosed,
+          eyeLook: eyeLook,
+          mouthHappy: mouthHappy,
+          mouthOpen: mouthOpen,
+          brows: true,
+        );
+        break;
+    }
+  }
+
+  void _drawFaceEyesAndMouth({
+    required Canvas canvas,
+    required double u,
+    required Color eyeColor,
+    required Color irisColor,
+    required bool eyesClosed,
+    required Offset eyeLook,
+    required bool mouthHappy,
+    required bool mouthOpen,
+    bool isLed = false,
+    bool brows = false,
+    bool catWhiskers = false,
+    bool pinkNose = false,
+  }) {
+    final eyeY = -1.2 * u;
+    final spread = 4.6 * u;
+
+    for (final sign in [-1.0, 1.0]) {
+      final ex = sign * spread;
+      if (eyesClosed) {
+        // Closed curved sleeping / blinking eyelid
+        canvas.drawArc(
+          Rect.fromCenter(center: Offset(ex, eyeY + 0.8 * u), width: 4.8 * u, height: 3.0 * u),
+          0.1,
+          math.pi - 0.2,
+          false,
           Paint()
-            ..color = color.withValues(alpha: alpha * 0.7)
+            ..color = isLed ? eyeColor : const Color(0xFF1E293B)
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.4,
+            ..strokeWidth = 1.6 * u
+            ..strokeCap = StrokeCap.round,
+        );
+      } else if (isLed) {
+        final ledCenter = Offset(ex + eyeLook.dx * 0.6, eyeY + eyeLook.dy * 0.6);
+        if (mouthHappy) {
+          canvas.drawArc(
+            Rect.fromCenter(center: ledCenter.translate(0, 0.6 * u), width: 4.6 * u, height: 3.4 * u),
+            math.pi,
+            math.pi,
+            false,
+            Paint()
+              ..color = eyeColor
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 1.9 * u
+              ..strokeCap = StrokeCap.round,
+          );
+        } else {
+          canvas.drawCircle(ledCenter, 2.3 * u, Paint()..color = eyeColor);
+          canvas.drawCircle(ledCenter.translate(-0.6 * u, -0.7 * u), 0.7 * u, Paint()..color = Colors.white);
+        }
+      } else {
+        // Expressive sclera + tracking iris + specular dot
+        canvas.drawOval(Rect.fromCenter(center: Offset(ex, eyeY), width: 4.8 * u, height: 5.4 * u), Paint()..color = eyeColor);
+        final pupilCenter = Offset(
+          ex + (eyeLook.dx * 0.45).clamp(-1.1 * u, 1.1 * u),
+          eyeY + (eyeLook.dy * 0.45).clamp(-1.1 * u, 1.1 * u),
+        );
+        canvas.drawCircle(pupilCenter, 1.75 * u, Paint()..color = irisColor);
+        canvas.drawCircle(pupilCenter.translate(-0.5 * u, -0.6 * u), 0.65 * u, Paint()..color = Colors.white);
+      }
+
+      if (brows && !eyesClosed) {
+        final browLift = behavior == MascotBehavior.think ? (sign > 0 ? -1.1 * u : 0.4 * u) : 0.0;
+        canvas.drawLine(
+          Offset(ex - 2.3 * u, eyeY - 3.8 * u + browLift),
+          Offset(ex + 2.3 * u, eyeY - 3.8 * u),
+          Paint()
+            ..color = const Color(0xFF27170C)
+            ..strokeWidth = 1.2 * u
+            ..strokeCap = StrokeCap.round,
         );
       }
     }
-  }
 
-  @override
-  bool shouldRepaint(covariant _KnockGlassWavePainter oldDelegate) =>
-      oldDelegate.progress != progress || oldDelegate.color != color;
-}
+    if (catWhiskers) {
+      canvas.drawCircle(Offset(0, 2.2 * u), 1.3 * u, Paint()..color = const Color(0xFFFB7185));
+      final wPaint = Paint()..color = Colors.white.withValues(alpha: 0.78)..strokeWidth = 0.85 * u;
+      canvas.drawLine(Offset(-5.5 * u, 2.0 * u), Offset(-11.5 * u, 1.0 * u), wPaint);
+      canvas.drawLine(Offset(-5.5 * u, 3.2 * u), Offset(-11.0 * u, 3.8 * u), wPaint);
+      canvas.drawLine(Offset(5.5 * u, 2.0 * u), Offset(11.5 * u, 1.0 * u), wPaint);
+      canvas.drawLine(Offset(5.5 * u, 3.2 * u), Offset(11.0 * u, 3.8 * u), wPaint);
+    } else if (pinkNose) {
+      canvas.drawCircle(Offset(0, 1.8 * u), 1.4 * u, Paint()..color = const Color(0xFFF43F5E));
+    }
 
-class _ThoughtCloudPainter extends CustomPainter {
-  final Color color;
-  final double progress;
-
-  const _ThoughtCloudPainter({required this.color, required this.progress});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final bob = math.sin(progress * math.pi * 2) * 3.5;
-    final fill = Paint()..color = Colors.white.withValues(alpha: 0.22);
-    final rim = Paint()
-      ..color = color.withValues(alpha: 0.75)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.4;
-
-    // Trailing rising thought droplets from mascot head toward top-right cloud
-    final p1 = Offset(size.width * 0.72, size.height * 0.16 + bob * 0.4);
-    final p2 = Offset(size.width * 0.84, size.height * 0.04 + bob * 0.7);
-    canvas.drawCircle(p1, size.width * 0.045, fill);
-    canvas.drawCircle(p1, size.width * 0.045, rim);
-    canvas.drawCircle(p2, size.width * 0.068, fill);
-    canvas.drawCircle(p2, size.width * 0.068, rim);
-
-    // Fluffy organic thought cloud puff
-    final cloudCenter = Offset(size.width * 0.96, -size.height * 0.10 + bob);
-    final cw = size.width * 0.34;
-    final path = Path()
-      ..addOval(Rect.fromCenter(center: cloudCenter, width: cw, height: cw * 0.62))
-      ..addOval(Rect.fromCenter(center: cloudCenter.translate(-cw * 0.26, 2), width: cw * 0.56, height: cw * 0.46))
-      ..addOval(Rect.fromCenter(center: cloudCenter.translate(cw * 0.24, 2), width: cw * 0.52, height: cw * 0.44));
-    canvas.drawPath(path, Paint()..color = const Color(0xFF141827).withValues(alpha: 0.88));
-    canvas.drawPath(path, rim);
-
-    // Three animated thinking pulse dots inside the thought cloud
-    for (int i = -1; i <= 1; i++) {
-      final pulse = 0.45 + 0.55 * math.sin(progress * math.pi * 4 - i * 0.9).abs();
-      canvas.drawCircle(
-        cloudCenter.translate(i * cw * 0.20, 0),
-        (cw * 0.075).clamp(1.6, 4.0),
-        Paint()..color = const Color(0xFFFBBF24).withValues(alpha: pulse),
+    // Mouth
+    final mY = 4.6 * u;
+    if (mouthOpen) {
+      canvas.drawOval(
+        Rect.fromCenter(center: Offset(0, mY), width: 4.0 * u, height: 3.0 * u),
+        Paint()..color = isLed ? eyeColor : const Color(0xFF7F1D1D),
+      );
+    } else {
+      canvas.drawArc(
+        Rect.fromCenter(center: Offset(0, mY - (mouthHappy ? 0.8 * u : 0.0)), width: 5.5 * u, height: 3.4 * u),
+        0.18,
+        math.pi - 0.36,
+        false,
+        Paint()
+          ..color = isLed ? eyeColor : const Color(0xFF7C2D12)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.3 * u
+          ..strokeCap = StrokeCap.round,
       );
     }
   }
 
-  @override
-  bool shouldRepaint(covariant _ThoughtCloudPainter oldDelegate) =>
-      oldDelegate.progress != progress || oldDelegate.color != color;
-}
-
-class _OpenBook3DPainter extends CustomPainter {
-  final Color accent;
-  final double progress;
-
-  const _OpenBook3DPainter({required this.accent, required this.progress});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final cx = size.width * 0.50;
-    final by = size.height * 0.86;
-    final bw = size.width * 0.56;
-    final bh = size.height * 0.22;
-    final pageGlow = 0.72 + 0.28 * math.sin(progress * math.pi * 2);
-
-    // Warm upward illumination onto mascot face from open luminous book
-    canvas.drawOval(
-      Rect.fromCenter(center: Offset(cx, by - bh * 0.4), width: bw * 1.25, height: bh * 1.8),
-      Paint()
-        ..shader = RadialGradient(
-          colors: [
-            const Color(0xFF7DD3FC).withValues(alpha: 0.30 * pageGlow),
-            accent.withValues(alpha: 0.12),
-            Colors.transparent,
-          ],
-        ).createShader(Rect.fromCenter(center: Offset(cx, by - bh * 0.4), width: bw * 1.3, height: bh * 1.9)),
-    );
-
-    // Left & Right 3D open pages
+  void _drawHeldOpenBook(Canvas canvas, Offset center, double u, Color accent, double pageFlip) {
+    final bw = 20 * u;
+    final bh = 13 * u;
     final leftPage = Path()
-      ..moveTo(cx, by)
-      ..quadraticBezierTo(cx - bw * 0.26, by - bh * 0.35, cx - bw * 0.50, by - bh * 0.18)
-      ..lineTo(cx - bw * 0.44, by - bh * 1.02)
-      ..quadraticBezierTo(cx - bw * 0.22, by - bh * 1.12, cx, by - bh * 0.76)
+      ..moveTo(center.dx, center.dy + bh * 0.4)
+      ..quadraticBezierTo(center.dx - bw * 0.25, center.dy + bh * 0.15, center.dx - bw * 0.50, center.dy + bh * 0.28)
+      ..lineTo(center.dx - bw * 0.45, center.dy - bh * 0.55)
+      ..quadraticBezierTo(center.dx - bw * 0.22, center.dy - bh * 0.65, center.dx, center.dy - bh * 0.35)
       ..close();
 
     final rightPage = Path()
-      ..moveTo(cx, by)
-      ..quadraticBezierTo(cx + bw * 0.26, by - bh * 0.35, cx + bw * 0.50, by - bh * 0.18)
-      ..lineTo(cx + bw * 0.44, by - bh * 1.02)
-      ..quadraticBezierTo(cx + bw * 0.22, by - bh * 1.12, cx, by - bh * 0.76)
+      ..moveTo(center.dx, center.dy + bh * 0.4)
+      ..quadraticBezierTo(center.dx + bw * 0.25, center.dy + bh * 0.15, center.dx + bw * 0.50, center.dy + bh * 0.28)
+      ..lineTo(center.dx + bw * 0.45, center.dy - bh * 0.55)
+      ..quadraticBezierTo(center.dx + bw * 0.22, center.dy - bh * 0.65, center.dx, center.dy - bh * 0.35)
       ..close();
 
-    final cover = Paint()
-      ..color = const Color(0xFF0F172A).withValues(alpha: 0.94)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2;
-    final pageFill = Paint()..color = const Color(0xFFE0F2FE).withValues(alpha: 0.90);
-    final edgeStroke = Paint()
-      ..color = const Color(0xFF38BDF8).withValues(alpha: 0.85)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
+    // Soft glowing page light onto reader's face
+    canvas.drawOval(
+      Rect.fromCenter(center: center.translate(0, -bh * 0.2), width: bw * 1.15, height: bh * 1.4),
+      Paint()
+        ..shader = RadialGradient(
+          colors: [const Color(0xFF7DD3FC).withValues(alpha: 0.25), Colors.transparent],
+        ).createShader(Rect.fromCenter(center: center, width: bw * 1.2, height: bh * 1.5)),
+    );
 
-    canvas.drawPath(leftPage, pageFill);
-    canvas.drawPath(rightPage, pageFill);
-    canvas.drawPath(leftPage, edgeStroke);
-    canvas.drawPath(rightPage, edgeStroke);
-    canvas.drawLine(Offset(cx, by + 1), Offset(cx, by - bh * 0.76), cover);
+    final cover = Paint()..color = const Color(0xFF0F172A)..style = PaintingStyle.stroke..strokeWidth = 2.0 * u;
+    canvas.drawPath(leftPage, Paint()..color = const Color(0xFFE0F2FE));
+    canvas.drawPath(rightPage, Paint()..color = const Color(0xFFE0F2FE));
+    canvas.drawPath(leftPage, Paint()..color = accent.withValues(alpha: 0.85)..style = PaintingStyle.stroke..strokeWidth = 1.0 * u);
+    canvas.drawPath(rightPage, Paint()..color = accent.withValues(alpha: 0.85)..style = PaintingStyle.stroke..strokeWidth = 1.0 * u);
+    canvas.drawLine(Offset(center.dx, center.dy + bh * 0.42), Offset(center.dx, center.dy - bh * 0.35), cover);
 
-    // Turning translucent page sweeping cleanly across spine
-    final flip = (math.sin(progress * math.pi * 2) * 0.5 + 0.5); // 0 -> 1
-    final flipTipX = cx + (0.5 - flip) * bw * 0.72;
-    final flipPage = Path()
-      ..moveTo(cx, by)
-      ..quadraticBezierTo((cx + flipTipX) * 0.5, by - bh * 0.65, flipTipX, by - bh * 0.35)
-      ..lineTo(flipTipX * 0.98 + cx * 0.02, by - bh * 1.06)
-      ..quadraticBezierTo((cx + flipTipX) * 0.5, by - bh * 1.20, cx, by - bh * 0.76)
+    // Subtle text lines & turning page
+    final flipX = center.dx + (0.5 - pageFlip) * bw * 0.72;
+    final turn = Path()
+      ..moveTo(center.dx, center.dy + bh * 0.4)
+      ..quadraticBezierTo((center.dx + flipX) * 0.5, center.dy - bh * 0.2, flipX, center.dy + bh * 0.15)
+      ..lineTo(flipX, center.dy - bh * 0.55)
+      ..quadraticBezierTo((center.dx + flipX) * 0.5, center.dy - bh * 0.70, center.dx, center.dy - bh * 0.35)
       ..close();
-    canvas.drawPath(flipPage, Paint()..color = Colors.white.withValues(alpha: 0.58));
+    canvas.drawPath(turn, Paint()..color = Colors.white.withValues(alpha: 0.60));
   }
 
-  @override
-  bool shouldRepaint(covariant _OpenBook3DPainter oldDelegate) =>
-      oldDelegate.progress != progress || oldDelegate.accent != accent;
-}
+  void _drawThoughtWisps(Canvas canvas, Offset center, double side, double u, double phase, Color accent) {
+    final bob = math.sin(phase * math.pi * 2) * 2.5 * u;
+    final p1 = center.translate(-side * 8 * u, 9 * u + bob * 0.3);
+    final p2 = center.translate(-side * 4 * u, 4 * u + bob * 0.6);
+    final fill = Paint()..color = Colors.white.withValues(alpha: 0.22);
+    final rim = Paint()..color = accent.withValues(alpha: 0.78)..style = PaintingStyle.stroke..strokeWidth = 1.1 * u;
+    canvas.drawCircle(p1, 2.0 * u, fill);
+    canvas.drawCircle(p1, 2.0 * u, rim);
+    canvas.drawCircle(p2, 3.0 * u, fill);
+    canvas.drawCircle(p2, 3.0 * u, rim);
 
-class _SleepZzzPainter extends CustomPainter {
-  final double progress;
+    final cloud = center.translate(0, -4 * u + bob);
+    final cw = 18 * u;
+    final path = Path()
+      ..addOval(Rect.fromCenter(center: cloud, width: cw, height: cw * 0.62))
+      ..addOval(Rect.fromCenter(center: cloud.translate(-cw * 0.26, 1.5 * u), width: cw * 0.56, height: cw * 0.46))
+      ..addOval(Rect.fromCenter(center: cloud.translate(cw * 0.24, 1.5 * u), width: cw * 0.52, height: cw * 0.44));
+    canvas.drawPath(path, Paint()..color = const Color(0xFF0F172A).withValues(alpha: 0.90));
+    canvas.drawPath(path, rim);
+    for (int i = -1; i <= 1; i++) {
+      final pulse = 0.4 + 0.6 * math.sin(phase * math.pi * 4 - i * 0.8).abs();
+      canvas.drawCircle(cloud.translate(i * 4.0 * u, 0), 1.4 * u, Paint()..color = const Color(0xFFFBBF24).withValues(alpha: pulse));
+    }
+  }
 
-  const _SleepZzzPainter({required this.progress});
-
-  @override
-  void paint(Canvas canvas, Size size) {
+  void _drawFloatingZzz(Canvas canvas, Offset origin, double u, double phase) {
     final letters = ['z', 'Z', 'z'];
     for (int i = 0; i < 3; i++) {
-      final t = (progress + i * 0.33) % 1.0;
+      final t = (phase + i * 0.33) % 1.0;
       final alpha = math.sin(t * math.pi).clamp(0.0, 1.0);
-      final x = size.width * (0.72 + i * 0.08 + math.sin(t * math.pi * 2) * 0.04);
-      final y = size.height * (0.24 - t * 0.36);
+      final x = origin.dx + i * 5.5 * u + math.sin(t * math.pi * 2) * 3.0 * u;
+      final y = origin.dy - t * 22.0 * u;
       final tp = TextPainter(
         text: TextSpan(
           text: letters[i],
           style: TextStyle(
-            fontSize: (size.width * (0.14 + t * 0.08)).clamp(9.0, 22.0),
+            fontSize: ((8.0 + t * 4.5) * u).clamp(8.0, 20.0),
             fontWeight: FontWeight.w800,
-            color: const Color(0xFF93C5FD).withValues(alpha: alpha * 0.92),
+            color: const Color(0xFF93C5FD).withValues(alpha: alpha * 0.95),
             shadows: const [Shadow(color: Colors.black87, blurRadius: 5)],
           ),
         ),
@@ -667,77 +1213,26 @@ class _SleepZzzPainter extends CustomPainter {
     }
   }
 
-  @override
-  bool shouldRepaint(covariant _SleepZzzPainter oldDelegate) => oldDelegate.progress != progress;
-}
-
-class _HappySparklesPainter extends CustomPainter {
-  final Color color;
-  final double progress;
-
-  const _HappySparklesPainter({required this.color, required this.progress});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    for (int i = 0; i < 6; i++) {
-      final angle = i * (math.pi / 3) + progress * math.pi * 2;
-      final dist = size.width * (0.48 + 0.10 * math.sin(progress * math.pi * 4 + i));
-      final pt = Offset(size.width / 2 + math.cos(angle) * dist, size.height / 2 + math.sin(angle) * dist);
-      canvas.drawCircle(
-        pt,
-        (size.width * 0.032).clamp(1.8, 4.2),
-        Paint()..color = (i.isEven ? const Color(0xFFFBBF24) : color).withValues(alpha: 0.85),
-      );
+  void _drawHappyStars(Canvas canvas, Offset center, double u, double phase, Color accent) {
+    for (int i = 0; i < 5; i++) {
+      final a = i * (math.pi * 2 / 5) + phase * math.pi * 2;
+      final pt = center.translate(math.cos(a) * 20 * u, math.sin(a) * 16 * u);
+      canvas.drawCircle(pt, 1.8 * u, Paint()..color = (i.isEven ? const Color(0xFFFBBF24) : accent));
     }
   }
 
   @override
-  bool shouldRepaint(covariant _HappySparklesPainter oldDelegate) =>
-      oldDelegate.progress != progress || oldDelegate.color != color;
-}
-
-class _MascotFallbackPainter extends CustomPainter {
-  final MascotCharacter character;
-  final Color color;
-  final bool sleeping;
-  final bool happy;
-  final double phase;
-
-  const _MascotFallbackPainter({
-    required this.character,
-    required this.color,
-    required this.sleeping,
-    required this.happy,
-    required this.phase,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final cx = size.width / 2;
-    final cy = size.height / 2;
-    final r = size.width * 0.30;
-    canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFF10131D));
-    final stroke = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = (size.width * 0.055).clamp(1.4, 3.2)
-      ..strokeCap = StrokeCap.round;
-    canvas.drawCircle(Offset(cx, cy), r * 0.85, stroke);
-    final eyePaint = Paint()..color = Colors.white;
-    canvas.drawCircle(Offset(cx - r * 0.3, cy - r * 0.05), r * 0.12, eyePaint);
-    canvas.drawCircle(Offset(cx + r * 0.3, cy - r * 0.05), r * 0.12, eyePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _MascotFallbackPainter oldDelegate) =>
+  bool shouldRepaint(covariant _RiggedMascotPainter oldDelegate) =>
       oldDelegate.character != character ||
-      oldDelegate.color != color ||
-      oldDelegate.sleeping != sleeping ||
+      oldDelegate.accent != accent ||
+      oldDelegate.behavior != behavior ||
       oldDelegate.happy != happy ||
-      oldDelegate.phase != phase;
+      oldDelegate.phase != phase ||
+      oldDelegate.facingDirection != facingDirection ||
+      oldDelegate.showProps != showProps;
 }
 
-/// Interactive preview stage in Settings for testing all 6 mascot behaviors, custom wallpapers, and live mascot size.
+/// Interactive preview stage in Settings for testing all 6 mascot physical animations, wallpapers & size.
 class MascotBehaviorStage extends StatefulWidget {
   final MascotCharacter character;
   final MascotBehavior behavior;
@@ -834,21 +1329,21 @@ class _MascotBehaviorStageState extends State<MascotBehaviorStage> with SingleTi
 
   String _behaviorPill(MascotBehavior b, bool tr) {
     if (_wakingUp) {
-      return tr ? '✨ Uyanıyor...' : '✨ Waking up...';
+      return tr ? '✨ El Sallıyor · Uyandı!' : '✨ Waving · Awake!';
     }
     switch (b) {
       case MascotBehavior.idle:
-        return tr ? 'Boşta · Hazır' : 'Idle · Ready';
+        return tr ? 'Boşta · Göz Kırpıyor' : 'Idle · Ready';
       case MascotBehavior.patrol:
-        return tr ? 'Devriye Geziyor' : 'Patrolling';
+        return tr ? 'Yürüyor · Adım Döngüsü' : 'Walking · Patrol';
       case MascotBehavior.knock:
-        return tr ? 'Tık Tık · Camda!' : 'Knock Knock!';
+        return tr ? 'Elini Kaldırıp Camı Tıklatıyor' : 'Knocking on Glass';
       case MascotBehavior.think:
-        return tr ? 'Tasarruf Analizi...' : 'Thinking...';
+        return tr ? 'Elini Başına Götürüp Düşünüyor' : 'Hand on Head · Thinking';
       case MascotBehavior.read:
-        return tr ? 'Kombi Rehberi Okuyor' : 'Reading Manual';
+        return tr ? 'Kitabı Çıkarıp Okuyor' : 'Pulling Book & Reading';
       case MascotBehavior.deepSleep:
-        return tr ? 'Derin Uyku (%50 Kısık)' : 'Deep Sleep (50% Dim)';
+        return tr ? 'Yere Uzandı · Gözler Kapalı (%50 Kısık)' : 'Lying Asleep (50% Dim)';
     }
   }
 
@@ -858,13 +1353,13 @@ class _MascotBehaviorStageState extends State<MascotBehaviorStage> with SingleTi
     final tr = widget.lang == LangCode.tr;
     final hasCustomBg = widget.backdrop == ScreensaverBackdrop.custom && widget.customBgSource.trim().isNotEmpty;
     final effectiveBehavior = _wakingUp ? MascotBehavior.idle : widget.behavior;
-    final scaledSize = (82.0 * widget.mascotScale).clamp(48.0, 134.0);
+    final scaledSize = (104.0 * widget.mascotScale).clamp(62.0, 162.0);
     final scalePct = (widget.mascotScale * 100).round();
 
     return GestureDetector(
       onTap: _triggerWake,
       child: Container(
-        height: 224,
+        height: 236,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: meta.color.withValues(alpha: 0.30)),
@@ -899,7 +1394,7 @@ class _MascotBehaviorStageState extends State<MascotBehaviorStage> with SingleTi
                 ),
               ),
 
-              // 4) Top chips inside stage (Mascot name + size % on left, backdrop on right)
+              // 4) Top chips inside stage
               Positioned(
                 top: 10,
                 left: 10,
@@ -946,56 +1441,59 @@ class _MascotBehaviorStageState extends State<MascotBehaviorStage> with SingleTi
                 ),
               ),
 
-              // 5) Center animated 3D Mascot + Behavior Status
-              Center(
-                child: AnimatedBuilder(
-                  animation: _anim,
-                  builder: (context, _) {
-                    final angle = _anim.value * math.pi * 2;
-                    final patrolDx = effectiveBehavior == MascotBehavior.patrol
-                        ? math.sin(angle) * 68.0
-                        : 0.0;
-                    // Derivative of sin(angle) is cos(angle): >0 moving right, <0 moving left
-                    final facingDir = effectiveBehavior == MascotBehavior.patrol
-                        ? (math.cos(angle) >= 0 ? 1.0 : -1.0)
-                        : 1.0;
+              // 5) Center articulated full-body Mascot + Behavior Status
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: AnimatedBuilder(
+                    animation: _anim,
+                    builder: (context, _) {
+                      final angle = _anim.value * math.pi * 2;
+                      final patrolDx = effectiveBehavior == MascotBehavior.patrol
+                          ? math.sin(angle) * 72.0
+                          : 0.0;
+                      final facingDir = effectiveBehavior == MascotBehavior.patrol
+                          ? (math.cos(angle) >= 0 ? 1.0 : -1.0)
+                          : 1.0;
 
-                    return Transform.translate(
-                      offset: Offset(patrolDx, 12.0),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3.5),
-                            decoration: BoxDecoration(
-                              color: effectiveBehavior == MascotBehavior.deepSleep
-                                  ? const Color(0xFF1E1B4B).withValues(alpha: 0.88)
-                                  : const Color(0xFF111522).withValues(alpha: 0.88),
-                              borderRadius: BorderRadius.circular(999),
-                              border: Border.all(
-                                color: (_wakingUp ? const Color(0xFFFBBF24) : meta.color).withValues(alpha: 0.50),
+                      return Transform.translate(
+                        offset: Offset(patrolDx, 0.0),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              margin: const EdgeInsets.only(bottom: 2),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3.5),
+                              decoration: BoxDecoration(
+                                color: effectiveBehavior == MascotBehavior.deepSleep
+                                    ? const Color(0xFF1E1B4B).withValues(alpha: 0.88)
+                                    : const Color(0xFF111522).withValues(alpha: 0.88),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: (_wakingUp ? const Color(0xFFFBBF24) : meta.color).withValues(alpha: 0.50),
+                                ),
+                              ),
+                              child: Text(
+                                _behaviorPill(effectiveBehavior, tr),
+                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
                               ),
                             ),
-                            child: Text(
-                              _behaviorPill(effectiveBehavior, tr),
-                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
+                            MascotAvatar(
+                              character: widget.character,
+                              size: scaledSize,
+                              behavior: effectiveBehavior,
+                              sleeping: effectiveBehavior == MascotBehavior.deepSleep,
+                              happy: _wakingUp,
+                              phase: _anim.value,
+                              facingDirection: facingDir,
+                              frameless: true,
                             ),
-                          ),
-                          MascotAvatar(
-                            character: widget.character,
-                            size: scaledSize,
-                            behavior: effectiveBehavior,
-                            sleeping: effectiveBehavior == MascotBehavior.deepSleep,
-                            happy: _wakingUp,
-                            phase: _anim.value,
-                            facingDirection: facingDir,
-                            frameless: true,
-                          ),
-                        ],
-                      ),
-                    );
-                  },
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
             ],
@@ -1160,7 +1658,7 @@ class _TermoBotOverlayState extends State<TermoBotOverlay> with SingleTickerProv
     final width = MediaQuery.of(context).size.width;
     final maxWalk = math.max(96.0, width - 160.0);
     final napping = _behavior == MascotBehavior.deepSleep;
-    final scaledSize = (64.0 * widget.mascotScale).clamp(38.0, 108.0);
+    final scaledSize = (82.0 * widget.mascotScale).clamp(48.0, 132.0);
 
     return AnimatedBuilder(
       animation: _walkCtrl,
@@ -1180,7 +1678,7 @@ class _TermoBotOverlayState extends State<TermoBotOverlay> with SingleTickerProv
               children: [
                 if (_speech != null || napping)
                   Container(
-                    margin: const EdgeInsets.only(bottom: 5),
+                    margin: const EdgeInsets.only(bottom: 4),
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: const Color(0xFF141620).withValues(alpha: 0.94),
@@ -1333,7 +1831,7 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
     final mm = _now.minute.toString().padLeft(2, '0');
     final activeBoiler = widget.boiler ?? ThermostatMath.computeBoilerTelemetry(widget.roomTemp, widget.targetTemp);
     final hasCustomBg = widget.backdrop == ScreensaverBackdrop.custom && widget.customBgSource.trim().isNotEmpty;
-    final scaledSize = (138.0 * widget.mascotScale).clamp(84.0, 224.0);
+    final scaledSize = (146.0 * widget.mascotScale).clamp(90.0, 234.0);
 
     return Positioned.fill(
       child: GestureDetector(
@@ -1366,19 +1864,18 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
                 ),
               ),
 
-              // 4) Foreground clock, floating 3D Unreal mascot (tappable to pet), and live telemetry
+              // 4) Foreground clock, articulated walking mascot (tappable to pet), and live telemetry
               Center(
                 child: AnimatedBuilder(
                   animation: _anim,
                   builder: (context, _) {
                     final dx = math.sin(_anim.value * math.pi * 2) * 34.0;
-                    final dy = math.cos(_anim.value * math.pi * 4).abs() * -9.0;
                     final oledShiftX = ((_now.minute % 3) - 1) * 4.0;
                     final oledShiftY = ((_now.minute % 5) - 2) * 2.0;
                     final facingDir = math.cos(_anim.value * math.pi * 2) >= 0 ? 1.0 : -1.0;
 
                     return Transform.translate(
-                      offset: Offset(dx + oledShiftX, dy + oledShiftY),
+                      offset: Offset(dx + oledShiftX, oledShiftY),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -1393,7 +1890,7 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
                               decoration: TextDecoration.none,
                             ),
                           ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 10),
                           GestureDetector(
                             onTap: _petMascot,
                             child: Column(
@@ -1401,7 +1898,7 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
                               children: [
                                 if (_reactionText != null)
                                   Container(
-                                    margin: const EdgeInsets.only(bottom: 10),
+                                    margin: const EdgeInsets.only(bottom: 8),
                                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                     decoration: BoxDecoration(
                                       color: const Color(0xFF141620).withValues(alpha: 0.92),
@@ -1430,7 +1927,7 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
                               ],
                             ),
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 12),
                           Text(
                             '${meta.name} · ${tr ? meta.roleTr : meta.roleEn}',
                             style: const TextStyle(
