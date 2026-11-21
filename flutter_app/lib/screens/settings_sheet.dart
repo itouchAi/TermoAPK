@@ -27,7 +27,7 @@ Future<void> showSystemSettingsSheet({
   required ValueChanged<SystemSettingsState> onSaveSettings,
   required VoidCallback onOpenAmbient,
   required VoidCallback onOpenScreensaverPreview,
-  required VoidCallback onTestAiCall,
+  required ValueChanged<AiCallReason> onTestAiCall,
   required VoidCallback onReplayBootCeremony,
   required VoidCallback onResetTelemetryHistory,
 }) {
@@ -70,7 +70,7 @@ class _SystemSettingsModal extends StatefulWidget {
   final ValueChanged<SystemSettingsState> onSaveSettings;
   final VoidCallback onOpenAmbient;
   final VoidCallback onOpenScreensaverPreview;
-  final VoidCallback onTestAiCall;
+  final ValueChanged<AiCallReason> onTestAiCall;
   final VoidCallback onReplayBootCeremony;
   final VoidCallback onResetTelemetryHistory;
 
@@ -2974,7 +2974,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 _hapticTap();
                 widget.onSaveSettings(_draft);
                 Navigator.of(context).pop();
-                widget.onTestAiCall();
+                widget.onTestAiCall(AiCallReason.manualTest);
               },
               icon: const Icon(Icons.phone_forwarded_rounded, size: 18, color: Color(0xFF34D399)),
               label: Text(
@@ -2987,6 +2987,30 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 padding: const EdgeInsets.symmetric(vertical: 11),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
               ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final sc in [
+                  (AiCallReason.ignition, tr ? '🔥 Ateşleme Testi' : '🔥 Ignition'),
+                  (AiCallReason.boilerOff, tr ? '⏸ Kapanma Testi' : '⏸ Boiler Off'),
+                  (AiCallReason.coldRoom, tr ? '❄️ Ev Soğuk (Açalım mı?)' : '❄️ Cold Room'),
+                  (AiCallReason.hotRoom, tr ? '☀️ Ev Sıcak (Kapatalım mı?)' : '☀️ Hot Room'),
+                ])
+                  ActionChip(
+                    label: Text(sc.$2, style: const TextStyle(fontSize: 10.5, color: Colors.white)),
+                    backgroundColor: Colors.white.withValues(alpha: 0.06),
+                    side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                    onPressed: () {
+                      _hapticTap();
+                      widget.onSaveSettings(_draft);
+                      Navigator.of(context).pop();
+                      widget.onTestAiCall(sc.$1);
+                    },
+                  ),
+              ],
             ),
           ],
         );

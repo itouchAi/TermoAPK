@@ -6,6 +6,7 @@ import 'package:termostat_flow/services/ambient_audio_service.dart';
 import 'package:termostat_flow/services/hardware_service.dart';
 import 'package:termostat_flow/services/notification_service.dart';
 import 'package:termostat_flow/services/vault_crypto_service.dart';
+import 'package:termostat_flow/services/voice_speech_service.dart';
 import 'package:termostat_flow/widgets/termo_bot.dart';
 
 void main() {
@@ -389,5 +390,87 @@ void main() {
     expect(boost.handled, isTrue);
     expect(boost.newTargetTemp, 25.0);
     expect(boost.newPreset, PresetId.boost);
+  });
+
+  test('VoiceSpeechService assigns female/male voices and formats derece naturally', () {
+    expect(VoiceSpeechService.isFemaleCharacter(MascotCharacter.ela), isTrue);
+    expect(VoiceSpeechService.isFemaleCharacter(MascotCharacter.mirnav), isTrue);
+    expect(VoiceSpeechService.isFemaleCharacter(MascotCharacter.puki), isTrue);
+    expect(VoiceSpeechService.isFemaleCharacter(MascotCharacter.termoBot), isFalse);
+    expect(VoiceSpeechService.isFemaleCharacter(MascotCharacter.mert), isFalse);
+
+    expect(
+      VoiceSpeechService.formatForSpeech('Hedef 20.0°C, oda 21.8°C.', lang: LangCode.tr),
+      'Hedef 20 derece, oda 21.8 derece.',
+    );
+  });
+
+  test('AiCallService detects boiler shutdown, room temp questions, and closing thank-you replies', () {
+    final heatingBoiler = ThermostatMath.computeBoilerTelemetry(21.0, 23.0);
+    final standbyBoiler = ThermostatMath.computeBoilerTelemetry(21.0, 15.0);
+    final safeGuard = NotificationService.evaluateSafetyThresholds(
+      roomTemp: 21.0,
+      outsideTemp: 15.0,
+      boiler: standbyBoiler,
+    );
+    final t0 = DateTime(2026, 11, 21, 14, 0, 0);
+
+    final offTrigger = AiCallService.evaluateTrigger(
+      enabled: true,
+      triggerMode: AiCallTriggerMode.onIgnition,
+      wasHeating: true,
+      nextBoiler: standbyBoiler,
+      safety: safeGuard,
+      roomTemp: 21.0,
+      now: t0,
+    );
+    expect(offTrigger.shouldCall, isTrue);
+    expect(offTrigger.reason, AiCallReason.boilerOff);
+
+    final coldTrigger = AiCallService.evaluateTrigger(
+      enabled: true,
+      triggerMode: AiCallTriggerMode.ignitionAndSafety,
+      wasHeating: false,
+      nextBoiler: standbyBoiler,
+      safety: safeGuard,
+      roomTemp: 16.5,
+      now: t0,
+    );
+    expect(coldTrigger.shouldCall, isTrue);
+    expect(coldTrigger.reason, AiCallReason.coldRoom);
+
+    final hotTrigger = AiCallService.evaluateTrigger(
+      enabled: true,
+      triggerMode: AiCallTriggerMode.ignitionAndSafety,
+      wasHeating: true,
+      nextBoiler: heatingBoiler,
+      safety: safeGuard,
+      roomTemp: 27.0,
+      now: t0,
+    );
+    expect(hotTrigger.shouldCall, isTrue);
+    expect(hotTrigger.reason, AiCallReason.hotRoom);
+
+    final closeResp = AiCallService.evaluateCallResponse(
+      rawInput: 'kombiyi kapat',
+      callReason: AiCallReason.manualTest,
+      boiler: heatingBoiler,
+      currentTargetTemp: 23.0,
+      lang: LangCode.tr,
+    );
+    expect(closeResp.handled, isTrue);
+    expect(closeResp.newTargetTemp, ThermostatMath.minTemp);
+    expect(closeResp.replyTr.contains('Teşekkürler'), isTrue);
+
+    final yesOpenResp = AiCallService.evaluateCallResponse(
+      rawInput: 'evet',
+      callReason: AiCallReason.coldRoom,
+      boiler: standbyBoiler,
+      currentTargetTemp: 18.0,
+      lang: LangCode.tr,
+    );
+    expect(yesOpenResp.handled, isTrue);
+    expect(yesOpenResp.newTargetTemp, 22.5);
+    expect(yesOpenResp.replyTr.contains('Teşekkürler'), isTrue);
   });
 }

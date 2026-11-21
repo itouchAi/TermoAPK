@@ -7,6 +7,7 @@ Future<void> showVoiceCommandSheet({
   required LangCode lang,
   required Color accentColor,
   required double currentTargetTemp,
+  MascotCharacter character = MascotCharacter.ela,
   bool ttsEnabled = true,
   required ValueChanged<VoiceCommandResult> onExecute,
 }) {
@@ -64,7 +65,7 @@ Future<void> showVoiceCommandSheet({
               onExecute(res);
             }
             if (speakingReply) {
-              VoiceSpeechService.speak(reply, lang: lang);
+              VoiceSpeechService.speak(reply, lang: lang, character: character);
             }
             controller.clear();
           }

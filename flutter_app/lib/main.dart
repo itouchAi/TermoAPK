@@ -399,6 +399,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       wasHeating: wasHeating,
       nextBoiler: nextBoiler,
       safety: safety,
+      roomTemp: _roomTemp,
       lastCallAt: _lastAiCallAt,
     );
     if (decision.shouldCall && decision.reason != null) {
@@ -612,6 +613,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                   lang: _lang,
                   accentColor: activeColor,
                   currentTargetTemp: _targetTemp,
+                  character: _settings.mascotCharacter,
                   ttsEnabled: _settings.aiCallVoiceBriefEnabled,
                   onExecute: (res) {
                     if (res.newTargetTemp != null) {
@@ -814,9 +816,10 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                           onOpenScreensaverPreview: () => setState(() {
                                             _screensaverPreview = true;
                                           }),
-                                          onTestAiCall: () => _launchAiCall(
-                                            reason: AiCallReason.manualTest,
-                                            urgent: false,
+                                          onTestAiCall: (reason) => _launchAiCall(
+                                            reason: reason,
+                                            urgent: reason == AiCallReason.safetyAlert ||
+                                                reason == AiCallReason.hotRoom,
                                           ),
                                           onReplayBootCeremony: () => setState(() {
                                             _showBootCeremony = true;

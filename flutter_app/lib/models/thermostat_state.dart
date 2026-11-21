@@ -729,6 +729,9 @@ enum AiCallTriggerMode {
 
 enum AiCallReason {
   ignition,
+  boilerOff,
+  coldRoom,
+  hotRoom,
   safetyAlert,
   manualTest,
 }
