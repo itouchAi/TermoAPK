@@ -1811,6 +1811,28 @@ class FullscreenScreensaverOverlay extends StatefulWidget {
     required this.onExit,
   });
 
+  /// Generates 3 shuffled cycles of all non-sleep animations (each repeating 3 times).
+  static List<MascotBehavior> buildBehaviorSequence([math.Random? rng]) {
+    final random = rng ?? math.Random();
+    const pool = [
+      MascotBehavior.patrol,
+      MascotBehavior.knock,
+      MascotBehavior.think,
+      MascotBehavior.read,
+    ];
+    final plan = <MascotBehavior>[];
+    for (int cycle = 0; cycle < 3; cycle++) {
+      final batch = List<MascotBehavior>.from(pool)..shuffle(random);
+      if (plan.isNotEmpty && batch.first == plan.last && batch.length > 1) {
+        final swap = batch.first;
+        batch[0] = batch[batch.length - 1];
+        batch[batch.length - 1] = swap;
+      }
+      plan.addAll(batch);
+    }
+    return plan;
+  }
+
   @override
   State<FullscreenScreensaverOverlay> createState() => _FullscreenScreensaverOverlayState();
 }
@@ -1819,29 +1841,100 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
     with SingleTickerProviderStateMixin {
   late final AnimationController _anim;
   late Timer _clockTimer;
+  final math.Random _rng = math.Random();
   DateTime _now = DateTime.now();
   bool _happy = false;
+  bool _sleepDimmed = false;
   String? _reactionText;
   Timer? _reactionTimer;
+  Timer? _behaviorTimer;
+  List<MascotBehavior> _behaviorPlan = const [];
+  int _stepIndex = 0;
+  MascotBehavior _currentBehavior = MascotBehavior.patrol;
+  double _patrolDx = 0.0;
+  double _facingDir = 1.0;
 
   @override
   void initState() {
     super.initState();
-    _anim = AnimationController(vsync: this, duration: const Duration(seconds: 8))..repeat();
+    _anim = AnimationController(vsync: this, duration: const Duration(milliseconds: 4200))
+      ..addListener(() {
+        final angle = _anim.value * math.pi * 2;
+        final targetDx = _currentBehavior == MascotBehavior.patrol && !_happy
+            ? math.sin(angle) * 58.0
+            : 0.0;
+        _patrolDx += (targetDx - _patrolDx) * 0.12;
+        if (_currentBehavior == MascotBehavior.patrol && !_happy) {
+          _facingDir = math.cos(angle) >= 0 ? 1.0 : -1.0;
+        } else {
+          _facingDir = 1.0;
+        }
+      })
+      ..repeat();
     _clockTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
     if (widget.soundsEnabled) {
       AmbientAudioService.playMascotSound(widget.character);
     }
+    _startBehaviorSequence();
+  }
+
+  void _startBehaviorSequence() {
+    _behaviorTimer?.cancel();
+    _behaviorPlan = FullscreenScreensaverOverlay.buildBehaviorSequence(_rng);
+    _stepIndex = 0;
+    if (_sleepDimmed) {
+      _sleepDimmed = false;
+      HardwareService.exitSmartDisplayHardware();
+    }
+    _advanceBehaviorStep();
+  }
+
+  void _advanceBehaviorStep() {
+    if (!mounted) return;
+    if (_stepIndex >= _behaviorPlan.length) {
+      setState(() {
+        _currentBehavior = MascotBehavior.deepSleep;
+        _sleepDimmed = true;
+      });
+      HardwareService.updateSmartDisplayBrightness(18);
+      if (widget.soundsEnabled) {
+        AmbientAudioService.playMascotSound(widget.character, sleepy: true);
+      }
+      return;
+    }
+
+    final nextBehavior = _behaviorPlan[_stepIndex];
+    _stepIndex++;
+    setState(() {
+      _currentBehavior = nextBehavior;
+      _sleepDimmed = false;
+    });
+
+    // Random 3–4 seconds per behavior before advancing to next random move
+    final durationMs = 3000 + _rng.nextInt(1001);
+    _behaviorTimer?.cancel();
+    _behaviorTimer = Timer(Duration(milliseconds: durationMs), _advanceBehaviorStep);
   }
 
   @override
   void dispose() {
+    _behaviorTimer?.cancel();
     _reactionTimer?.cancel();
     _clockTimer.cancel();
     _anim.dispose();
+    if (_sleepDimmed) {
+      HardwareService.exitSmartDisplayHardware();
+    }
     super.dispose();
+  }
+
+  void _handleExit() {
+    if (_sleepDimmed) {
+      HardwareService.exitSmartDisplayHardware();
+    }
+    widget.onExit();
   }
 
   void _petMascot() {
@@ -1856,9 +1949,15 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
     if (widget.soundsEnabled) {
       AmbientAudioService.playMascotSound(widget.character);
     }
+    if (_sleepDimmed) {
+      HardwareService.exitSmartDisplayHardware();
+    }
     final isHeating = widget.boiler?.isHeating ?? (widget.targetTemp > widget.roomTemp + 0.1);
+    _behaviorTimer?.cancel();
     setState(() {
       _happy = true;
+      _sleepDimmed = false;
+      _currentBehavior = MascotBehavior.idle;
       _reactionText = isHeating
           ? (tr ? '${meta.name}: Ev ısıtılıyor!' : '${meta.name}: Warming up!')
           : (tr ? '${meta.name}: Konfor sıcaklığı ideal!' : '${meta.name}: Comfort steady!');
@@ -1870,6 +1969,7 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
           _happy = false;
           _reactionText = null;
         });
+        _startBehaviorSequence();
       }
     });
   }
@@ -1883,10 +1983,14 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
     final activeBoiler = widget.boiler ?? ThermostatMath.computeBoilerTelemetry(widget.roomTemp, widget.targetTemp);
     final hasCustomBg = widget.backdrop == ScreensaverBackdrop.custom && widget.customBgSource.trim().isNotEmpty;
     final scaledSize = (146.0 * widget.mascotScale).clamp(90.0, 234.0);
+    final cycleNum = _currentBehavior == MascotBehavior.deepSleep
+        ? 3
+        : (((_stepIndex - 1).clamp(0, 11) ~/ 4) + 1);
 
     return Positioned.fill(
       child: GestureDetector(
-        onTap: widget.onExit,
+        behavior: HitTestBehavior.opaque,
+        onTap: _handleExit,
         child: ClipRect(
           child: Stack(
             fit: StackFit.expand,
@@ -1915,18 +2019,16 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
                 ),
               ),
 
-              // 4) Foreground clock, articulated walking mascot (tappable to pet), and live telemetry
+              // 4) Foreground clock, articulated animated mascot (tappable to pet), and live telemetry
               Center(
                 child: AnimatedBuilder(
                   animation: _anim,
                   builder: (context, _) {
-                    final dx = math.sin(_anim.value * math.pi * 2) * 34.0;
                     final oledShiftX = ((_now.minute % 3) - 1) * 4.0;
                     final oledShiftY = ((_now.minute % 5) - 2) * 2.0;
-                    final facingDir = math.cos(_anim.value * math.pi * 2) >= 0 ? 1.0 : -1.0;
 
                     return Transform.translate(
-                      offset: Offset(dx + oledShiftX, oledShiftY),
+                      offset: Offset(oledShiftX, oledShiftY),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -1936,55 +2038,61 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
                               fontSize: 44,
                               fontWeight: FontWeight.w300,
                               letterSpacing: 2.0,
-                              color: Colors.white.withValues(alpha: 0.90),
+                              color: Colors.white.withValues(alpha: _sleepDimmed ? 0.56 : 0.90),
                               fontFeatures: const [FontFeature.tabularFigures()],
                               decoration: TextDecoration.none,
                             ),
                           ),
                           const SizedBox(height: 10),
-                          GestureDetector(
-                            onTap: _petMascot,
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (_reactionText != null)
-                                  Container(
-                                    margin: const EdgeInsets.only(bottom: 8),
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF141620).withValues(alpha: 0.92),
-                                      borderRadius: BorderRadius.circular(14),
-                                      border: Border.all(color: meta.color.withValues(alpha: 0.65)),
-                                    ),
-                                    child: Text(
-                                      _reactionText!,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.white,
-                                        decoration: TextDecoration.none,
+                          Transform.translate(
+                            offset: Offset(_patrolDx, 0.0),
+                            child: GestureDetector(
+                              onTap: _petMascot,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (_reactionText != null)
+                                    Container(
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF141620).withValues(alpha: 0.92),
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(color: meta.color.withValues(alpha: 0.65)),
+                                      ),
+                                      child: Text(
+                                        _reactionText!,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.white,
+                                          decoration: TextDecoration.none,
+                                        ),
                                       ),
                                     ),
+                                  MascotAvatar(
+                                    character: widget.character,
+                                    size: scaledSize,
+                                    behavior: _currentBehavior,
+                                    sleeping: _currentBehavior == MascotBehavior.deepSleep,
+                                    happy: _happy,
+                                    phase: _anim.value,
+                                    facingDirection: _facingDir,
+                                    frameless: true,
                                   ),
-                                MascotAvatar(
-                                  character: widget.character,
-                                  size: scaledSize,
-                                  behavior: MascotBehavior.patrol,
-                                  happy: _happy,
-                                  phase: _anim.value,
-                                  facingDirection: facingDir,
-                                  frameless: true,
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            '${meta.name} · ${tr ? meta.roleTr : meta.roleEn}',
-                            style: const TextStyle(
+                            _sleepDimmed
+                                ? '${meta.name} · ${tr ? 'Uyku Modu (%50 Kısık)' : 'Sleep Mode (Dimmed)'}'
+                                : '${meta.name} · ${tr ? meta.roleTr : meta.roleEn} ($cycleNum/3)',
+                            style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.w700,
-                              color: Colors.white,
+                              color: Colors.white.withValues(alpha: _sleepDimmed ? 0.65 : 1.0),
                               decoration: TextDecoration.none,
                             ),
                           ),
@@ -2020,6 +2128,16 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
                       ),
                     );
                   },
+                ),
+              ),
+
+              // 5) Smooth night-sleep dimming veil when deep sleep engages after 3 cycles
+              IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: _sleepDimmed ? 0.50 : 0.0,
+                  duration: const Duration(milliseconds: 900),
+                  curve: Curves.easeInOut,
+                  child: const ColoredBox(color: Colors.black),
                 ),
               ),
             ],

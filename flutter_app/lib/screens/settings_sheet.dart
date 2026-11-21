@@ -894,7 +894,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           iconColor: const Color(0xFFFBBF24),
           title: tr ? 'Sanal Asistan & Ekran Koruyucu' : 'Virtual Assistant Screensaver',
           tag: 'TermoBot',
-          subtitle: tr ? 'Boşta kalınca yürüyen ve 3 döngü sonra uyuyan maskot' : 'Idle mascot companion & sleep mode',
+          subtitle: tr ? 'Boşta kalınca tam ekran açılan ve 3 döngü sonra uyuyan koruyucu' : 'Idle fullscreen screensaver & 3-cycle sleep mode',
           trailingAction: _ActionPill(
             label: _draft.termoBotEnabled ? (tr ? 'Açık ✓' : 'On ✓') : (tr ? 'Kapalı' : 'Off'),
             active: _draft.termoBotEnabled,

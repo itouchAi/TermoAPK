@@ -74,8 +74,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   bool _ambientMode = false;
   bool _screensaverPreview = false;
   bool _voiceOpen = false;
+  bool _modalSheetOpen = false;
   bool _showBootCeremony = false;
-  bool _termoBotIdle = false;
   DateTime _now = DateTime.now();
   int _slideIndex = 0;
   int _slideTicks = 0;
@@ -134,14 +134,17 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   }
 
   void _resetIdleTimer() {
-    if (_termoBotIdle) {
-      setState(() => _termoBotIdle = false);
-    }
     _idleTimer?.cancel();
-    if (_settings.termoBotEnabled) {
+    if (_settings.termoBotEnabled && !_screensaverPreview) {
       _idleTimer = Timer(Duration(seconds: _settings.screensaverIdleSeconds), () {
-        if (mounted && !_ambientMode && !_voiceOpen && !_screensaverPreview) {
-          setState(() => _termoBotIdle = true);
+        if (mounted &&
+            _settings.termoBotEnabled &&
+            !_ambientMode &&
+            !_voiceOpen &&
+            !_modalSheetOpen &&
+            !_showBootCeremony &&
+            !_screensaverPreview) {
+          setState(() => _screensaverPreview = true);
         }
       });
     }
@@ -521,16 +524,10 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
     return Listener(
       onPointerDown: (_) {
-        if (!_termoBotIdle) _resetIdleTimer();
+        if (!_screensaverPreview) _resetIdleTimer();
       },
       onPointerUp: (_) {
-        if (_termoBotIdle) {
-          Future.microtask(() {
-            if (mounted && _termoBotIdle) _resetIdleTimer();
-          });
-        } else {
-          _resetIdleTimer();
-        }
+        if (!_screensaverPreview) _resetIdleTimer();
       },
       child: Scaffold(
         backgroundColor: palette.scaffoldBg,
@@ -672,9 +669,11 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                   // Theme & Visual Effects Sheet
                                   _TopActionButton(
                                     palette: palette,
-                                    onTap: () {
+                                    onTap: () async {
                                       _triggerHaptic();
-                                      showThemeEffectsSheet(
+                                      _modalSheetOpen = true;
+                                      _idleTimer?.cancel();
+                                      await showThemeEffectsSheet(
                                         context: context,
                                         lang: _lang,
                                         accentColor: activeColor,
@@ -682,6 +681,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                         initialVisual: _visual,
                                         onUpdateVisual: _updateVisual,
                                       );
+                                      _modalSheetOpen = false;
+                                      if (mounted) _resetIdleTimer();
                                     },
                                     child: Icon(Icons.palette_outlined, size: 17, color: palette.textPrimary),
                                   ),
@@ -690,9 +691,11 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                   // Widget & Screen Order Sheet
                                   _TopActionButton(
                                     palette: palette,
-                                    onTap: () {
+                                    onTap: () async {
                                       _triggerHaptic();
-                                      showWidgetOrderSheet(
+                                      _modalSheetOpen = true;
+                                      _idleTimer?.cancel();
+                                      await showWidgetOrderSheet(
                                         context: context,
                                         lang: _lang,
                                         accentColor: activeColor,
@@ -700,6 +703,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                         initialVisual: _visual,
                                         onUpdateVisual: _updateVisual,
                                       );
+                                      _modalSheetOpen = false;
+                                      if (mounted) _resetIdleTimer();
                                     },
                                     child: Icon(Icons.dashboard_customize_outlined, size: 17, color: palette.textPrimary),
                                   ),
@@ -720,9 +725,11 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                     // System Settings Sheet
                                     _TopActionButton(
                                       palette: palette,
-                                      onTap: () {
+                                      onTap: () async {
                                         _triggerHaptic();
-                                        showSystemSettingsSheet(
+                                        _modalSheetOpen = true;
+                                        _idleTimer?.cancel();
+                                        await showSystemSettingsSheet(
                                           context: context,
                                           lang: _lang,
                                           locationName: _locationName,
@@ -740,25 +747,26 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                             _persist();
                                           },
                                           onOpenAmbient: _enterAmbientMode,
-                                         onOpenScreensaverPreview: () => setState(() {
-                                           _termoBotIdle = false;
-                                           _screensaverPreview = true;
-                                         }),
-                                         onReplayBootCeremony: () => setState(() {
-                                           _showBootCeremony = true;
-                                         }),
-                                         onResetTelemetryHistory: () {
-                                           setState(() {
-                                             _schedule = ThermostatMath.defaultSchedule;
-                                             _targetTemp = 22.5;
-                                             _activePreset = PresetId.konfor;
-                                           });
-                                           _persist();
-                                         },
-                                       );
-                                     },
-                                     child: Icon(Icons.settings_outlined, size: 17, color: palette.textPrimary),
-                                   ),
+                                          onOpenScreensaverPreview: () => setState(() {
+                                            _screensaverPreview = true;
+                                          }),
+                                          onReplayBootCeremony: () => setState(() {
+                                            _showBootCeremony = true;
+                                          }),
+                                          onResetTelemetryHistory: () {
+                                            setState(() {
+                                              _schedule = ThermostatMath.defaultSchedule;
+                                              _targetTemp = 22.5;
+                                              _activePreset = PresetId.konfor;
+                                            });
+                                            _persist();
+                                          },
+                                        );
+                                        _modalSheetOpen = false;
+                                        if (mounted) _resetIdleTimer();
+                                      },
+                                      child: Icon(Icons.settings_outlined, size: 17, color: palette.textPrimary),
+                                    ),
                                  ],
                                ),
                              ],
@@ -851,50 +859,28 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                ),
              ),
 
-             // TermoBot Idle Companion Mascot
-             TermoBotOverlay(
-               enabled: _settings.termoBotEnabled && !_ambientMode && !_screensaverPreview,
-               isSleeping: _termoBotIdle,
-               character: _settings.mascotCharacter,
-               mascotScale: _settings.mascotScale,
-               soundsEnabled: _settings.mascotSoundsEnabled,
-               hapticEnabled: _settings.hapticEnabled,
-               hapticStrength: _settings.hapticStrength,
-               roomTemp: _roomTemp,
-               targetTemp: _targetTemp,
-               boiler: boiler,
-               lang: _lang,
-               accentColor: activeColor,
-               bottomOffset: (compactLandscape ? 72.0 : 88.0) + media.padding.bottom,
-               onWake: _resetIdleTimer,
-               onOpenScreensaver: () => setState(() {
-                 _termoBotIdle = false;
-                 _screensaverPreview = true;
-               }),
-             ),
-
-             // Fullscreen Screensaver Preview Overlay
-             if (_screensaverPreview)
-               FullscreenScreensaverOverlay(
-                 character: _settings.mascotCharacter,
-                 mascotScale: _settings.mascotScale,
-                 backdrop: _settings.screensaverBackdrop,
-                 blurBackground: _settings.screensaverBlurBg,
-                 customBgSource: _settings.screensaverCustomBgSource,
-                 soundsEnabled: _settings.mascotSoundsEnabled,
-                 hapticEnabled: _settings.hapticEnabled,
-                 hapticStrength: _settings.hapticStrength,
-                 roomTemp: _roomTemp,
-                 targetTemp: _targetTemp,
-                 boiler: boiler,
-                 locationName: _locationName,
-                 accentColor: activeColor,
-                 lang: _lang,
-                 onExit: () {
-                   _resetIdleTimer();
-                   setState(() => _screensaverPreview = false);
-                 },
-               ),
+              // Fullscreen Screensaver (auto-launches after idle seconds or on Preview)
+              if (_screensaverPreview)
+                FullscreenScreensaverOverlay(
+                  character: _settings.mascotCharacter,
+                  mascotScale: _settings.mascotScale,
+                  backdrop: _settings.screensaverBackdrop,
+                  blurBackground: _settings.screensaverBlurBg,
+                  customBgSource: _settings.screensaverCustomBgSource,
+                  soundsEnabled: _settings.mascotSoundsEnabled,
+                  hapticEnabled: _settings.hapticEnabled,
+                  hapticStrength: _settings.hapticStrength,
+                  roomTemp: _roomTemp,
+                  targetTemp: _targetTemp,
+                  boiler: boiler,
+                  locationName: _locationName,
+                  accentColor: activeColor,
+                  lang: _lang,
+                  onExit: () {
+                    setState(() => _screensaverPreview = false);
+                    _resetIdleTimer();
+                  },
+                ),
 
              // Enhanced Smart Display / Ambient Mode Fullscreen Clock & Telemetry
              if (_ambientMode)

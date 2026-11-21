@@ -222,6 +222,24 @@ void main() {
     }
   });
 
+  test('FullscreenScreensaverOverlay.buildBehaviorSequence schedules 3 cycles of non-sleep animations', () {
+    final plan = FullscreenScreensaverOverlay.buildBehaviorSequence();
+    expect(plan.length, 12);
+    expect(plan.contains(MascotBehavior.deepSleep), isFalse);
+    expect(plan.contains(MascotBehavior.idle), isFalse);
+    for (final active in [
+      MascotBehavior.patrol,
+      MascotBehavior.knock,
+      MascotBehavior.think,
+      MascotBehavior.read,
+    ]) {
+      expect(plan.where((b) => b == active).length, 3);
+    }
+    for (int i = 1; i < plan.length; i++) {
+      expect(plan[i] != plan[i - 1], isTrue);
+    }
+  });
+
   test('HardwareService scales haptic vibration amplitude within valid 1-255 bounds', () {
     expect(HardwareService.scaledAmplitude(200, 100), 200);
     expect(HardwareService.scaledAmplitude(200, 50), 100);
