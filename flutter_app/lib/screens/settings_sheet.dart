@@ -2913,7 +2913,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: _draft.aiCallVoiceBriefEnabled,
-              activeThumbColor: const Color(0xFF10B981),
+              activeColor: const Color(0xFF10B981),
               title: Text(
                 tr ? 'Cevaplandığında Sesli Özet Okuma' : 'Voice Briefing When Answered',
                 style: const TextStyle(fontSize: 12, color: Colors.white),
@@ -2930,7 +2930,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: _draft.aiCallMissedAlertEnabled,
-              activeThumbColor: const Color(0xFFF59E0B),
+              activeColor: const Color(0xFFF59E0B),
               title: Text(
                 tr ? 'Cevapsızda Bildirim & Telegram Gönder' : 'Send Alert & Telegram if Missed',
                 style: const TextStyle(fontSize: 12, color: Colors.white),
