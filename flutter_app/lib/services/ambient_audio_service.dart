@@ -8,10 +8,13 @@ class AmbientAudioService {
 
   static final AudioPlayer _player = AudioPlayer();
   static final AudioPlayer _chimePlayer = AudioPlayer();
+  static final AudioPlayer _ringPlayer = AudioPlayer();
   static bool _playing = false;
+  static bool _ringing = false;
   static Uint8List? _customAudioBytes;
 
   static bool get isPlaying => _playing;
+  static bool get isRinging => _ringing;
 
   static void setCustomAudioBytes(Uint8List? bytes) {
     _customAudioBytes = bytes;
@@ -289,6 +292,176 @@ class AmbientAudioService {
       await _chimePlayer.setReleaseMode(ReleaseMode.release);
       await _chimePlayer.setVolume(0.65);
       await _chimePlayer.play(BytesSource(generateMascotSoundWavBytes(character, sleepy: sleepy)));
+    } catch (_) {}
+  }
+
+  static ByteData _createWavBuffer(int numSamples, {int sampleRate = 22050}) {
+    final dataSize = numSamples * 2;
+    final buffer = ByteData(44 + dataSize);
+    void writeAscii(int offset, String text) {
+      for (int i = 0; i < text.length; i++) {
+        buffer.setUint8(offset + i, text.codeUnitAt(i));
+      }
+    }
+
+    writeAscii(0, 'RIFF');
+    buffer.setUint32(4, 36 + dataSize, Endian.little);
+    writeAscii(8, 'WAVE');
+    writeAscii(12, 'fmt ');
+    buffer.setUint32(16, 16, Endian.little);
+    buffer.setUint16(20, 1, Endian.little);
+    buffer.setUint16(22, 1, Endian.little);
+    buffer.setUint32(24, sampleRate, Endian.little);
+    buffer.setUint32(28, sampleRate * 2, Endian.little);
+    buffer.setUint16(32, 2, Endian.little);
+    buffer.setUint16(34, 16, Endian.little);
+    writeAscii(36, 'data');
+    buffer.setUint32(40, dataSize, Endian.little);
+    return buffer;
+  }
+
+  /// Synthesizes a 2.0-second smartphone incoming ringtone WAV loop (harmonic cadence + pause).
+  static Uint8List generateRingtoneWavBytes({bool urgent = false}) {
+    const sampleRate = 22050;
+    const durationMs = 2000;
+    const numSamples = (sampleRate * durationMs) ~/ 1000;
+    final buffer = _createWavBuffer(numSamples, sampleRate: sampleRate);
+
+    for (int i = 0; i < numSamples; i++) {
+      final t = i / sampleRate;
+      double env = 0.0;
+      double baseFreq = 659.25;
+      double harmonyFreq = 987.77;
+
+      if (urgent) {
+        // Brisk triple alert ring: 0-0.22s, 0.30-0.52s, 0.60-0.86s
+        if (t < 0.22) {
+          env = math.sin((t / 0.22) * math.pi);
+          baseFreq = 783.99;
+          harmonyFreq = 1174.66;
+        } else if (t >= 0.30 && t < 0.52) {
+          env = math.sin(((t - 0.30) / 0.22) * math.pi);
+          baseFreq = 880.0;
+          harmonyFreq = 1318.51;
+        } else if (t >= 0.60 && t < 0.86) {
+          env = math.sin(((t - 0.60) / 0.26) * math.pi);
+          baseFreq = 1046.50;
+          harmonyFreq = 1567.98;
+        }
+      } else {
+        // Warm smartphone dual-pulse marimba ring: 0-0.28s, 0.36-0.74s
+        if (t < 0.28) {
+          env = math.sin((t / 0.28) * math.pi);
+          baseFreq = 587.33;
+          harmonyFreq = 880.0;
+        } else if (t >= 0.36 && t < 0.74) {
+          env = math.sin(((t - 0.36) / 0.38) * math.pi);
+          baseFreq = 783.99;
+          harmonyFreq = 1174.66;
+        }
+      }
+
+      final shimmer = 0.85 + 0.15 * math.sin(2 * math.pi * 14.0 * t);
+      final tone = (math.sin(2 * math.pi * baseFreq * t) * 0.62 +
+              math.sin(2 * math.pi * harmonyFreq * t) * 0.28 +
+              math.sin(2 * math.pi * baseFreq * 2.0 * t) * 0.10) *
+          env *
+          shimmer *
+          0.50;
+      final pcm = (tone * 20000).round().clamp(-32767, 32767);
+      buffer.setInt16(44 + i * 2, pcm, Endian.little);
+    }
+
+    return buffer.buffer.asUint8List();
+  }
+
+  /// Generates a crisp call-connect (answered) or call-end (hangup) tone WAV.
+  static Uint8List generateCallChimeWavBytes({required bool answered}) {
+    const sampleRate = 22050;
+    const totalMs = 340;
+    const numSamples = (sampleRate * totalMs) ~/ 1000;
+    final buffer = _createWavBuffer(numSamples, sampleRate: sampleRate);
+
+    for (int i = 0; i < numSamples; i++) {
+      final p = i / numSamples;
+      final t = i / sampleRate;
+      final env = math.sin(p * math.pi);
+      final freq = answered
+          ? (p < 0.45 ? 523.25 : 783.99)
+          : (p < 0.45 ? 587.33 : 392.00);
+      final tone = (math.sin(2 * math.pi * freq * t) + 0.25 * math.sin(4 * math.pi * freq * t)) * env * 0.38;
+      final pcm = (tone * 18000).round().clamp(-32767, 32767);
+      buffer.setInt16(44 + i * 2, pcm, Endian.little);
+    }
+    return buffer.buffer.asUint8List();
+  }
+
+  /// Generates a soft 3-syllable assistant briefing acoustic cue WAV when call is answered.
+  static Uint8List generateVoiceBriefCueWavBytes() {
+    const sampleRate = 22050;
+    const totalMs = 720;
+    const numSamples = (sampleRate * totalMs) ~/ 1000;
+    final buffer = _createWavBuffer(numSamples, sampleRate: sampleRate);
+
+    for (int i = 0; i < numSamples; i++) {
+      final t = i / sampleRate;
+      final p = i / numSamples;
+      double freq = 440.0;
+      double localEnv = 0.0;
+      if (p < 0.30) {
+        freq = 440.0;
+        localEnv = math.sin((p / 0.30) * math.pi);
+      } else if (p < 0.62) {
+        freq = 554.37;
+        localEnv = math.sin(((p - 0.30) / 0.32) * math.pi);
+      } else {
+        freq = 659.25;
+        localEnv = math.sin(((p - 0.62) / 0.38) * math.pi);
+      }
+      final tone = (math.sin(2 * math.pi * freq * t) * 0.72 +
+              math.sin(2 * math.pi * freq * 1.5 * t) * 0.20) *
+          localEnv *
+          0.34;
+      final pcm = (tone * 18000).round().clamp(-32767, 32767);
+      buffer.setInt16(44 + i * 2, pcm, Endian.little);
+    }
+    return buffer.buffer.asUint8List();
+  }
+
+  static Future<void> startRingtone({bool urgent = false, double volume = 0.85}) async {
+    try {
+      await _ringPlayer.stop();
+      await _ringPlayer.setReleaseMode(ReleaseMode.loop);
+      await _ringPlayer.setVolume(volume.clamp(0.1, 1.0));
+      await _ringPlayer.play(BytesSource(generateRingtoneWavBytes(urgent: urgent)));
+      _ringing = true;
+    } catch (_) {
+      _ringing = false;
+    }
+  }
+
+  static Future<void> stopRingtone() async {
+    try {
+      await _ringPlayer.stop();
+    } catch (_) {}
+    _ringing = false;
+  }
+
+  static Future<void> playCallChime({required bool answered}) async {
+    try {
+      await _chimePlayer.stop();
+      await _chimePlayer.setReleaseMode(ReleaseMode.release);
+      await _chimePlayer.setVolume(0.75);
+      await _chimePlayer.play(BytesSource(generateCallChimeWavBytes(answered: answered)));
+    } catch (_) {}
+  }
+
+  static Future<void> playVoiceBriefCue() async {
+    try {
+      await _chimePlayer.stop();
+      await _chimePlayer.setReleaseMode(ReleaseMode.release);
+      await _chimePlayer.setVolume(0.68);
+      await _chimePlayer.play(BytesSource(generateVoiceBriefCueWavBytes()));
     } catch (_) {}
   }
 }

@@ -10,10 +10,12 @@ import 'screens/settings_sheet.dart';
 import 'screens/theme_effects_sheet.dart';
 import 'screens/thermostat_screen.dart';
 import 'screens/widget_order_sheet.dart';
+import 'services/ai_call_service.dart';
 import 'services/ambient_audio_service.dart';
 import 'services/firebase_sync_service.dart';
 import 'services/hardware_service.dart';
 import 'services/notification_service.dart';
+import 'widgets/ai_phone_call_overlay.dart';
 import 'widgets/boot_ceremony_overlay.dart';
 import 'widgets/flow_tab_bar.dart';
 import 'widgets/overlays.dart';
@@ -73,6 +75,10 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   bool _savedNotice = false;
   bool _ambientMode = false;
   bool _screensaverPreview = false;
+  bool _aiCallOpen = false;
+  AiCallReason _aiCallReason = AiCallReason.ignition;
+  bool _aiCallUrgent = false;
+  DateTime? _lastAiCallAt;
   bool _voiceOpen = false;
   bool _modalSheetOpen = false;
   bool _showBootCeremony = false;
@@ -135,7 +141,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
   void _resetIdleTimer() {
     _idleTimer?.cancel();
-    if (_settings.termoBotEnabled && !_screensaverPreview) {
+    if (_settings.termoBotEnabled && !_screensaverPreview && !_aiCallOpen) {
       _idleTimer = Timer(Duration(seconds: _settings.screensaverIdleSeconds), () {
         if (mounted &&
             _settings.termoBotEnabled &&
@@ -143,6 +149,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             !_voiceOpen &&
             !_modalSheetOpen &&
             !_showBootCeremony &&
+            !_aiCallOpen &&
             !_screensaverPreview) {
           setState(() => _screensaverPreview = true);
         }
@@ -306,6 +313,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     _automationTimer?.cancel();
     _pageController.dispose();
     AmbientAudioService.stop();
+    AmbientAudioService.stopRingtone();
     HardwareService.exitSmartDisplayHardware();
     super.dispose();
   }
@@ -352,7 +360,50 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     }
   }
 
-  void _changeTarget(double next) {
+  void _launchAiCall({
+    required AiCallReason reason,
+    required bool urgent,
+  }) {
+    if (!mounted || _aiCallOpen) return;
+    _idleTimer?.cancel();
+    if (_screensaverPreview) {
+      HardwareService.exitSmartDisplayHardware();
+    }
+    setState(() {
+      _screensaverPreview = false;
+      _aiCallReason = reason;
+      _aiCallUrgent = urgent;
+      _aiCallOpen = true;
+      _lastAiCallAt = DateTime.now();
+    });
+  }
+
+  void _evaluateBoilerAiCallTrigger({
+    required bool wasHeating,
+    required double nextTargetTemp,
+  }) {
+    if (_aiCallOpen || _modalSheetOpen || _showBootCeremony) return;
+    final nextBoiler = ThermostatMath.computeBoilerTelemetry(_roomTemp, nextTargetTemp);
+    final safety = NotificationService.evaluateSafetyThresholds(
+      roomTemp: _roomTemp,
+      outsideTemp: 17.7,
+      boiler: nextBoiler,
+    );
+    final decision = AiCallService.evaluateTrigger(
+      enabled: _settings.aiPhoneCallEnabled,
+      triggerMode: _settings.aiCallTriggerMode,
+      wasHeating: wasHeating,
+      nextBoiler: nextBoiler,
+      safety: safety,
+      lastCallAt: _lastAiCallAt,
+    );
+    if (decision.shouldCall && decision.reason != null) {
+      _launchAiCall(reason: decision.reason!, urgent: decision.urgent);
+    }
+  }
+
+  void _changeTarget(double next, {bool suppressAiCall = false}) {
+    final prevHeating = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating;
     final snapped = ThermostatMath.snapTemperature(next);
     if ((snapped - _targetTemp).abs() >= 0.05) {
       _triggerHaptic();
@@ -364,9 +415,13 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     });
     _persist();
     _syncFirebaseBackground(snapped);
+    if (!suppressAiCall) {
+      _evaluateBoilerAiCallTrigger(wasHeating: prevHeating, nextTargetTemp: snapped);
+    }
   }
 
   void _selectPreset(ThermostatPreset preset) {
+    final prevHeating = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating;
     _triggerHaptic();
     _resetIdleTimer();
     setState(() {
@@ -375,6 +430,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     });
     _persist();
     _syncFirebaseBackground(preset.temp);
+    _evaluateBoilerAiCallTrigger(wasHeating: prevHeating, nextTargetTemp: preset.temp);
   }
 
   void _updateVisual(VisualCustomizationState next) {
@@ -750,6 +806,10 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                           onOpenScreensaverPreview: () => setState(() {
                                             _screensaverPreview = true;
                                           }),
+                                          onTestAiCall: () => _launchAiCall(
+                                            reason: AiCallReason.manualTest,
+                                            urgent: false,
+                                          ),
                                           onReplayBootCeremony: () => setState(() {
                                             _showBootCeremony = true;
                                           }),
@@ -911,6 +971,59 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                    ),
                  ),
                ),
+
+            // AI Voice Phone Call Assistant Fullscreen Overlay
+            if (_aiCallOpen)
+              AiPhoneCallOverlay(
+                character: _settings.mascotCharacter,
+                reason: _aiCallReason,
+                urgent: _aiCallUrgent,
+                ringSeconds: _settings.aiCallRingSeconds,
+                voiceBriefEnabled: _settings.aiCallVoiceBriefEnabled,
+                missedAlertEnabled: _settings.aiCallMissedAlertEnabled,
+                hapticEnabled: _settings.hapticEnabled,
+                hapticStrength: _settings.hapticStrength,
+                locationName: _locationName,
+                espDeviceId: _settings.espDeviceId,
+                roomTemp: _roomTemp,
+                targetTemp: _targetTemp,
+                boiler: boiler,
+                safety: NotificationService.evaluateSafetyThresholds(
+                  roomTemp: _roomTemp,
+                  outsideTemp: 17.7,
+                  boiler: boiler,
+                ),
+                lang: _lang,
+                onAdjustTargetTemp: (t) => _changeTarget(t, suppressAiCall: true),
+                onMissedCallNotify: () {
+                  final tr = _lang == LangCode.tr;
+                  final meta = MascotMeta.of(_settings.mascotCharacter);
+                  NotificationService.dispatchNotification(
+                    context: context,
+                    lang: _lang,
+                    locationName: _locationName,
+                    roomTemp: _roomTemp,
+                    targetTemp: _targetTemp,
+                    boiler: boiler,
+                    settings: _settings,
+                    severityOverride: _aiCallUrgent ? AlertSeverity.critical : AlertSeverity.warning,
+                    customTitle: tr
+                        ? '📵 Cevapsız AI Asistan Araması (${meta.name})'
+                        : '📵 Missed AI Assistant Call (${meta.name})',
+                    customBody: tr
+                        ? '$_locationName · Oda ${_roomTemp.toStringAsFixed(1)}°C / Hedef ${_targetTemp.toStringAsFixed(1)}°C · ${boiler.statusTextTr}'
+                        : '$_locationName · Room ${_roomTemp.toStringAsFixed(1)}°C / Target ${_targetTemp.toStringAsFixed(1)}°C · ${boiler.statusTextEn}',
+                  );
+                },
+                onCloseWithOutcome: (outcome) {
+                  setState(() {
+                    _aiCallOpen = false;
+                    _settings = _settings.copyWith(aiCallLastOutcome: outcome);
+                  });
+                  _persist();
+                  _resetIdleTimer();
+                },
+              ),
 
             // Interactive Multi-Stage Boot Calibration Ceremony
             if (_showBootCeremony)

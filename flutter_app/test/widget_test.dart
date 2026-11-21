@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:termostat_flow/models/thermostat_state.dart';
+import 'package:termostat_flow/services/ai_call_service.dart';
 import 'package:termostat_flow/services/ambient_audio_service.dart';
 import 'package:termostat_flow/services/hardware_service.dart';
 import 'package:termostat_flow/services/notification_service.dart';
@@ -245,5 +246,120 @@ void main() {
     expect(HardwareService.scaledAmplitude(200, 50), 100);
     expect(HardwareService.scaledAmplitude(200, 10), 80); // clamped min 40%
     expect(HardwareService.scaledAmplitude(255, 100), 255);
+  });
+
+  test('SystemSettingsState round-trips and clamps AI Phone Call settings', () {
+    final initial = SystemSettingsState.defaults().copyWith(
+      aiPhoneCallEnabled: false,
+      aiCallRingSeconds: 20,
+      aiCallTriggerMode: AiCallTriggerMode.ignitionAndSafety,
+      aiCallMissedAlertEnabled: false,
+      aiCallVoiceBriefEnabled: false,
+      aiCallLastOutcome: '14:22 · Cevaplandı (00:18)',
+    );
+    final restored = SystemSettingsState.fromJson(initial.toJson());
+    expect(restored.aiPhoneCallEnabled, isFalse);
+    expect(restored.aiCallRingSeconds, 20);
+    expect(restored.aiCallTriggerMode, AiCallTriggerMode.ignitionAndSafety);
+    expect(restored.aiCallMissedAlertEnabled, isFalse);
+    expect(restored.aiCallVoiceBriefEnabled, isFalse);
+    expect(restored.aiCallLastOutcome, '14:22 · Cevaplandı (00:18)');
+
+    expect(initial.copyWith(aiCallRingSeconds: 2).aiCallRingSeconds, 5);
+    expect(initial.copyWith(aiCallRingSeconds: 99).aiCallRingSeconds, 30);
+  });
+
+  test('AiCallService evaluates ignition, critical safety, and cooldown accurately', () {
+    final heatingBoiler = ThermostatMath.computeBoilerTelemetry(21.0, 23.0);
+    final standbyBoiler = ThermostatMath.computeBoilerTelemetry(22.0, 21.5);
+    final safeGuard = NotificationService.evaluateSafetyThresholds(
+      roomTemp: 21.0,
+      outsideTemp: 15.0,
+      boiler: heatingBoiler,
+    );
+    final freezeGuard = NotificationService.evaluateSafetyThresholds(
+      roomTemp: 4.0,
+      outsideTemp: 1.0,
+      boiler: standbyBoiler,
+    );
+    final t0 = DateTime(2026, 11, 21, 14, 0, 0);
+
+    // Ignition transition triggers call
+    final onIgn = AiCallService.evaluateTrigger(
+      enabled: true,
+      triggerMode: AiCallTriggerMode.onIgnition,
+      wasHeating: false,
+      nextBoiler: heatingBoiler,
+      safety: safeGuard,
+      now: t0,
+    );
+    expect(onIgn.shouldCall, isTrue);
+    expect(onIgn.reason, AiCallReason.ignition);
+    expect(onIgn.urgent, isFalse);
+
+    // Already heating does NOT re-trigger
+    final alreadyHeating = AiCallService.evaluateTrigger(
+      enabled: true,
+      triggerMode: AiCallTriggerMode.onIgnition,
+      wasHeating: true,
+      nextBoiler: heatingBoiler,
+      safety: safeGuard,
+      now: t0,
+    );
+    expect(alreadyHeating.shouldCall, isFalse);
+
+    // Cooldown suppresses immediate repeat call
+    final cooledDown = AiCallService.evaluateTrigger(
+      enabled: true,
+      triggerMode: AiCallTriggerMode.onIgnition,
+      wasHeating: false,
+      nextBoiler: heatingBoiler,
+      safety: safeGuard,
+      lastCallAt: t0.subtract(const Duration(seconds: 20)),
+      now: t0,
+    );
+    expect(cooledDown.shouldCall, isFalse);
+
+    // criticalOnly ignores normal ignition and fires urgent call on safety threshold breach
+    final critIgnored = AiCallService.evaluateTrigger(
+      enabled: true,
+      triggerMode: AiCallTriggerMode.criticalOnly,
+      wasHeating: false,
+      nextBoiler: heatingBoiler,
+      safety: safeGuard,
+      now: t0,
+    );
+    expect(critIgnored.shouldCall, isFalse);
+
+    final critFired = AiCallService.evaluateTrigger(
+      enabled: true,
+      triggerMode: AiCallTriggerMode.criticalOnly,
+      wasHeating: true,
+      nextBoiler: standbyBoiler,
+      safety: freezeGuard,
+      now: t0,
+    );
+    expect(critFired.shouldCall, isTrue);
+    expect(critFired.reason, AiCallReason.safetyAlert);
+    expect(critFired.urgent, isTrue);
+  });
+
+  test('AmbientAudioService synthesizes valid ringtone, call chime, and voice brief WAV headers', () {
+    for (final urgent in [false, true]) {
+      final ring = AmbientAudioService.generateRingtoneWavBytes(urgent: urgent);
+      expect(ring.length, greaterThan(44));
+      expect(String.fromCharCodes(ring.sublist(0, 4)), 'RIFF');
+      expect(String.fromCharCodes(ring.sublist(8, 12)), 'WAVE');
+    }
+    for (final ans in [false, true]) {
+      final chime = AmbientAudioService.generateCallChimeWavBytes(answered: ans);
+      expect(chime.length, greaterThan(44));
+      expect(String.fromCharCodes(chime.sublist(0, 4)), 'RIFF');
+      expect(String.fromCharCodes(chime.sublist(8, 12)), 'WAVE');
+    }
+    final voiceCue = AmbientAudioService.generateVoiceBriefCueWavBytes();
+    expect(voiceCue.length, greaterThan(44));
+    expect(String.fromCharCodes(voiceCue.sublist(0, 4)), 'RIFF');
+    expect(String.fromCharCodes(voiceCue.sublist(8, 12)), 'WAVE');
   });
 }

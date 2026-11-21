@@ -614,6 +614,18 @@ enum BootCeremonyStyle {
   minimalRadar,
 }
 
+enum AiCallTriggerMode {
+  onIgnition,
+  ignitionAndSafety,
+  criticalOnly,
+}
+
+enum AiCallReason {
+  ignition,
+  safetyAlert,
+  manualTest,
+}
+
 class HourlyWeatherSlot {
   final String hour;
   final int temp;
@@ -803,6 +815,10 @@ class SystemSettingsState {
   final double mascotScale;
   final bool aiPhoneCallEnabled;
   final int aiCallRingSeconds;
+  final AiCallTriggerMode aiCallTriggerMode;
+  final bool aiCallMissedAlertEnabled;
+  final bool aiCallVoiceBriefEnabled;
+  final String aiCallLastOutcome;
   final String espDeviceId;
   final bool espOnline;
   final String firebaseRtdbUrl;
@@ -854,6 +870,10 @@ class SystemSettingsState {
     required this.mascotScale,
     required this.aiPhoneCallEnabled,
     required this.aiCallRingSeconds,
+    required this.aiCallTriggerMode,
+    required this.aiCallMissedAlertEnabled,
+    required this.aiCallVoiceBriefEnabled,
+    required this.aiCallLastOutcome,
     required this.espDeviceId,
     required this.espOnline,
     required this.firebaseRtdbUrl,
@@ -920,6 +940,10 @@ class SystemSettingsState {
         mascotScale: 1.0,
         aiPhoneCallEnabled: true,
         aiCallRingSeconds: 10,
+        aiCallTriggerMode: AiCallTriggerMode.onIgnition,
+        aiCallMissedAlertEnabled: true,
+        aiCallVoiceBriefEnabled: true,
+        aiCallLastOutcome: '',
         espDeviceId: 'ESP32-KOMBI-01',
         espOnline: false,
         firebaseRtdbUrl: 'https://kombi-kontrol-default-rtdb.firebaseio.com',
@@ -996,6 +1020,10 @@ class SystemSettingsState {
     double? mascotScale,
     bool? aiPhoneCallEnabled,
     int? aiCallRingSeconds,
+    AiCallTriggerMode? aiCallTriggerMode,
+    bool? aiCallMissedAlertEnabled,
+    bool? aiCallVoiceBriefEnabled,
+    String? aiCallLastOutcome,
     String? espDeviceId,
     bool? espOnline,
     String? firebaseRtdbUrl,
@@ -1046,7 +1074,11 @@ class SystemSettingsState {
       screensaverCustomBgLabel: screensaverCustomBgLabel ?? this.screensaverCustomBgLabel,
       mascotScale: (mascotScale ?? this.mascotScale).clamp(0.60, 1.60),
       aiPhoneCallEnabled: aiPhoneCallEnabled ?? this.aiPhoneCallEnabled,
-      aiCallRingSeconds: aiCallRingSeconds ?? this.aiCallRingSeconds,
+      aiCallRingSeconds: (aiCallRingSeconds ?? this.aiCallRingSeconds).clamp(5, 30),
+      aiCallTriggerMode: aiCallTriggerMode ?? this.aiCallTriggerMode,
+      aiCallMissedAlertEnabled: aiCallMissedAlertEnabled ?? this.aiCallMissedAlertEnabled,
+      aiCallVoiceBriefEnabled: aiCallVoiceBriefEnabled ?? this.aiCallVoiceBriefEnabled,
+      aiCallLastOutcome: aiCallLastOutcome ?? this.aiCallLastOutcome,
       espDeviceId: espDeviceId ?? this.espDeviceId,
       espOnline: espOnline ?? this.espOnline,
       firebaseRtdbUrl: firebaseRtdbUrl ?? this.firebaseRtdbUrl,
@@ -1099,6 +1131,10 @@ class SystemSettingsState {
         'mascotScale': mascotScale,
         'aiPhoneCallEnabled': aiPhoneCallEnabled,
         'aiCallRingSeconds': aiCallRingSeconds,
+        'aiCallTriggerMode': aiCallTriggerMode.name,
+        'aiCallMissedAlertEnabled': aiCallMissedAlertEnabled,
+        'aiCallVoiceBriefEnabled': aiCallVoiceBriefEnabled,
+        'aiCallLastOutcome': aiCallLastOutcome,
         'espDeviceId': espDeviceId,
         'firebaseRtdbUrl': firebaseRtdbUrl,
         'cloudSyncEnabled': cloudSyncEnabled,
@@ -1201,6 +1237,14 @@ class SystemSettingsState {
       mascotScale: (map['mascotScale'] as num?)?.toDouble() ?? defaults.mascotScale,
       aiPhoneCallEnabled: (map['aiPhoneCallEnabled'] as bool?) ?? defaults.aiPhoneCallEnabled,
       aiCallRingSeconds: (map['aiCallRingSeconds'] as int?) ?? defaults.aiCallRingSeconds,
+      aiCallTriggerMode: _parseEnum(
+        map['aiCallTriggerMode'] as String?,
+        AiCallTriggerMode.values,
+        defaults.aiCallTriggerMode,
+      ),
+      aiCallMissedAlertEnabled: (map['aiCallMissedAlertEnabled'] as bool?) ?? defaults.aiCallMissedAlertEnabled,
+      aiCallVoiceBriefEnabled: (map['aiCallVoiceBriefEnabled'] as bool?) ?? defaults.aiCallVoiceBriefEnabled,
+      aiCallLastOutcome: (map['aiCallLastOutcome'] as String?) ?? defaults.aiCallLastOutcome,
       espDeviceId: (map['espDeviceId'] as String?) ?? defaults.espDeviceId,
       firebaseRtdbUrl: (map['firebaseRtdbUrl'] as String?) ?? defaults.firebaseRtdbUrl,
       cloudSyncEnabled: (map['cloudSyncEnabled'] as bool?) ?? defaults.cloudSyncEnabled,

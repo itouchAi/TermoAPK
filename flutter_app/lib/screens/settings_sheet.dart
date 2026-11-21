@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/thermostat_state.dart';
+import '../services/ai_call_service.dart';
 import '../services/ambient_audio_service.dart';
 import '../services/hardware_service.dart';
 import '../services/notification_service.dart';
@@ -25,6 +26,7 @@ Future<void> showSystemSettingsSheet({
   required ValueChanged<SystemSettingsState> onSaveSettings,
   required VoidCallback onOpenAmbient,
   required VoidCallback onOpenScreensaverPreview,
+  required VoidCallback onTestAiCall,
   required VoidCallback onReplayBootCeremony,
   required VoidCallback onResetTelemetryHistory,
 }) {
@@ -46,6 +48,7 @@ Future<void> showSystemSettingsSheet({
       onSaveSettings: onSaveSettings,
       onOpenAmbient: onOpenAmbient,
       onOpenScreensaverPreview: onOpenScreensaverPreview,
+      onTestAiCall: onTestAiCall,
       onReplayBootCeremony: onReplayBootCeremony,
       onResetTelemetryHistory: onResetTelemetryHistory,
     ),
@@ -66,6 +69,7 @@ class _SystemSettingsModal extends StatefulWidget {
   final ValueChanged<SystemSettingsState> onSaveSettings;
   final VoidCallback onOpenAmbient;
   final VoidCallback onOpenScreensaverPreview;
+  final VoidCallback onTestAiCall;
   final VoidCallback onReplayBootCeremony;
   final VoidCallback onResetTelemetryHistory;
 
@@ -83,6 +87,7 @@ class _SystemSettingsModal extends StatefulWidget {
     required this.onSaveSettings,
     required this.onOpenAmbient,
     required this.onOpenScreensaverPreview,
+    required this.onTestAiCall,
     required this.onReplayBootCeremony,
     required this.onResetTelemetryHistory,
   });
@@ -906,12 +911,19 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           ),
         );
       case SettingsItemId.aiPhoneCall:
+        final callModeShort = switch (_draft.aiCallTriggerMode) {
+          AiCallTriggerMode.onIgnition => tr ? 'Ateşleme' : 'Ignition',
+          AiCallTriggerMode.ignitionAndSafety => tr ? 'Ateş+Emniyet' : 'Ign+Safety',
+          AiCallTriggerMode.criticalOnly => tr ? 'Kritik' : 'Critical',
+        };
         return _CardMeta(
           icon: Icons.phone_in_talk_outlined,
           iconColor: const Color(0xFF10B981),
           title: tr ? 'AI Sesli Telefon Araması (Asistan)' : 'AI Voice Call Assistant',
-          tag: '${_draft.aiCallRingSeconds} sn',
-          subtitle: tr ? 'Kombi ateşlendiğinde arar, sesli bilgi verir' : 'Calls on boiler ignition, alerts if missed',
+          tag: '${_draft.aiCallRingSeconds} sn · $callModeShort',
+          subtitle: _draft.aiCallLastOutcome.isNotEmpty
+              ? (tr ? 'Son arama: ${_draft.aiCallLastOutcome}' : 'Last call: ${_draft.aiCallLastOutcome}')
+              : (tr ? 'Kombi ateşlendiğinde arar, sesli bilgi verir' : 'Calls on boiler ignition, alerts if missed'),
           trailingAction: _ActionPill(
             label: _draft.aiPhoneCallEnabled ? (tr ? 'Açık ✓' : 'On ✓') : (tr ? 'Kapalı' : 'Off'),
             active: _draft.aiPhoneCallEnabled,
@@ -2833,12 +2845,60 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
 
       case SettingsItemId.aiPhoneCall:
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Text(
+              tr
+                  ? 'Kombi ateşlendiğinde veya kritik güvenlik eşiği aşıldığında asistan tam ekran telefon araması başlatır; cevaplarsanız sesli özet sunar ve arama ekranından sıcaklığı anında değiştirebilirsiniz.'
+                  : 'Starts a fullscreen assistant phone call when boiler ignition or a critical safety alert triggers; answer for a voice summary and quick thermostat controls.',
+              style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.72), height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              tr ? 'Tetikleme Koşulu:' : 'Call Trigger Condition:',
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF6EE7B7)),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final mode in AiCallTriggerMode.values)
+                  GestureDetector(
+                    onTap: () {
+                      _hapticTap();
+                      setState(() => _draft = _draft.copyWith(aiCallTriggerMode: mode));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: _draft.aiCallTriggerMode == mode
+                            ? const Color(0xFF10B981).withValues(alpha: 0.24)
+                            : Colors.white.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: _draft.aiCallTriggerMode == mode
+                              ? const Color(0xFF34D399)
+                              : Colors.white.withValues(alpha: 0.14),
+                        ),
+                      ),
+                      child: Text(
+                        AiCallService.triggerModeLabel(mode, _lang),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: _draft.aiCallTriggerMode == mode ? Colors.white : Colors.white70,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(tr ? 'Çalma Süresi' : 'Ring Duration', style: const TextStyle(fontSize: 12, color: Colors.white70)),
+                Text(tr ? 'Çalma Süresi (Zaman Aşımı)' : 'Ring Timeout', style: const TextStyle(fontSize: 12, color: Colors.white70)),
                 Text('${_draft.aiCallRingSeconds} sn', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF10B981))),
               ],
             ),
@@ -2849,6 +2909,83 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               divisions: 5,
               activeColor: const Color(0xFF10B981),
               onChanged: (v) => setState(() => _draft = _draft.copyWith(aiCallRingSeconds: v.round())),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _draft.aiCallVoiceBriefEnabled,
+              activeThumbColor: const Color(0xFF10B981),
+              title: Text(
+                tr ? 'Cevaplandığında Sesli Özet Okuma' : 'Voice Briefing When Answered',
+                style: const TextStyle(fontSize: 12, color: Colors.white),
+              ),
+              subtitle: Text(
+                tr ? 'Ses tonuyla oda, hedef ve modülasyon brifingi' : 'Acoustic cue & live room/flame briefing readout',
+                style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.56)),
+              ),
+              onChanged: (v) {
+                _hapticTap();
+                setState(() => _draft = _draft.copyWith(aiCallVoiceBriefEnabled: v));
+              },
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: _draft.aiCallMissedAlertEnabled,
+              activeThumbColor: const Color(0xFFF59E0B),
+              title: Text(
+                tr ? 'Cevapsızda Bildirim & Telegram Gönder' : 'Send Alert & Telegram if Missed',
+                style: const TextStyle(fontSize: 12, color: Colors.white),
+              ),
+              subtitle: Text(
+                tr ? 'Arama açılmazsa acil bildirim ve Telegram bot uyarısı' : 'Dispatches alert banner & Telegram bot if unanswered',
+                style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.56)),
+              ),
+              onChanged: (v) {
+                _hapticTap();
+                setState(() => _draft = _draft.copyWith(aiCallMissedAlertEnabled: v));
+              },
+            ),
+            if (_draft.aiCallLastOutcome.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.history_rounded, size: 14, color: Color(0xFF34D399)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        tr ? 'Son Arama Kaydı: ${_draft.aiCallLastOutcome}' : 'Last Call Log: ${_draft.aiCallLastOutcome}',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white70),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () {
+                _hapticTap();
+                widget.onSaveSettings(_draft);
+                Navigator.of(context).pop();
+                widget.onTestAiCall();
+              },
+              icon: const Icon(Icons.phone_forwarded_rounded, size: 18, color: Color(0xFF34D399)),
+              label: Text(
+                tr ? 'Gelen Aramayı Şimdi Test Et (Önizle)' : 'Test Incoming AI Call Now',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF6EE7B7)),
+              ),
+              style: OutlinedButton.styleFrom(
+                backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.14),
+                side: BorderSide(color: const Color(0xFF10B981).withValues(alpha: 0.45)),
+                padding: const EdgeInsets.symmetric(vertical: 11),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+              ),
             ),
           ],
         );
