@@ -256,7 +256,8 @@ class _RiggedMascotPainter extends CustomPainter {
   Offset _solveJoint(Offset root, Offset target, double l1, double l2, double bendSign) {
     final dx = target.dx - root.dx;
     final dy = target.dy - root.dy;
-    final dist = math.sqrt(dx * dx + dy * dy).clamp(0.001, l1 + l2 - 0.05);
+    final maxReach = math.max(0.01, l1 + l2 - 0.05);
+    final dist = math.sqrt(dx * dx + dy * dy).clamp(0.001, maxReach);
     final cosA = ((l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist)).clamp(-1.0, 1.0);
     final baseAngle = math.atan2(dy, dx);
     final jointAngle = baseAngle + bendSign * math.acos(cosA);
@@ -269,14 +270,14 @@ class _RiggedMascotPainter extends CustomPainter {
   Paint _limbPaint(Color base, double width, Offset a, Offset b) {
     return Paint()
       ..shader = ui.Gradient.linear(
-        a.translate(-width * 0.3, -width * 0.3),
-        b.translate(width * 0.3, width * 0.3),
+        a.translate(-width * 0.35, -width * 0.35),
+        b.translate(width * 0.35, width * 0.35),
         [
-          Color.lerp(base, Colors.white, 0.28)!,
+          Color.lerp(base, Colors.white, 0.34)!,
           base,
-          Color.lerp(base, Colors.black, 0.38)!,
+          Color.lerp(base, Colors.black, 0.44)!,
         ],
-        [0.0, 0.52, 1.0],
+        [0.0, 0.50, 1.0],
       )
       ..strokeWidth = width
       ..strokeCap = StrokeCap.round
@@ -284,27 +285,44 @@ class _RiggedMascotPainter extends CustomPainter {
   }
 
   void _drawCapsuleLimb(Canvas canvas, Offset root, Offset mid, Offset tip, double width, Color base) {
+    final rimOutline = Paint()
+      ..color = Colors.black.withValues(alpha: 0.34)
+      ..strokeWidth = width + (width * 0.22)
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    canvas.drawLine(root, mid, rimOutline);
+    canvas.drawLine(mid, tip, rimOutline);
+
     canvas.drawLine(root, mid, _limbPaint(base, width, root, mid));
-    canvas.drawLine(mid, tip, _limbPaint(base, width * 0.92, mid, tip));
-    // Subtle joint ball
-    canvas.drawCircle(mid, width * 0.44, Paint()..color = Color.lerp(base, Colors.white, 0.14)!);
+    canvas.drawLine(mid, tip, _limbPaint(base, width * 0.94, mid, tip));
+
+    // Specular edge sheen & sculpted joint socket
+    final sheen = Paint()
+      ..color = Colors.white.withValues(alpha: 0.16)
+      ..strokeWidth = width * 0.24
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+    canvas.drawLine(root.translate(-width * 0.14, -width * 0.12), mid.translate(-width * 0.14, -width * 0.12), sheen);
+    canvas.drawCircle(mid, width * 0.46, Paint()..color = Color.lerp(base, Colors.black, 0.24)!);
+    canvas.drawCircle(mid.translate(-width * 0.08, -width * 0.08), width * 0.30, Paint()..color = Color.lerp(base, Colors.white, 0.22)!);
   }
 
   Paint _spherePaint(Rect rect, Color light, Color mid, Color dark) {
     return Paint()
       ..shader = RadialGradient(
-        center: const Alignment(-0.32, -0.38),
-        radius: 0.92,
+        center: const Alignment(-0.34, -0.40),
+        radius: 0.94,
         colors: [light, mid, dark],
-        stops: const [0.0, 0.55, 1.0],
+        stops: const [0.0, 0.54, 1.0],
       ).createShader(rect);
   }
 
   @override
   void paint(Canvas canvas, Size size) {
+    if (size.width < 2.0 || size.height < 2.0) return;
     final u = size.width / 100.0;
     final cx = size.width * 0.50;
-    final groundY = size.height * 0.89;
+    final groundY = size.height * 0.90;
     final p2 = phase * math.pi * 2;
     final isSleep = behavior == MascotBehavior.deepSleep;
 
@@ -718,35 +736,42 @@ class _RiggedMascotPainter extends CustomPainter {
     final rElbow = _solveJoint(rShoulder, rHandTarget, 10.5 * u, 10.5 * u, rBend);
 
     // Draw back leg first
-    _drawCapsuleLimb(canvas, lHip, lKnee, lFootTarget, 5.4 * u, Color.lerp(legTone, Colors.black, 0.14)!);
-    canvas.drawOval(Rect.fromCenter(center: lFootTarget.translate(1.5 * u, 1.5 * u), width: 7.4 * u, height: 4.4 * u), Paint()..color = shoeColor);
+    _drawCapsuleLimb(canvas, lHip, lKnee, lFootTarget, 6.4 * u, Color.lerp(legTone, Colors.black, 0.16)!);
+    final lBootRect = Rect.fromCenter(center: lFootTarget.translate(1.8 * u, 1.8 * u), width: 8.6 * u, height: 5.2 * u);
+    canvas.drawOval(lBootRect, _spherePaint(lBootRect, Color.lerp(shoeColor, Colors.white, 0.28)!, shoeColor, Color.lerp(shoeColor, Colors.black, 0.45)!));
 
     // Draw back arm behind torso
-    _drawCapsuleLimb(canvas, lShoulder, lElbow, lHandTarget, 4.4 * u, Color.lerp(limbColor, Colors.black, 0.12)!);
-    canvas.drawCircle(lHandTarget, 2.8 * u, Paint()..color = handColor);
+    _drawCapsuleLimb(canvas, lShoulder, lElbow, lHandTarget, 5.4 * u, Color.lerp(limbColor, Colors.black, 0.14)!);
+    final lHandRect = Rect.fromCenter(center: lHandTarget, width: 6.6 * u, height: 6.6 * u);
+    canvas.drawOval(lHandRect, _spherePaint(lHandRect, Color.lerp(handColor, Colors.white, 0.35)!, handColor, Color.lerp(handColor, Colors.black, 0.32)!));
 
     // Draw front leg
-    _drawCapsuleLimb(canvas, rHip, rKnee, rFootTarget, 5.6 * u, legTone);
-    canvas.drawOval(Rect.fromCenter(center: rFootTarget.translate(1.5 * u, 1.5 * u), width: 7.6 * u, height: 4.6 * u), Paint()..color = shoeColor);
+    _drawCapsuleLimb(canvas, rHip, rKnee, rFootTarget, 6.8 * u, legTone);
+    final rBootRect = Rect.fromCenter(center: rFootTarget.translate(1.8 * u, 1.8 * u), width: 8.8 * u, height: 5.4 * u);
+    canvas.drawOval(rBootRect, _spherePaint(rBootRect, Color.lerp(shoeColor, Colors.white, 0.30)!, shoeColor, Color.lerp(shoeColor, Colors.black, 0.42)!));
 
     // ------------------------------------------------------------------
-    // 4. Torso (3D Radial Lit Capsule + Character Chest Emblem/Scarf/Coil)
+    // 4. Torso (3D Radial Lit Capsule + Neck Ambient Shadow + Emblem)
     // ------------------------------------------------------------------
     canvas.save();
     canvas.translate(hipCenter.dx, hipCenter.dy);
     canvas.rotate(torsoLean);
-    final torsoRect = Rect.fromLTWH(-10.5 * u, -21.5 * u, 21.0 * u, 22.5 * u);
+    final torsoRect = Rect.fromLTWH(-11.5 * u, -22.0 * u, 23.0 * u, 23.0 * u);
     canvas.drawRRect(
-      RRect.fromRectAndRadius(torsoRect, Radius.circular(8.5 * u)),
+      RRect.fromRectAndRadius(torsoRect, Radius.circular(9.5 * u)),
       _spherePaint(torsoRect, bodyLight, bodyPrimary, bodyDark),
     );
-    // Specular rim highlight on torso edge
+    // Neck occlusion shadow & soft specular rim highlight
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(0, -20.5 * u), width: 13 * u, height: 4.5 * u),
+      Paint()..color = Colors.black.withValues(alpha: 0.28),
+    );
     canvas.drawRRect(
-      RRect.fromRectAndRadius(torsoRect, Radius.circular(8.5 * u)),
+      RRect.fromRectAndRadius(torsoRect, Radius.circular(9.5 * u)),
       Paint()
-        ..color = accent.withValues(alpha: 0.42)
+        ..color = accent.withValues(alpha: 0.48)
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.1 * u,
+        ..strokeWidth = 1.2 * u,
     );
 
     if (character == MascotCharacter.termoBot) {
@@ -814,11 +839,26 @@ class _RiggedMascotPainter extends CustomPainter {
     // ------------------------------------------------------------------
     // 7. Front Arm Drawn Over Chest / Holding Book / Touching Temple / Knocking
     // ------------------------------------------------------------------
-    _drawCapsuleLimb(canvas, rShoulder, rElbow, rHandTarget, 4.6 * u, limbColor);
-    canvas.drawCircle(rHandTarget, 2.9 * u, Paint()..color = handColor);
+    _drawCapsuleLimb(canvas, rShoulder, rElbow, rHandTarget, 5.6 * u, limbColor);
+    final rHandRect = Rect.fromCenter(center: rHandTarget, width: 6.8 * u, height: 6.8 * u);
+    canvas.drawOval(rHandRect, _spherePaint(rHandRect, Color.lerp(handColor, Colors.white, 0.38)!, handColor, Color.lerp(handColor, Colors.black, 0.30)!));
+    canvas.drawCircle(rHandTarget.translate(-1.2 * u, -1.2 * u), 1.0 * u, Paint()..color = Colors.white.withValues(alpha: 0.55));
 
-    // Knock glass ripples right at knuckle impact point
+    // Knock glass pane & concentric ripples right at knuckle impact point
     if (showProps && behavior == MascotBehavior.knock) {
+      final glassX = cx + 22.0 * u;
+      canvas.drawLine(
+        Offset(glassX, headCenter.dy - 14 * u),
+        Offset(glassX, groundY - 6 * u),
+        Paint()
+          ..shader = ui.Gradient.linear(
+            Offset(glassX, headCenter.dy - 14 * u),
+            Offset(glassX, groundY - 6 * u),
+            [Colors.transparent, Colors.white.withValues(alpha: 0.34), Colors.transparent],
+            [0.0, 0.5, 1.0],
+          )
+          ..strokeWidth = 1.6 * u,
+      );
       final burst = (phase * 2.0) % 1.0;
       for (final start in [0.20, 0.40, 0.60]) {
         final dt = burst - start;
@@ -826,11 +866,11 @@ class _RiggedMascotPainter extends CustomPainter {
           final k = dt / 0.35;
           canvas.drawCircle(
             rHandTarget,
-            (4.0 + k * 18.0) * u,
+            (3.5 + k * 15.0) * u,
             Paint()
-              ..color = Colors.white.withValues(alpha: (1.0 - k) * 0.72)
+              ..color = accent.withValues(alpha: (1.0 - k) * 0.80)
               ..style = PaintingStyle.stroke
-              ..strokeWidth = 1.6 * u,
+              ..strokeWidth = 1.7 * u,
           );
         }
       }
@@ -1149,12 +1189,20 @@ class _RiggedMascotPainter extends CustomPainter {
 
     final cover = Paint()..color = const Color(0xFF0F172A)..style = PaintingStyle.stroke..strokeWidth = 2.0 * u;
     canvas.drawPath(leftPage, Paint()..color = const Color(0xFFE0F2FE));
-    canvas.drawPath(rightPage, Paint()..color = const Color(0xFFE0F2FE));
+    canvas.drawPath(rightPage, Paint()..color = const Color(0xFFF0F9FF));
     canvas.drawPath(leftPage, Paint()..color = accent.withValues(alpha: 0.85)..style = PaintingStyle.stroke..strokeWidth = 1.0 * u);
     canvas.drawPath(rightPage, Paint()..color = accent.withValues(alpha: 0.85)..style = PaintingStyle.stroke..strokeWidth = 1.0 * u);
     canvas.drawLine(Offset(center.dx, center.dy + bh * 0.42), Offset(center.dx, center.dy - bh * 0.35), cover);
 
-    // Subtle text lines & turning page
+    // Readable text lines on left and right pages
+    final linePaint = Paint()..color = const Color(0xFF0369A1).withValues(alpha: 0.45)..strokeWidth = 0.85 * u..strokeCap = StrokeCap.round;
+    for (int row = 0; row < 3; row++) {
+      final ly = center.dy - bh * 0.25 + row * (bh * 0.18);
+      canvas.drawLine(Offset(center.dx - bw * 0.36, ly), Offset(center.dx - bw * 0.10, ly - 0.6 * u), linePaint);
+      canvas.drawLine(Offset(center.dx + bw * 0.10, ly - 0.6 * u), Offset(center.dx + bw * 0.36, ly), linePaint);
+    }
+
+    // Turning page animation
     final flipX = center.dx + (0.5 - pageFlip) * bw * 0.72;
     final turn = Path()
       ..moveTo(center.dx, center.dy + bh * 0.4)
@@ -1162,7 +1210,7 @@ class _RiggedMascotPainter extends CustomPainter {
       ..lineTo(flipX, center.dy - bh * 0.55)
       ..quadraticBezierTo((center.dx + flipX) * 0.5, center.dy - bh * 0.70, center.dx, center.dy - bh * 0.35)
       ..close();
-    canvas.drawPath(turn, Paint()..color = Colors.white.withValues(alpha: 0.60));
+    canvas.drawPath(turn, Paint()..color = Colors.white.withValues(alpha: 0.65));
   }
 
   void _drawThoughtWisps(Canvas canvas, Offset center, double side, double u, double phase, Color accent) {
@@ -1353,13 +1401,13 @@ class _MascotBehaviorStageState extends State<MascotBehaviorStage> with SingleTi
     final tr = widget.lang == LangCode.tr;
     final hasCustomBg = widget.backdrop == ScreensaverBackdrop.custom && widget.customBgSource.trim().isNotEmpty;
     final effectiveBehavior = _wakingUp ? MascotBehavior.idle : widget.behavior;
-    final scaledSize = (104.0 * widget.mascotScale).clamp(62.0, 162.0);
+    final scaledSize = (98.0 * widget.mascotScale).clamp(58.0, 146.0);
     final scalePct = (widget.mascotScale * 100).round();
 
     return GestureDetector(
       onTap: _triggerWake,
       child: Container(
-        height: 236,
+        height: 252,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: meta.color.withValues(alpha: 0.30)),
@@ -1441,11 +1489,36 @@ class _MascotBehaviorStageState extends State<MascotBehaviorStage> with SingleTi
                 ),
               ),
 
-              // 5) Center articulated full-body Mascot + Behavior Status
+              // 4b) Behavior status pill fixed cleanly in upper stage band so it never overlaps mascot head/knock/thought
+              Positioned(
+                top: 40,
+                left: 10,
+                right: 10,
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3.5),
+                    decoration: BoxDecoration(
+                      color: effectiveBehavior == MascotBehavior.deepSleep
+                          ? const Color(0xFF1E1B4B).withValues(alpha: 0.88)
+                          : const Color(0xFF111522).withValues(alpha: 0.88),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: (_wakingUp ? const Color(0xFFFBBF24) : meta.color).withValues(alpha: 0.50),
+                      ),
+                    ),
+                    child: Text(
+                      _behaviorPill(effectiveBehavior, tr),
+                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+
+              // 5) Center articulated full-body Mascot unobstructed on floor
               Align(
                 alignment: Alignment.bottomCenter,
                 child: Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.only(bottom: 12),
                   child: AnimatedBuilder(
                     animation: _anim,
                     builder: (context, _) {
@@ -1459,37 +1532,15 @@ class _MascotBehaviorStageState extends State<MascotBehaviorStage> with SingleTi
 
                       return Transform.translate(
                         offset: Offset(patrolDx, 0.0),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              margin: const EdgeInsets.only(bottom: 2),
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3.5),
-                              decoration: BoxDecoration(
-                                color: effectiveBehavior == MascotBehavior.deepSleep
-                                    ? const Color(0xFF1E1B4B).withValues(alpha: 0.88)
-                                    : const Color(0xFF111522).withValues(alpha: 0.88),
-                                borderRadius: BorderRadius.circular(999),
-                                border: Border.all(
-                                  color: (_wakingUp ? const Color(0xFFFBBF24) : meta.color).withValues(alpha: 0.50),
-                                ),
-                              ),
-                              child: Text(
-                                _behaviorPill(effectiveBehavior, tr),
-                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
-                              ),
-                            ),
-                            MascotAvatar(
-                              character: widget.character,
-                              size: scaledSize,
-                              behavior: effectiveBehavior,
-                              sleeping: effectiveBehavior == MascotBehavior.deepSleep,
-                              happy: _wakingUp,
-                              phase: _anim.value,
-                              facingDirection: facingDir,
-                              frameless: true,
-                            ),
-                          ],
+                        child: MascotAvatar(
+                          character: widget.character,
+                          size: scaledSize,
+                          behavior: effectiveBehavior,
+                          sleeping: effectiveBehavior == MascotBehavior.deepSleep,
+                          happy: _wakingUp,
+                          phase: _anim.value,
+                          facingDirection: facingDir,
+                          frameless: true,
                         ),
                       );
                     },
