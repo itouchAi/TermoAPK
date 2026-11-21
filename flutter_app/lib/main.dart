@@ -857,6 +857,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                enabled: _settings.termoBotEnabled && !_ambientMode && !_screensaverPreview,
                isSleeping: _termoBotIdle,
                character: _settings.mascotCharacter,
+               mascotScale: _settings.mascotScale,
                soundsEnabled: _settings.mascotSoundsEnabled,
                hapticEnabled: _settings.hapticEnabled,
                hapticStrength: _settings.hapticStrength,
@@ -877,6 +878,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
              if (_screensaverPreview)
                FullscreenScreensaverOverlay(
                  character: _settings.mascotCharacter,
+                 mascotScale: _settings.mascotScale,
                  backdrop: _settings.screensaverBackdrop,
                  blurBackground: _settings.screensaverBlurBg,
                  customBgSource: _settings.screensaverCustomBgSource,

@@ -135,7 +135,8 @@ class ScreensaverCustomWallpaper extends StatelessWidget {
   }
 }
 
-/// High-fidelity Unreal-style 3D Mascot Portrait with real-time animated behavior overlays.
+/// Unreal Engine 3D Character Actor with frameless radial feathering, 3D perspective kinematics,
+/// and organic scene-integrated animations (zero circular badge rings or corner pill icons).
 class MascotAvatar extends StatelessWidget {
   final MascotCharacter character;
   final double size;
@@ -143,30 +144,190 @@ class MascotAvatar extends StatelessWidget {
   final bool happy;
   final MascotBehavior behavior;
   final double phase;
+  final double facingDirection; // +1 = facing right, -1 = facing left
   final bool showBehaviorOverlay;
+  final bool frameless;
 
   const MascotAvatar({
     super.key,
     required this.character,
-    this.size = 48,
+    this.size = 64,
     this.sleeping = false,
     this.happy = false,
     this.behavior = MascotBehavior.idle,
     this.phase = 0.0,
+    this.facingDirection = 1.0,
     this.showBehaviorOverlay = true,
+    this.frameless = true,
   });
 
   @override
   Widget build(BuildContext context) {
     final meta = MascotMeta.of(character);
     final isSleep = sleeping || behavior == MascotBehavior.deepSleep;
-    final breath = 1.0 + math.sin(phase * math.pi * 2) * (isSleep ? 0.015 : 0.032);
-    final lean = behavior == MascotBehavior.patrol
-        ? math.sin(phase * math.pi * 6) * 0.06
-        : (behavior == MascotBehavior.knock ? math.sin(phase * math.pi * 8) * 0.08 : 0.0);
-    final knockScale = behavior == MascotBehavior.knock
-        ? 1.0 + math.sin(phase * math.pi * 8).abs() * 0.09
-        : 1.0;
+    final p2 = phase * math.pi * 2;
+
+    // 3D kinematic motion parameters per behavior
+    double tx = 0.0;
+    double ty = 0.0;
+    double rotX = 0.0;
+    double rotY = 0.0;
+    double rotZ = 0.0;
+    double scaleX = 1.0;
+    double scaleY = 1.0;
+
+    if (happy) {
+      final bounce = math.sin(phase * math.pi * 8).abs();
+      ty = -bounce * (size * 0.14);
+      scaleX = 1.06 + bounce * 0.06;
+      scaleY = 1.06 + bounce * 0.08;
+      rotZ = math.sin(phase * math.pi * 6) * 0.07;
+    } else if (isSleep) {
+      // Deep rhythmic chest breathing + drowsy head nod
+      final breath = math.sin(p2);
+      ty = size * 0.07 + breath * 1.5;
+      scaleX = 1.0 + breath * 0.024;
+      scaleY = 1.0 - breath * 0.020;
+      rotX = 0.22 + breath * 0.03;
+      rotZ = -0.07 + math.cos(p2) * 0.02;
+    } else {
+      switch (behavior) {
+        case MascotBehavior.idle:
+          final breath = math.sin(p2);
+          ty = breath * (size * 0.025);
+          scaleX = 1.0 + breath * 0.018;
+          scaleY = 1.0 - breath * 0.018;
+          rotY = math.sin(p2 * 0.5) * 0.16;
+          rotZ = math.cos(p2 * 0.5) * 0.035;
+          break;
+        case MascotBehavior.patrol:
+          // Stride step cycle: 4 steps per phase cycle
+          final stepWave = math.sin(p2 * 3.0);
+          final strideHop = stepWave.abs();
+          ty = -strideHop * (size * 0.11);
+          rotZ = stepWave * 0.10 * facingDirection;
+          rotX = -0.10; // forward walk lean
+          rotY = facingDirection >= 0 ? -0.20 : 0.20;
+          scaleY = 0.97 + strideHop * 0.06;
+          scaleX = 1.03 - strideHop * 0.03;
+          break;
+        case MascotBehavior.knock:
+          // Rushes right up to the front glass & taps 3 times cleanly
+          final burst = (phase * 2.0) % 1.0;
+          final hit1 = math.exp(-math.pow((burst - 0.20) * 14, 2));
+          final hit2 = math.exp(-math.pow((burst - 0.38) * 14, 2));
+          final hit3 = math.exp(-math.pow((burst - 0.56) * 14, 2));
+          final knockImpulse = (hit1 + hit2 + hit3).clamp(0.0, 1.0);
+          final rush = 1.14 + knockImpulse * 0.22;
+          scaleX = rush;
+          scaleY = rush;
+          tx = math.sin(burst * math.pi * 6) * knockImpulse * 4.0;
+          ty = -knockImpulse * (size * 0.08);
+          rotX = -0.18 - knockImpulse * 0.10;
+          rotZ = (hit1 - hit2) * 0.09;
+          break;
+        case MascotBehavior.think:
+          // Thoughtful head tilt & curious glance upward
+          final sway = math.sin(p2);
+          ty = -size * 0.03 + sway * 2.5;
+          rotZ = -0.14 + sway * 0.03;
+          rotY = 0.24 + math.cos(p2) * 0.05;
+          rotX = -0.06;
+          scaleX = 1.03;
+          scaleY = 1.03;
+          break;
+        case MascotBehavior.read:
+          // Calm downward bow + horizontal eye-line reading sweep left <-> right
+          final scan = math.sin(p2 * 2.0);
+          ty = size * 0.05 + math.cos(p2) * 1.5;
+          rotX = 0.18;
+          rotY = scan * 0.22;
+          rotZ = scan * 0.03;
+          scaleX = 0.99;
+          scaleY = 0.99;
+          break;
+        case MascotBehavior.deepSleep:
+          break;
+      }
+    }
+
+    final perspective = Matrix4.identity()
+      ..setEntry(3, 2, 0.0022)
+      ..rotateX(rotX)
+      ..rotateY(rotY)
+      ..rotateZ(rotZ);
+
+    final imageCore = Image.asset(
+      meta.assetPath,
+      fit: BoxFit.cover,
+      gaplessPlayback: true,
+      errorBuilder: (_, __, ___) => CustomPaint(
+        painter: _MascotFallbackPainter(
+          character: character,
+          color: meta.color,
+          sleeping: isSleep,
+          happy: happy,
+          phase: phase,
+        ),
+      ),
+    );
+
+    // Frameless uses soft radial feather so dark studio bg melts into the scene (not a circular badge)
+    final characterVisual = frameless
+        ? ShaderMask(
+            shaderCallback: (bounds) => const RadialGradient(
+              center: Alignment(0, -0.04),
+              radius: 0.50,
+              colors: [
+                Colors.white,
+                Colors.white,
+                Color(0x99FFFFFF),
+                Colors.transparent,
+              ],
+              stops: [0.0, 0.56, 0.78, 0.98],
+            ).createShader(bounds),
+            blendMode: BlendMode.dstIn,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                imageCore,
+                if (isSleep)
+                  Container(
+                    color: const Color(0xFF0B1022).withValues(alpha: 0.45),
+                  ),
+                if (happy)
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: RadialGradient(
+                        colors: [
+                          const Color(0xFFFBBF24).withValues(alpha: 0.22),
+                          Colors.transparent,
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          )
+        : Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(size * 0.26),
+              border: Border.all(
+                color: happy ? const Color(0xFFFBBF24) : meta.color.withValues(alpha: 0.72),
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: meta.color.withValues(alpha: 0.28),
+                  blurRadius: size * 0.25,
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(size * 0.24),
+              child: imageCore,
+            ),
+          );
 
     return SizedBox(
       width: size,
@@ -175,192 +336,106 @@ class MascotAvatar extends StatelessWidget {
         clipBehavior: Clip.none,
         alignment: Alignment.center,
         children: [
-          // Ripple rings for knock behavior
-          if (showBehaviorOverlay && behavior == MascotBehavior.knock)
-            Positioned.fill(
-              child: CustomPaint(
-                painter: _KnockRipplePainter(
-                  color: meta.color,
-                  progress: phase,
+          // Soft ambient aura & grounded floor shadow (only when frameless floating actor)
+          if (frameless) ...[
+            Positioned(
+              bottom: -size * 0.06,
+              child: Container(
+                width: size * (behavior == MascotBehavior.patrol ? 0.62 : 0.72),
+                height: size * 0.14,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: isSleep ? 0.65 : 0.50),
+                      blurRadius: size * 0.14,
+                      spreadRadius: 1,
+                    ),
+                    BoxShadow(
+                      color: meta.color.withValues(alpha: isSleep ? 0.10 : 0.22),
+                      blurRadius: size * 0.22,
+                    ),
+                  ],
                 ),
               ),
             ),
+            // Floor step glow during patrol
+            if (showBehaviorOverlay && behavior == MascotBehavior.patrol)
+              Positioned(
+                bottom: -size * 0.05,
+                left: facingDirection >= 0 ? -size * 0.26 : null,
+                right: facingDirection < 0 ? -size * 0.26 : null,
+                child: CustomPaint(
+                  size: Size(size * 0.42, size * 0.14),
+                  painter: _FootstepDustPainter(color: meta.color, progress: phase),
+                ),
+              ),
+          ],
 
-          // 3D Unreal Portrait Orb
-          Transform.rotate(
-            angle: lean,
-            child: Transform.scale(
-              scale: breath * knockScale,
-              child: Opacity(
-                opacity: isSleep ? 0.52 : 1.0,
-                child: Container(
-                  width: size,
-                  height: size,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: happy
-                          ? const Color(0xFFFBBF24)
-                          : meta.color.withValues(alpha: isSleep ? 0.40 : 0.85),
-                      width: size > 70 ? 2.6 : 1.6,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: (happy ? const Color(0xFFFBBF24) : meta.color).withValues(alpha: isSleep ? 0.16 : 0.46),
-                        blurRadius: size * (happy ? 0.45 : 0.30),
-                        spreadRadius: happy ? 2.0 : 0.0,
-                      ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Image.asset(
-                          meta.assetPath,
-                          fit: BoxFit.cover,
-                          gaplessPlayback: true,
-                          errorBuilder: (_, __, ___) => CustomPaint(
-                            painter: _MascotFallbackPainter(
-                              character: character,
-                              color: meta.color,
-                              sleeping: isSleep,
-                              happy: happy,
-                              phase: phase,
-                            ),
-                          ),
-                        ),
-                        // Cool nocturnal veil on Deep Sleep
-                        if (isSleep)
-                          Container(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  const Color(0xFF0F172A).withValues(alpha: 0.48),
-                                  const Color(0xFF1E1B4B).withValues(alpha: 0.38),
-                                ],
-                              ),
-                            ),
-                          ),
-                        // Subtle top glass rim specular arc for 3D depth
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                Colors.white.withValues(alpha: isSleep ? 0.08 : 0.22),
-                                Colors.transparent,
-                                meta.color.withValues(alpha: 0.12),
-                              ],
-                              stops: const [0.0, 0.42, 1.0],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+          // Animated 3D Character Layer
+          Opacity(
+            opacity: isSleep ? 0.50 : 1.0,
+            child: Transform.translate(
+              offset: Offset(tx, ty),
+              child: Transform.scale(
+                scaleX: scaleX,
+                scaleY: scaleY,
+                child: Transform(
+                  alignment: Alignment.center,
+                  transform: perspective,
+                  child: SizedBox(
+                    width: size,
+                    height: size,
+                    child: characterVisual,
                   ),
                 ),
               ),
             ),
           ),
 
-          // Behavior Overlay Props
+          // Scene-Integrated Character Acting Props (no rounded badge circles)
           if (showBehaviorOverlay && isSleep)
-            Positioned(
-              top: -size * 0.22 - (phase * 10.0) % 10.0,
-              right: -size * 0.10,
-              child: Text(
-                'z Z',
-                style: TextStyle(
-                  fontSize: (size * 0.18).clamp(9.0, 18.0),
-                  fontWeight: FontWeight.w800,
-                  color: const Color(0xFF7DD3FC).withValues(alpha: 0.92),
-                  shadows: const [Shadow(color: Colors.black87, blurRadius: 6)],
-                  decoration: TextDecoration.none,
-                ),
-              ),
-            ),
-
-          if (showBehaviorOverlay && behavior == MascotBehavior.think)
-            Positioned(
-              top: -size * 0.14,
-              right: -size * 0.16,
-              child: Transform.translate(
-                offset: Offset(0, math.sin(phase * math.pi * 2) * 3.0),
-                child: Container(
-                  padding: EdgeInsets.all((size * 0.06).clamp(3.0, 6.0)),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: const Color(0xFF1E1B2E).withValues(alpha: 0.94),
-                    border: Border.all(color: const Color(0xFFFBBF24).withValues(alpha: 0.8)),
-                    boxShadow: [
-                      BoxShadow(color: const Color(0xFFFBBF24).withValues(alpha: 0.45), blurRadius: 8),
-                    ],
-                  ),
-                  child: Icon(
-                    Icons.lightbulb_rounded,
-                    size: (size * 0.20).clamp(10.0, 22.0),
-                    color: const Color(0xFFFBBF24),
-                  ),
-                ),
-              ),
-            ),
-
-          if (showBehaviorOverlay && behavior == MascotBehavior.read)
-            Positioned(
-              bottom: -size * 0.06,
-              right: -size * 0.12,
-              child: Transform.translate(
-                offset: Offset(0, math.cos(phase * math.pi * 2) * 2.0),
-                child: Container(
-                  padding: EdgeInsets.all((size * 0.06).clamp(3.0, 6.0)),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    color: const Color(0xFF0F172A).withValues(alpha: 0.94),
-                    border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.8)),
-                    boxShadow: [
-                      BoxShadow(color: const Color(0xFF38BDF8).withValues(alpha: 0.40), blurRadius: 8),
-                    ],
-                  ),
-                  child: Icon(
-                    Icons.menu_book_rounded,
-                    size: (size * 0.19).clamp(10.0, 20.0),
-                    color: const Color(0xFF38BDF8),
-                  ),
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  painter: _SleepZzzPainter(progress: phase),
                 ),
               ),
             ),
 
           if (showBehaviorOverlay && behavior == MascotBehavior.knock)
-            Positioned(
-              bottom: -size * 0.06,
-              left: -size * 0.12,
-              child: Container(
-                padding: EdgeInsets.all((size * 0.055).clamp(3.0, 6.0)),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: const Color(0xFF18181B).withValues(alpha: 0.94),
-                  border: Border.all(color: meta.color.withValues(alpha: 0.85)),
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  painter: _KnockGlassWavePainter(color: meta.color, progress: phase),
                 ),
-                child: Icon(
-                  Icons.touch_app_rounded,
-                  size: (size * 0.18).clamp(10.0, 19.0),
-                  color: meta.color,
+              ),
+            ),
+
+          if (showBehaviorOverlay && behavior == MascotBehavior.think)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  painter: _ThoughtCloudPainter(color: meta.color, progress: phase),
+                ),
+              ),
+            ),
+
+          if (showBehaviorOverlay && behavior == MascotBehavior.read)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  painter: _OpenBook3DPainter(accent: meta.color, progress: phase),
                 ),
               ),
             ),
 
           if (showBehaviorOverlay && happy)
-            Positioned(
-              top: -size * 0.10,
-              left: -size * 0.08,
-              child: Icon(
-                Icons.auto_awesome_rounded,
-                size: (size * 0.22).clamp(11.0, 22.0),
-                color: const Color(0xFFFBBF24),
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  painter: _HappySparklesPainter(color: meta.color, progress: phase),
+                ),
               ),
             ),
         ],
@@ -369,28 +444,255 @@ class MascotAvatar extends StatelessWidget {
   }
 }
 
-class _KnockRipplePainter extends CustomPainter {
+class _FootstepDustPainter extends CustomPainter {
   final Color color;
   final double progress;
 
-  const _KnockRipplePainter({required this.color, required this.progress});
+  const _FootstepDustPainter({required this.color, required this.progress});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    for (int i = 0; i < 2; i++) {
-      final t = (progress * 2.0 + i * 0.5) % 1.0;
-      final radius = (size.width * 0.48) + t * (size.width * 0.34);
-      final paint = Paint()
-        ..color = color.withValues(alpha: (1.0 - t) * 0.52)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0;
-      canvas.drawCircle(center, radius, paint);
+    for (int i = 0; i < 3; i++) {
+      final t = (progress * 3.0 + i * 0.33) % 1.0;
+      final r = (1.0 - t) * (size.height * 0.42);
+      final x = size.width * (1.0 - t);
+      final y = size.height * 0.55 - t * 4.0;
+      canvas.drawCircle(
+        Offset(x, y),
+        r,
+        Paint()..color = color.withValues(alpha: (1.0 - t) * 0.34),
+      );
     }
   }
 
   @override
-  bool shouldRepaint(covariant _KnockRipplePainter oldDelegate) =>
+  bool shouldRepaint(covariant _FootstepDustPainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.color != color;
+}
+
+class _KnockGlassWavePainter extends CustomPainter {
+  final Color color;
+  final double progress;
+
+  const _KnockGlassWavePainter({required this.color, required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final burst = (progress * 2.0) % 1.0;
+    final impactCenter = Offset(size.width * 0.52, size.height * 0.48);
+
+    // Three expanding crisp screen-glass refraction rings at impact timing
+    final starts = [0.18, 0.36, 0.54];
+    for (final s in starts) {
+      final dt = burst - s;
+      if (dt >= 0 && dt < 0.42) {
+        final k = dt / 0.42;
+        final radius = size.width * (0.14 + k * 0.52);
+        final alpha = (1.0 - k) * 0.65;
+        canvas.drawCircle(
+          impactCenter,
+          radius,
+          Paint()
+            ..color = Colors.white.withValues(alpha: alpha)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.2 * (1.0 - k * 0.6),
+        );
+        canvas.drawCircle(
+          impactCenter,
+          radius * 0.72,
+          Paint()
+            ..color = color.withValues(alpha: alpha * 0.7)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.4,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _KnockGlassWavePainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.color != color;
+}
+
+class _ThoughtCloudPainter extends CustomPainter {
+  final Color color;
+  final double progress;
+
+  const _ThoughtCloudPainter({required this.color, required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final bob = math.sin(progress * math.pi * 2) * 3.5;
+    final fill = Paint()..color = Colors.white.withValues(alpha: 0.22);
+    final rim = Paint()
+      ..color = color.withValues(alpha: 0.75)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4;
+
+    // Trailing rising thought droplets from mascot head toward top-right cloud
+    final p1 = Offset(size.width * 0.72, size.height * 0.16 + bob * 0.4);
+    final p2 = Offset(size.width * 0.84, size.height * 0.04 + bob * 0.7);
+    canvas.drawCircle(p1, size.width * 0.045, fill);
+    canvas.drawCircle(p1, size.width * 0.045, rim);
+    canvas.drawCircle(p2, size.width * 0.068, fill);
+    canvas.drawCircle(p2, size.width * 0.068, rim);
+
+    // Fluffy organic thought cloud puff
+    final cloudCenter = Offset(size.width * 0.96, -size.height * 0.10 + bob);
+    final cw = size.width * 0.34;
+    final path = Path()
+      ..addOval(Rect.fromCenter(center: cloudCenter, width: cw, height: cw * 0.62))
+      ..addOval(Rect.fromCenter(center: cloudCenter.translate(-cw * 0.26, 2), width: cw * 0.56, height: cw * 0.46))
+      ..addOval(Rect.fromCenter(center: cloudCenter.translate(cw * 0.24, 2), width: cw * 0.52, height: cw * 0.44));
+    canvas.drawPath(path, Paint()..color = const Color(0xFF141827).withValues(alpha: 0.88));
+    canvas.drawPath(path, rim);
+
+    // Three animated thinking pulse dots inside the thought cloud
+    for (int i = -1; i <= 1; i++) {
+      final pulse = 0.45 + 0.55 * math.sin(progress * math.pi * 4 - i * 0.9).abs();
+      canvas.drawCircle(
+        cloudCenter.translate(i * cw * 0.20, 0),
+        (cw * 0.075).clamp(1.6, 4.0),
+        Paint()..color = const Color(0xFFFBBF24).withValues(alpha: pulse),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ThoughtCloudPainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.color != color;
+}
+
+class _OpenBook3DPainter extends CustomPainter {
+  final Color accent;
+  final double progress;
+
+  const _OpenBook3DPainter({required this.accent, required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cx = size.width * 0.50;
+    final by = size.height * 0.86;
+    final bw = size.width * 0.56;
+    final bh = size.height * 0.22;
+    final pageGlow = 0.72 + 0.28 * math.sin(progress * math.pi * 2);
+
+    // Warm upward illumination onto mascot face from open luminous book
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(cx, by - bh * 0.4), width: bw * 1.25, height: bh * 1.8),
+      Paint()
+        ..shader = RadialGradient(
+          colors: [
+            const Color(0xFF7DD3FC).withValues(alpha: 0.30 * pageGlow),
+            accent.withValues(alpha: 0.12),
+            Colors.transparent,
+          ],
+        ).createShader(Rect.fromCenter(center: Offset(cx, by - bh * 0.4), width: bw * 1.3, height: bh * 1.9)),
+    );
+
+    // Left & Right 3D open pages
+    final leftPage = Path()
+      ..moveTo(cx, by)
+      ..quadraticBezierTo(cx - bw * 0.26, by - bh * 0.35, cx - bw * 0.50, by - bh * 0.18)
+      ..lineTo(cx - bw * 0.44, by - bh * 1.02)
+      ..quadraticBezierTo(cx - bw * 0.22, by - bh * 1.12, cx, by - bh * 0.76)
+      ..close();
+
+    final rightPage = Path()
+      ..moveTo(cx, by)
+      ..quadraticBezierTo(cx + bw * 0.26, by - bh * 0.35, cx + bw * 0.50, by - bh * 0.18)
+      ..lineTo(cx + bw * 0.44, by - bh * 1.02)
+      ..quadraticBezierTo(cx + bw * 0.22, by - bh * 1.12, cx, by - bh * 0.76)
+      ..close();
+
+    final cover = Paint()
+      ..color = const Color(0xFF0F172A).withValues(alpha: 0.94)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2;
+    final pageFill = Paint()..color = const Color(0xFFE0F2FE).withValues(alpha: 0.90);
+    final edgeStroke = Paint()
+      ..color = const Color(0xFF38BDF8).withValues(alpha: 0.85)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+
+    canvas.drawPath(leftPage, pageFill);
+    canvas.drawPath(rightPage, pageFill);
+    canvas.drawPath(leftPage, edgeStroke);
+    canvas.drawPath(rightPage, edgeStroke);
+    canvas.drawLine(Offset(cx, by + 1), Offset(cx, by - bh * 0.76), cover);
+
+    // Turning translucent page sweeping cleanly across spine
+    final flip = (math.sin(progress * math.pi * 2) * 0.5 + 0.5); // 0 -> 1
+    final flipTipX = cx + (0.5 - flip) * bw * 0.72;
+    final flipPage = Path()
+      ..moveTo(cx, by)
+      ..quadraticBezierTo((cx + flipTipX) * 0.5, by - bh * 0.65, flipTipX, by - bh * 0.35)
+      ..lineTo(flipTipX * 0.98 + cx * 0.02, by - bh * 1.06)
+      ..quadraticBezierTo((cx + flipTipX) * 0.5, by - bh * 1.20, cx, by - bh * 0.76)
+      ..close();
+    canvas.drawPath(flipPage, Paint()..color = Colors.white.withValues(alpha: 0.58));
+  }
+
+  @override
+  bool shouldRepaint(covariant _OpenBook3DPainter oldDelegate) =>
+      oldDelegate.progress != progress || oldDelegate.accent != accent;
+}
+
+class _SleepZzzPainter extends CustomPainter {
+  final double progress;
+
+  const _SleepZzzPainter({required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final letters = ['z', 'Z', 'z'];
+    for (int i = 0; i < 3; i++) {
+      final t = (progress + i * 0.33) % 1.0;
+      final alpha = math.sin(t * math.pi).clamp(0.0, 1.0);
+      final x = size.width * (0.72 + i * 0.08 + math.sin(t * math.pi * 2) * 0.04);
+      final y = size.height * (0.24 - t * 0.36);
+      final tp = TextPainter(
+        text: TextSpan(
+          text: letters[i],
+          style: TextStyle(
+            fontSize: (size.width * (0.14 + t * 0.08)).clamp(9.0, 22.0),
+            fontWeight: FontWeight.w800,
+            color: const Color(0xFF93C5FD).withValues(alpha: alpha * 0.92),
+            shadows: const [Shadow(color: Colors.black87, blurRadius: 5)],
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(x, y));
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SleepZzzPainter oldDelegate) => oldDelegate.progress != progress;
+}
+
+class _HappySparklesPainter extends CustomPainter {
+  final Color color;
+  final double progress;
+
+  const _HappySparklesPainter({required this.color, required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (int i = 0; i < 6; i++) {
+      final angle = i * (math.pi / 3) + progress * math.pi * 2;
+      final dist = size.width * (0.48 + 0.10 * math.sin(progress * math.pi * 4 + i));
+      final pt = Offset(size.width / 2 + math.cos(angle) * dist, size.height / 2 + math.sin(angle) * dist);
+      canvas.drawCircle(
+        pt,
+        (size.width * 0.032).clamp(1.8, 4.2),
+        Paint()..color = (i.isEven ? const Color(0xFFFBBF24) : color).withValues(alpha: 0.85),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _HappySparklesPainter oldDelegate) =>
       oldDelegate.progress != progress || oldDelegate.color != color;
 }
 
@@ -435,10 +737,11 @@ class _MascotFallbackPainter extends CustomPainter {
       oldDelegate.phase != phase;
 }
 
-/// Interactive preview stage in Settings for testing all 6 mascot behaviors and custom wallpapers.
+/// Interactive preview stage in Settings for testing all 6 mascot behaviors, custom wallpapers, and live mascot size.
 class MascotBehaviorStage extends StatefulWidget {
   final MascotCharacter character;
   final MascotBehavior behavior;
+  final double mascotScale;
   final ScreensaverBackdrop backdrop;
   final bool blurBackground;
   final String customBgSource;
@@ -454,6 +757,7 @@ class MascotBehaviorStage extends StatefulWidget {
     super.key,
     required this.character,
     required this.behavior,
+    this.mascotScale = 1.0,
     required this.backdrop,
     required this.blurBackground,
     required this.customBgSource,
@@ -534,17 +838,17 @@ class _MascotBehaviorStageState extends State<MascotBehaviorStage> with SingleTi
     }
     switch (b) {
       case MascotBehavior.idle:
-        return tr ? '🟢 Boşta · Hazır' : '🟢 Idle · Ready';
+        return tr ? 'Boşta · Hazır' : 'Idle · Ready';
       case MascotBehavior.patrol:
-        return tr ? '🐾 Devriye Geziyor' : '🐾 Patrolling';
+        return tr ? 'Devriye Geziyor' : 'Patrolling';
       case MascotBehavior.knock:
-        return tr ? '🤔 Tık Tık · Camda!' : '🤔 Knock Knock!';
+        return tr ? 'Tık Tık · Camda!' : 'Knock Knock!';
       case MascotBehavior.think:
-        return tr ? '💡 Tasarruf Analizi...' : '💡 Thinking...';
+        return tr ? 'Tasarruf Analizi...' : 'Thinking...';
       case MascotBehavior.read:
-        return tr ? '📖 Kombi Rehberi Okuyor' : '📖 Reading Manual';
+        return tr ? 'Kombi Rehberi Okuyor' : 'Reading Manual';
       case MascotBehavior.deepSleep:
-        return tr ? '🌙 Derin Uyku (%50 Kısık)' : '🌙 Deep Sleep (50% Dim)';
+        return tr ? 'Derin Uyku (%50 Kısık)' : 'Deep Sleep (50% Dim)';
     }
   }
 
@@ -554,11 +858,13 @@ class _MascotBehaviorStageState extends State<MascotBehaviorStage> with SingleTi
     final tr = widget.lang == LangCode.tr;
     final hasCustomBg = widget.backdrop == ScreensaverBackdrop.custom && widget.customBgSource.trim().isNotEmpty;
     final effectiveBehavior = _wakingUp ? MascotBehavior.idle : widget.behavior;
+    final scaledSize = (82.0 * widget.mascotScale).clamp(48.0, 134.0);
+    final scalePct = (widget.mascotScale * 100).round();
 
     return GestureDetector(
       onTap: _triggerWake,
       child: Container(
-        height: 196,
+        height: 224,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: meta.color.withValues(alpha: 0.30)),
@@ -593,7 +899,7 @@ class _MascotBehaviorStageState extends State<MascotBehaviorStage> with SingleTi
                 ),
               ),
 
-              // 4) Top chips inside stage
+              // 4) Top chips inside stage (Mascot name + size % on left, backdrop on right)
               Positioned(
                 top: 10,
                 left: 10,
@@ -611,14 +917,10 @@ class _MascotBehaviorStageState extends State<MascotBehaviorStage> with SingleTi
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          MascotAvatar(
-                            character: widget.character,
-                            size: 16,
-                            showBehaviorOverlay: false,
-                          ),
+                          Icon(meta.icon, size: 12, color: meta.color),
                           const SizedBox(width: 5),
                           Text(
-                            meta.name,
+                            '${meta.name} · %$scalePct',
                             style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
                           ),
                         ],
@@ -649,44 +951,46 @@ class _MascotBehaviorStageState extends State<MascotBehaviorStage> with SingleTi
                 child: AnimatedBuilder(
                   animation: _anim,
                   builder: (context, _) {
+                    final angle = _anim.value * math.pi * 2;
                     final patrolDx = effectiveBehavior == MascotBehavior.patrol
-                        ? math.sin(_anim.value * math.pi * 2) * 58.0
+                        ? math.sin(angle) * 68.0
                         : 0.0;
-                    final bobDy = effectiveBehavior == MascotBehavior.patrol
-                        ? -math.sin(_anim.value * math.pi * 12).abs() * 5.0
-                        : (effectiveBehavior == MascotBehavior.knock
-                            ? math.sin(_anim.value * math.pi * 8) * 3.0
-                            : 0.0);
+                    // Derivative of sin(angle) is cos(angle): >0 moving right, <0 moving left
+                    final facingDir = effectiveBehavior == MascotBehavior.patrol
+                        ? (math.cos(angle) >= 0 ? 1.0 : -1.0)
+                        : 1.0;
 
                     return Transform.translate(
-                      offset: Offset(patrolDx, 12 + bobDy),
+                      offset: Offset(patrolDx, 12.0),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3.5),
                             decoration: BoxDecoration(
                               color: effectiveBehavior == MascotBehavior.deepSleep
-                                  ? const Color(0xFF1E1B4B).withValues(alpha: 0.90)
-                                  : const Color(0xFF111522).withValues(alpha: 0.90),
+                                  ? const Color(0xFF1E1B4B).withValues(alpha: 0.88)
+                                  : const Color(0xFF111522).withValues(alpha: 0.88),
                               borderRadius: BorderRadius.circular(999),
                               border: Border.all(
-                                color: (_wakingUp ? const Color(0xFFFBBF24) : meta.color).withValues(alpha: 0.55),
+                                color: (_wakingUp ? const Color(0xFFFBBF24) : meta.color).withValues(alpha: 0.50),
                               ),
                             ),
                             child: Text(
                               _behaviorPill(effectiveBehavior, tr),
-                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
+                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
                             ),
                           ),
                           MascotAvatar(
                             character: widget.character,
-                            size: 86,
+                            size: scaledSize,
                             behavior: effectiveBehavior,
                             sleeping: effectiveBehavior == MascotBehavior.deepSleep,
                             happy: _wakingUp,
                             phase: _anim.value,
+                            facingDirection: facingDir,
+                            frameless: true,
                           ),
                         ],
                       ),
@@ -706,6 +1010,7 @@ class TermoBotOverlay extends StatefulWidget {
   final bool enabled;
   final bool isSleeping;
   final MascotCharacter character;
+  final double mascotScale;
   final bool soundsEnabled;
   final bool hapticEnabled;
   final int hapticStrength;
@@ -723,6 +1028,7 @@ class TermoBotOverlay extends StatefulWidget {
     required this.enabled,
     required this.isSleeping,
     required this.character,
+    this.mascotScale = 1.0,
     required this.soundsEnabled,
     this.hapticEnabled = true,
     this.hapticStrength = 80,
@@ -759,6 +1065,8 @@ class _TermoBotOverlayState extends State<TermoBotOverlay> with SingleTickerProv
           _walkHalfLegs++;
           if (_walkHalfLegs == 2) {
             if (mounted) setState(() => _behavior = MascotBehavior.think);
+          } else if (_walkHalfLegs == 3) {
+            if (mounted) setState(() => _behavior = MascotBehavior.knock);
           } else if (_walkHalfLegs == 4) {
             if (mounted) setState(() => _behavior = MascotBehavior.read);
           } else if (_walkHalfLegs >= 6) {
@@ -852,15 +1160,17 @@ class _TermoBotOverlayState extends State<TermoBotOverlay> with SingleTickerProv
     final width = MediaQuery.of(context).size.width;
     final maxWalk = math.max(96.0, width - 160.0);
     final napping = _behavior == MascotBehavior.deepSleep;
+    final scaledSize = (64.0 * widget.mascotScale).clamp(38.0, 108.0);
 
     return AnimatedBuilder(
       animation: _walkCtrl,
       builder: (context, child) {
         final x = 18.0 + (napping ? 0.15 : _walkCtrl.value) * (maxWalk * 0.55);
-        final bob = napping ? 0.0 : math.sin(_walkCtrl.value * math.pi * 12).abs() * 3.5;
+        final facingDir = _walkCtrl.status == AnimationStatus.reverse ? -1.0 : 1.0;
+
         return Positioned(
           left: x,
-          bottom: widget.bottomOffset + bob,
+          bottom: widget.bottomOffset,
           child: GestureDetector(
             onTap: _handleTap,
             onLongPress: widget.onOpenScreensaver,
@@ -899,11 +1209,13 @@ class _TermoBotOverlayState extends State<TermoBotOverlay> with SingleTickerProv
                   ),
                 MascotAvatar(
                   character: widget.character,
-                  size: 52,
+                  size: scaledSize,
                   behavior: _behavior,
                   sleeping: napping,
                   happy: _happy,
                   phase: _walkCtrl.value,
+                  facingDirection: facingDir,
+                  frameless: true,
                 ),
               ],
             ),
@@ -916,6 +1228,7 @@ class _TermoBotOverlayState extends State<TermoBotOverlay> with SingleTickerProv
 
 class FullscreenScreensaverOverlay extends StatefulWidget {
   final MascotCharacter character;
+  final double mascotScale;
   final ScreensaverBackdrop backdrop;
   final bool blurBackground;
   final String customBgSource;
@@ -933,6 +1246,7 @@ class FullscreenScreensaverOverlay extends StatefulWidget {
   const FullscreenScreensaverOverlay({
     super.key,
     required this.character,
+    this.mascotScale = 1.0,
     required this.backdrop,
     required this.blurBackground,
     this.customBgSource = '',
@@ -1019,6 +1333,7 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
     final mm = _now.minute.toString().padLeft(2, '0');
     final activeBoiler = widget.boiler ?? ThermostatMath.computeBoilerTelemetry(widget.roomTemp, widget.targetTemp);
     final hasCustomBg = widget.backdrop == ScreensaverBackdrop.custom && widget.customBgSource.trim().isNotEmpty;
+    final scaledSize = (138.0 * widget.mascotScale).clamp(84.0, 224.0);
 
     return Positioned.fill(
       child: GestureDetector(
@@ -1051,7 +1366,7 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
                 ),
               ),
 
-              // 4) Foreground clock, 3D Unreal mascot portrait (tappable to pet), and live telemetry
+              // 4) Foreground clock, floating 3D Unreal mascot (tappable to pet), and live telemetry
               Center(
                 child: AnimatedBuilder(
                   animation: _anim,
@@ -1060,6 +1375,7 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
                     final dy = math.cos(_anim.value * math.pi * 4).abs() * -9.0;
                     final oledShiftX = ((_now.minute % 3) - 1) * 4.0;
                     final oledShiftY = ((_now.minute % 5) - 2) * 2.0;
+                    final facingDir = math.cos(_anim.value * math.pi * 2) >= 0 ? 1.0 : -1.0;
 
                     return Transform.translate(
                       offset: Offset(dx + oledShiftX, dy + oledShiftY),
@@ -1104,9 +1420,12 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
                                   ),
                                 MascotAvatar(
                                   character: widget.character,
-                                  size: 122,
+                                  size: scaledSize,
+                                  behavior: MascotBehavior.patrol,
                                   happy: _happy,
                                   phase: _anim.value,
+                                  facingDirection: facingDir,
+                                  frameless: true,
                                 ),
                               ],
                             ),

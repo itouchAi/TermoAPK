@@ -800,6 +800,7 @@ class SystemSettingsState {
   final bool mascotSoundsEnabled;
   final String screensaverCustomBgSource;
   final String screensaverCustomBgLabel;
+  final double mascotScale;
   final bool aiPhoneCallEnabled;
   final int aiCallRingSeconds;
   final String espDeviceId;
@@ -850,6 +851,7 @@ class SystemSettingsState {
     required this.mascotSoundsEnabled,
     required this.screensaverCustomBgSource,
     required this.screensaverCustomBgLabel,
+    required this.mascotScale,
     required this.aiPhoneCallEnabled,
     required this.aiCallRingSeconds,
     required this.espDeviceId,
@@ -915,6 +917,7 @@ class SystemSettingsState {
         mascotSoundsEnabled: true,
         screensaverCustomBgSource: '',
         screensaverCustomBgLabel: '',
+        mascotScale: 1.0,
         aiPhoneCallEnabled: true,
         aiCallRingSeconds: 10,
         espDeviceId: 'ESP32-KOMBI-01',
@@ -990,6 +993,7 @@ class SystemSettingsState {
     bool? mascotSoundsEnabled,
     String? screensaverCustomBgSource,
     String? screensaverCustomBgLabel,
+    double? mascotScale,
     bool? aiPhoneCallEnabled,
     int? aiCallRingSeconds,
     String? espDeviceId,
@@ -1040,6 +1044,7 @@ class SystemSettingsState {
       mascotSoundsEnabled: mascotSoundsEnabled ?? this.mascotSoundsEnabled,
       screensaverCustomBgSource: screensaverCustomBgSource ?? this.screensaverCustomBgSource,
       screensaverCustomBgLabel: screensaverCustomBgLabel ?? this.screensaverCustomBgLabel,
+      mascotScale: (mascotScale ?? this.mascotScale).clamp(0.60, 1.60),
       aiPhoneCallEnabled: aiPhoneCallEnabled ?? this.aiPhoneCallEnabled,
       aiCallRingSeconds: aiCallRingSeconds ?? this.aiCallRingSeconds,
       espDeviceId: espDeviceId ?? this.espDeviceId,
@@ -1091,6 +1096,7 @@ class SystemSettingsState {
         'mascotSoundsEnabled': mascotSoundsEnabled,
         'screensaverCustomBgSource': screensaverCustomBgSource,
         'screensaverCustomBgLabel': screensaverCustomBgLabel,
+        'mascotScale': mascotScale,
         'aiPhoneCallEnabled': aiPhoneCallEnabled,
         'aiCallRingSeconds': aiCallRingSeconds,
         'espDeviceId': espDeviceId,
@@ -1192,6 +1198,7 @@ class SystemSettingsState {
       mascotSoundsEnabled: (map['mascotSoundsEnabled'] as bool?) ?? defaults.mascotSoundsEnabled,
       screensaverCustomBgSource: (map['screensaverCustomBgSource'] as String?) ?? defaults.screensaverCustomBgSource,
       screensaverCustomBgLabel: (map['screensaverCustomBgLabel'] as String?) ?? defaults.screensaverCustomBgLabel,
+      mascotScale: (map['mascotScale'] as num?)?.toDouble() ?? defaults.mascotScale,
       aiPhoneCallEnabled: (map['aiPhoneCallEnabled'] as bool?) ?? defaults.aiPhoneCallEnabled,
       aiCallRingSeconds: (map['aiCallRingSeconds'] as int?) ?? defaults.aiCallRingSeconds,
       espDeviceId: (map['espDeviceId'] as String?) ?? defaults.espDeviceId,

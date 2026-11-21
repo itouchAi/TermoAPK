@@ -72,6 +72,7 @@ void main() {
       mascotSoundsEnabled: false,
       screensaverCustomBgSource: 'https://example.com/hearth.jpg',
       screensaverCustomBgLabel: 'example.com',
+      mascotScale: 1.35,
     );
     final restored = SystemSettingsState.fromJson(initial.toJson());
     expect(restored.smartDisplayMode, SmartDisplayMode.liveNature);
@@ -103,9 +104,12 @@ void main() {
     expect(restored.mascotSoundsEnabled, isFalse);
     expect(restored.screensaverCustomBgSource, 'https://example.com/hearth.jpg');
     expect(restored.screensaverCustomBgLabel, 'example.com');
+    expect(restored.mascotScale, 1.35);
 
-    final clamped = initial.copyWith(bootCeremonyDurationMs: 9000);
+    final clamped = initial.copyWith(bootCeremonyDurationMs: 9000, mascotScale: 3.0);
     expect(clamped.bootCeremonyDurationMs, 3500);
+    expect(clamped.mascotScale, 1.60);
+    expect(initial.copyWith(mascotScale: 0.10).mascotScale, 0.60);
   });
 
   test('DailyWeatherForecast.sample5Days includes 5 days with hourly slots', () {

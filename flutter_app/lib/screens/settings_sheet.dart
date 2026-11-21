@@ -2347,6 +2347,10 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                   color: const Color(0xFFF59E0B),
                 ),
                 _InfoBadge(
+                  text: tr ? 'Boyut: %${(_draft.mascotScale * 100).round()}' : 'Size: ${(_draft.mascotScale * 100).round()}%',
+                  color: const Color(0xFF10B981),
+                ),
+                _InfoBadge(
                   text: _draft.screensaverBlurBg ? (tr ? 'Cam Blur: Açık' : 'Glass Blur: On') : (tr ? 'Cam Blur: Kapalı' : 'Glass Blur: Off'),
                   color: _draft.screensaverBlurBg ? const Color(0xFF38BDF8) : const Color(0xFF9CA3AF),
                 ),
@@ -2411,9 +2415,10 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                         children: [
                           MascotAvatar(
                             character: ch,
-                            size: 44,
+                            size: 46,
                             happy: selected,
                             showBehaviorOverlay: false,
+                            frameless: false,
                           ),
                           const SizedBox(height: 5),
                           Text(meta.name, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
@@ -2712,6 +2717,36 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               ),
             ],
             const SizedBox(height: 12),
+            // Mascot Scale Slider (live-updates preview stage, main screen & screensaver)
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  tr ? 'Maskot Boyutu (Canlı Boyutlandırma)' : 'Mascot Size (Live Scale)',
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.85)),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: activeMascotMeta.color.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: activeMascotMeta.color.withValues(alpha: 0.45)),
+                  ),
+                  child: Text(
+                    '%${(_draft.mascotScale * 100).round()}',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: activeMascotMeta.color),
+                  ),
+                ),
+              ],
+            ),
+            Slider(
+              value: _draft.mascotScale.clamp(0.60, 1.60),
+              min: 0.60,
+              max: 1.60,
+              divisions: 20,
+              activeColor: activeMascotMeta.color,
+              onChanged: (v) => setState(() => _draft = _draft.copyWith(mascotScale: v)),
+            ),
             // Live Preview & 6-Behavior Test Stage
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2730,6 +2765,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             MascotBehaviorStage(
               character: _draft.mascotCharacter,
               behavior: _previewBehavior,
+              mascotScale: _draft.mascotScale,
               backdrop: _draft.screensaverBackdrop,
               blurBackground: _draft.screensaverBlurBg,
               customBgSource: _draft.screensaverCustomBgSource,
