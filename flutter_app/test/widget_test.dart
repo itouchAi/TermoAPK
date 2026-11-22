@@ -743,9 +743,15 @@ void main() {
     expect(FirebaseSyncService.sanitizeNodePath('/ev/salon/'), 'ev/salon');
     expect(FirebaseSyncService.sanitizeNodePath('   '), 'kombi');
 
-    expect(FirebaseSyncService.validateRtdbUrl('https://kombi-kontrol-default-rtdb.firebaseio.com'), isTrue);
+    expect(
+      SystemSettingsState.defaults().firebaseRtdbUrl,
+      'https://kombi-kontrol-babd5-default-rtdb.firebaseio.com',
+    );
+    expect(FirebaseSyncService.validateRtdbUrl('https://kombi-kontrol-babd5-default-rtdb.firebaseio.com'), isTrue);
     expect(FirebaseSyncService.validateRtdbUrl('ftp://invalid-host'), isFalse);
     expect(FirebaseSyncService.validateRtdbUrl(''), isFalse);
+    expect(FirebaseSyncService.isWebApiKey('AIzaSyDummyKeyExample1234567890123456789'), isTrue);
+    expect(FirebaseSyncService.isWebApiKey('legacy-db-secret-token'), isFalse);
 
     final boiler = ThermostatMath.computeBoilerTelemetry(21.8, 22.5);
     final preview = FirebaseSyncService.buildPayloadPreviewJson(

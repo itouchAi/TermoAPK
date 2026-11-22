@@ -23,6 +23,13 @@ class FirebaseSyncResult {
 class FirebaseSyncService {
   FirebaseSyncService._();
 
+  static final Map<String, String> _anonymousIdTokens = <String, String>{};
+
+  static bool isWebApiKey(String? raw) {
+    final trimmed = raw?.trim() ?? '';
+    return trimmed.startsWith('AIza') && trimmed.length >= 30;
+  }
+
   static String sanitizeNodePath(String raw) {
     var cleaned = raw.trim().replaceAll(RegExp(r'\.json$'), '');
     cleaned = cleaned.replaceAll(RegExp(r'^/+|/+$'), '');
@@ -38,17 +45,52 @@ class FirebaseSyncService {
     return uri.scheme == 'https' || uri.scheme == 'http';
   }
 
+  static Future<String?> _resolveRtdbAuthToken(String? apiKey) async {
+    final key = apiKey?.trim() ?? '';
+    if (key.isEmpty) return null;
+    if (!isWebApiKey(key)) return key;
+
+    final cached = _anonymousIdTokens[key];
+    if (cached != null && cached.isNotEmpty) return cached;
+
+    try {
+      final authUri = Uri.parse(
+        'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${Uri.encodeComponent(key)}',
+      );
+      final resp = await http
+          .post(
+            authUri,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({'returnSecureToken': true}),
+          )
+          .timeout(const Duration(seconds: 6));
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        final decoded = jsonDecode(resp.body);
+        if (decoded is Map<String, dynamic> && decoded['idToken'] is String) {
+          final idToken = decoded['idToken'] as String;
+          if (idToken.isNotEmpty) {
+            _anonymousIdTokens[key] = idToken;
+            return idToken;
+          }
+        }
+      }
+    } catch (_) {
+      // Anonymous auth may be disabled or offline; fall back cleanly.
+    }
+    return null;
+  }
+
   static Uri? _buildEndpoint(
     String baseUrl,
-    String? apiKey, {
+    String? authToken, {
     String nodePath = 'kombi',
   }) {
     if (!validateRtdbUrl(baseUrl)) return null;
     final trimmed = baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
     final safeNode = sanitizeNodePath(nodePath);
-    final key = apiKey?.trim() ?? '';
-    final suffix = key.isNotEmpty
-        ? '/$safeNode.json?auth=${Uri.encodeComponent(key)}'
+    final token = authToken?.trim() ?? '';
+    final suffix = token.isNotEmpty
+        ? '/$safeNode.json?auth=${Uri.encodeComponent(token)}'
         : '/$safeNode.json';
     return Uri.tryParse('$trimmed$suffix');
   }
@@ -104,8 +146,7 @@ class FirebaseSyncService {
     required double targetTemp,
     required BoilerTelemetry boiler,
   }) async {
-    final uri = _buildEndpoint(baseUrl, apiKey, nodePath: nodePath);
-    if (uri == null) {
+    if (!validateRtdbUrl(baseUrl)) {
       return const FirebaseSyncResult(
         ok: false,
         messageTr: 'Geçerli bir Firebase RTDB URL adresi (https://...) girin.',
@@ -115,6 +156,15 @@ class FirebaseSyncService {
 
     final sw = Stopwatch()..start();
     try {
+      final authToken = await _resolveRtdbAuthToken(apiKey);
+      final uri = _buildEndpoint(baseUrl, authToken, nodePath: nodePath);
+      if (uri == null) {
+        return const FirebaseSyncResult(
+          ok: false,
+          messageTr: 'Geçerli bir Firebase RTDB URL adresi (https://...) girin.',
+          messageEn: 'Enter a valid Firebase RTDB URL (https://...).',
+        );
+      }
       final resp = await http
           .patch(
             uri,
@@ -132,6 +182,10 @@ class FirebaseSyncService {
           .timeout(const Duration(seconds: 7));
       sw.stop();
       final ms = sw.elapsedMilliseconds;
+
+      if (resp.statusCode == 401 && isWebApiKey(apiKey)) {
+        _anonymousIdTokens.remove(apiKey?.trim());
+      }
 
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
         final safeNode = sanitizeNodePath(nodePath);
@@ -167,8 +221,7 @@ class FirebaseSyncService {
     String? apiKey,
     String nodePath = 'kombi',
   }) async {
-    final uri = _buildEndpoint(baseUrl, apiKey, nodePath: nodePath);
-    if (uri == null) {
+    if (!validateRtdbUrl(baseUrl)) {
       return const FirebaseSyncResult(
         ok: false,
         messageTr: 'Geçerli bir Firebase RTDB URL adresi girin.',
@@ -178,10 +231,24 @@ class FirebaseSyncService {
 
     final sw = Stopwatch()..start();
     try {
+      final authToken = await _resolveRtdbAuthToken(apiKey);
+      final uri = _buildEndpoint(baseUrl, authToken, nodePath: nodePath);
+      if (uri == null) {
+        return const FirebaseSyncResult(
+          ok: false,
+          messageTr: 'Geçerli bir Firebase RTDB URL adresi girin.',
+          messageEn: 'Enter a valid Firebase RTDB URL.',
+        );
+      }
       final resp = await http.get(uri).timeout(const Duration(seconds: 7));
       sw.stop();
       final ms = sw.elapsedMilliseconds;
       final safeNode = sanitizeNodePath(nodePath);
+
+      if (resp.statusCode == 401 && isWebApiKey(apiKey)) {
+        _anonymousIdTokens.remove(apiKey?.trim());
+      }
+
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
         final decoded = jsonDecode(resp.body);
         double? target;

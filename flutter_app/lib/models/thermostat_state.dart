@@ -1259,7 +1259,7 @@ class SystemSettingsState {
         espLastPingAt: '',
         espWdtResetCount: 1,
         espOfflineBurnMinutes: 42,
-        firebaseRtdbUrl: 'https://kombi-kontrol-default-rtdb.firebaseio.com',
+        firebaseRtdbUrl: 'https://kombi-kontrol-babd5-default-rtdb.firebaseio.com',
         firebaseApiKey: '',
         firebaseNodePath: 'kombi',
         cloudSyncEnabled: false,
@@ -1667,7 +1667,13 @@ class SystemSettingsState {
         }
         return list;
       }(),
-      firebaseRtdbUrl: (map['firebaseRtdbUrl'] as String?) ?? defaults.firebaseRtdbUrl,
+      firebaseRtdbUrl: () {
+        final raw = (map['firebaseRtdbUrl'] as String?)?.trim() ?? '';
+        if (raw.isEmpty || raw == 'https://kombi-kontrol-default-rtdb.firebaseio.com') {
+          return defaults.firebaseRtdbUrl;
+        }
+        return raw;
+      }(),
       firebaseApiKey: (map['firebaseApiKey'] as String?) ?? defaults.firebaseApiKey,
       firebaseNodePath: (map['firebaseNodePath'] as String?) ?? defaults.firebaseNodePath,
       cloudSyncEnabled: (map['cloudSyncEnabled'] as bool?) ?? defaults.cloudSyncEnabled,

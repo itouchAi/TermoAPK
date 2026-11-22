@@ -127,7 +127,6 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
   bool _cloudSyncBusy = false;
   String? _cloudSyncStatus;
   bool _cloudSyncOk = true;
-  bool _showFirebaseKey = false;
   bool _showCloudPayloadPreview = false;
 
   final _firebaseUrlCtrl = TextEditingController();
@@ -3973,70 +3972,104 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.035),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Text(
+                      tr ? 'Bulut Senkronizasyon Durumu:' : 'Cloud Sync Status:',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: (_draft.cloudSyncEnabled ? const Color(0xFF10B981) : const Color(0xFFF59E0B)).withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: (_draft.cloudSyncEnabled ? const Color(0xFF10B981) : const Color(0xFFF59E0B)).withValues(alpha: 0.45),
+                      ),
+                    ),
+                    child: Text(
+                      _draft.cloudSyncEnabled
+                          ? (tr ? '• Bağlı (Bulut Aktif)' : '• Connected (Cloud)')
+                          : (tr ? '• Çevrimdışı (Yerel Mod)' : '• Offline (Local Mode)'),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: _draft.cloudSyncEnabled ? const Color(0xFF6EE7B7) : const Color(0xFFFCD34D),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
               children: [
-                _InfoBadge(
-                  text: _draft.cloudSyncEnabled
-                      ? (tr
-                          ? 'Senkron Açık${_draft.cloudLastSyncAt.isNotEmpty ? ' · ${_draft.cloudLastSyncAt}' : ''}'
-                          : 'Sync On${_draft.cloudLastSyncAt.isNotEmpty ? ' · ${_draft.cloudLastSyncAt}' : ''}')
-                      : (tr ? 'Beklemede' : 'Standby'),
-                  color: _draft.cloudSyncEnabled ? const Color(0xFF10B981) : const Color(0xFFE11D48),
-                ),
-                _InfoBadge(
-                  text: '/$activeNode.json',
-                  color: const Color(0xFF38BDF8),
-                ),
-                _InfoBadge(
-                  text: urlValid
-                      ? (tr ? 'URL Geçerli' : 'URL Valid')
-                      : (tr ? 'URL Geçersiz' : 'Invalid URL'),
-                  color: urlValid ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                const Icon(Icons.storage_rounded, size: 15, color: Color(0xFF38BDF8)),
+                const SizedBox(width: 6),
+                Text(
+                  'Firebase Database URL:',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.90)),
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
             _DarkTextField(
               controller: _firebaseUrlCtrl,
-              hint: 'Firebase RTDB URL (https://...firebaseio.com)',
+              hint: 'https://kombi-kontrol-babd5-default-rtdb.firebaseio.com',
               keyboardType: TextInputType.url,
+              textColor: const Color(0xFFFCD34D),
+              monospace: true,
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(Icons.vpn_key_outlined, size: 15, color: Color(0xFFFBBF24)),
+                const SizedBox(width: 6),
+                Text(
+                  'Firebase Web API Key:',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.90)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            _DarkTextField(
+              controller: _firebaseApiKeyCtrl,
+              hint: tr ? 'Firebase Web API Key veya RTDB Gizli Anahtarı girin' : 'Enter Firebase Web API Key',
+              obscure: true,
+              textColor: const Color(0xFFFCD34D),
             ),
             const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(
-                  flex: 2,
                   child: _DarkTextField(
                     controller: _firebaseNodeCtrl,
-                    hint: tr ? 'Düğüm (kombi)' : 'Node (kombi)',
+                    hint: tr ? 'RTDB Düğüm Yolu (kombi)' : 'RTDB Node Path (kombi)',
                   ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  flex: 3,
-                  child: _DarkTextField(
-                    controller: _firebaseApiKeyCtrl,
-                    hint: tr ? 'RTDB Auth / Secret (opsiyonel)' : 'RTDB Auth / Secret (optional)',
-                    obscure: !_showFirebaseKey,
-                  ),
+                _InfoBadge(
+                  text: '/$activeNode.json',
+                  color: const Color(0xFF38BDF8),
                 ),
-                const SizedBox(width: 4),
-                IconButton(
-                  onPressed: () {
-                    _hapticTap();
-                    setState(() => _showFirebaseKey = !_showFirebaseKey);
-                  },
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.white.withValues(alpha: 0.06),
-                    side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
-                  ),
-                  icon: Icon(
-                    _showFirebaseKey ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                    size: 17,
-                    color: Colors.white70,
-                  ),
+                const SizedBox(width: 6),
+                _InfoBadge(
+                  text: urlValid
+                      ? (tr ? 'URL Geçerli' : 'Valid')
+                      : (tr ? 'URL Geçersiz' : 'Invalid'),
+                  color: urlValid ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
                 ),
               ],
             ),
@@ -4323,12 +4356,16 @@ class _DarkTextField extends StatelessWidget {
   final String hint;
   final bool obscure;
   final TextInputType? keyboardType;
+  final Color textColor;
+  final bool monospace;
 
   const _DarkTextField({
     required this.controller,
     required this.hint,
     this.obscure = false,
     this.keyboardType,
+    this.textColor = Colors.white,
+    this.monospace = false,
   });
 
   @override
@@ -4337,7 +4374,11 @@ class _DarkTextField extends StatelessWidget {
       controller: controller,
       obscureText: obscure,
       keyboardType: keyboardType,
-      style: const TextStyle(fontSize: 13, color: Colors.white),
+      style: TextStyle(
+        fontSize: 12.5,
+        color: textColor,
+        fontFamily: monospace ? 'monospace' : null,
+      ),
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.40)),
