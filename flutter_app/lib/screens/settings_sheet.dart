@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../models/thermostat_state.dart';
 import '../services/ai_call_service.dart';
 import '../services/ambient_audio_service.dart';
+import '../services/esp_log_service.dart';
 import '../services/hardware_service.dart';
 import '../services/notification_service.dart';
 import '../services/voice_gender_classifier.dart';
@@ -118,6 +119,10 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
   List<VoiceOptionInfo> _trVoices = const [];
   bool _voicesLoaded = false;
   String? _voiceTestStatus;
+  EspLogCategory? _espLogFilter;
+  bool _espPingBusy = false;
+  String? _espPingStatus;
+  bool _espPingOk = true;
 
   final _firebaseUrlCtrl = TextEditingController();
   final _espIdCtrl = TextEditingController();
@@ -125,6 +130,49 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
   final _screensaverBgUrlCtrl = TextEditingController();
 
   static const _locations = ['Ev · İstanbul', 'Yazlık · İzmir', 'Ofis · Ankara'];
+
+  Future<void> _runEspConnectionTest() async {
+    if (_espPingBusy) return;
+    _hapticTap();
+    final deviceId = _espIdCtrl.text.trim().isEmpty
+        ? _draft.espDeviceId
+        : _espIdCtrl.text.trim();
+    final rtdbUrl = _firebaseUrlCtrl.text.trim().isEmpty
+        ? _draft.firebaseRtdbUrl
+        : _firebaseUrlCtrl.text.trim();
+    setState(() {
+      _espPingBusy = true;
+      _espPingStatus = null;
+    });
+    final liveBoiler = ThermostatMath.computeBoilerTelemetry(widget.roomTemp, _liveTargetTemp);
+    final res = await EspLogService.testDeviceConnection(
+      baseUrl: rtdbUrl,
+      espDeviceId: deviceId,
+      roomName: _draft.googleHomeRoom,
+      roomTemp: widget.roomTemp,
+      targetTemp: _liveTargetTemp,
+      boiler: liveBoiler,
+      lang: _lang,
+    );
+    if (!mounted) return;
+    final nextDraft = _draft.copyWith(
+      espDeviceId: deviceId,
+      firebaseRtdbUrl: rtdbUrl,
+      espOnline: res.ok,
+      espLastPingAt: res.timestampLabel,
+      espWdtResetCount: !res.ok && _draft.espWdtEnabled
+          ? _draft.espWdtResetCount + 1
+          : _draft.espWdtResetCount,
+      espLogs: EspLogService.appendLog(_draft.espLogs, res.logEntry),
+    );
+    setState(() {
+      _espPingBusy = false;
+      _espPingOk = res.ok;
+      _espPingStatus = _lang == LangCode.tr ? res.messageTr : res.messageEn;
+      _draft = nextDraft;
+    });
+    widget.onSaveSettings(nextDraft);
+  }
 
   Future<void> _refreshTurkishVoices() async {
     VoiceSpeechService.warmup();
@@ -573,9 +621,10 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                       child: FilledButton(
                         onPressed: () {
                           _hapticTap();
+                          final typedEspId = _espIdCtrl.text.trim();
                           final updated = _draft.copyWith(
                             firebaseRtdbUrl: _firebaseUrlCtrl.text.trim(),
-                            espDeviceId: _espIdCtrl.text.trim(),
+                            espDeviceId: typedEspId.isEmpty ? _draft.espDeviceId : typedEspId,
                             customAudioLabel: _customAudioCtrl.text.trim(),
                             customAudioSource: _resolveAudioSource(),
                           );
@@ -958,8 +1007,10 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           icon: Icons.memory_rounded,
           iconColor: const Color(0xFFFBBF24),
           title: tr ? 'ESP Donanım Günlüğü & Raporlama' : 'ESP Hardware & Offline Logs',
-          tag: 'ESP32 / WDT',
-          subtitle: tr ? 'Çevrimdışı yanma süreleri ve kilitlenme logları' : 'Offline burn cycles & watchdog logs',
+          tag: tr ? 'ESP32 / WDT · ${_draft.espLogs.length} kayıt' : 'ESP32 / WDT · ${_draft.espLogs.length} logs',
+          subtitle: tr
+              ? '${_draft.espOfflineBurnMinutes} dk çevrimdışı yanma · ${_draft.espWdtResetCount} WDT'
+              : '${_draft.espOfflineBurnMinutes} min offline burn · ${_draft.espWdtResetCount} WDT',
           trailingAction: _ActionPill(
             label: _draft.espOnline ? (tr ? 'Çevrimiçi' : 'Online') : (tr ? 'Çevrimdışı' : 'Offline'),
             active: _draft.espOnline,
@@ -3384,31 +3435,413 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
         );
 
       case SettingsItemId.espLog:
+        final liveBoiler = ThermostatMath.computeBoilerTelemetry(widget.roomTemp, _liveTargetTemp);
+        final filteredEspLogs = EspLogService.filterLogs(
+          _draft.espLogs,
+          category: _espLogFilter,
+        );
+        final warningEvents = EspLogService.countWatchdogEvents(_draft.espLogs);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _DarkTextField(controller: _espIdCtrl, hint: 'ESP32 Cihaz Kimliği'),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                _InfoBadge(
+                  text: _draft.espOnline
+                      ? (tr
+                          ? 'Çevrimiçi${_draft.espLastPingAt.isNotEmpty ? ' · ${_draft.espLastPingAt}' : ''}'
+                          : 'Online${_draft.espLastPingAt.isNotEmpty ? ' · ${_draft.espLastPingAt}' : ''}')
+                      : (tr ? 'Çevrimdışı' : 'Offline'),
+                  color: _draft.espOnline ? const Color(0xFF10B981) : const Color(0xFFE11D48),
+                ),
+                _InfoBadge(
+                  text: tr
+                      ? 'WDT: ${_draft.espWdtResetCount} (${warningEvents} uyarı)'
+                      : 'WDT: ${_draft.espWdtResetCount} (${warningEvents} alerts)',
+                  color: const Color(0xFFFBBF24),
+                ),
+                _InfoBadge(
+                  text: tr
+                      ? 'Yanma: ${_draft.espOfflineBurnMinutes} dk'
+                      : 'Burn: ${_draft.espOfflineBurnMinutes} min',
+                  color: const Color(0xFFF97316),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _DarkTextField(
+                    controller: _espIdCtrl,
+                    hint: tr ? 'ESP32 Cihaz Kimliği (ör. ESP32-KOMBI-01)' : 'ESP32 Device ID',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: _espPingBusy ? null : _runEspConnectionTest,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFFBBF24).withValues(alpha: 0.22),
+                    foregroundColor: const Color(0xFFFDE68A),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(color: const Color(0xFFFBBF24).withValues(alpha: 0.45)),
+                    ),
+                  ),
+                  icon: _espPingBusy
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFDE68A)),
+                        )
+                      : const Icon(Icons.wifi_tethering_rounded, size: 16),
+                  label: Text(
+                    tr ? 'Ping' : 'Ping',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+            if (_espPingStatus != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: (_espPingOk ? const Color(0xFF10B981) : const Color(0xFFE11D48)).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: (_espPingOk ? const Color(0xFF10B981) : const Color(0xFFE11D48)).withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Text(
+                  _espPingStatus!,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: _espPingOk ? const Color(0xFFA7F3D0) : const Color(0xFFFECDD3),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _MiniToggleTile(
+                    label: tr ? 'WDT Kilitlenme İzleme' : 'WDT Lockup Watchdog',
+                    value: _draft.espWdtEnabled,
+                    activeColor: const Color(0xFFFBBF24),
+                    onTap: () {
+                      _hapticTap();
+                      final next = _draft.copyWith(espWdtEnabled: !_draft.espWdtEnabled);
+                      setState(() => _draft = next);
+                      widget.onSaveSettings(next);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _MiniToggleTile(
+                    label: tr ? 'NVS Çevrimdışı Tampon' : 'NVS Offline Buffer',
+                    value: _draft.espOfflineBufferEnabled,
+                    activeColor: const Color(0xFF10B981),
+                    onTap: () {
+                      _hapticTap();
+                      final next = _draft.copyWith(
+                        espOfflineBufferEnabled: !_draft.espOfflineBufferEnabled,
+                      );
+                      setState(() => _draft = next);
+                      widget.onSaveSettings(next);
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                ActionChip(
+                  avatar: const Icon(Icons.add_chart_rounded, size: 14, color: Color(0xFF38BDF8)),
+                  label: Text(
+                    tr ? 'Anlık Kayıt Al' : 'Log Snapshot',
+                    style: const TextStyle(fontSize: 11, color: Colors.white),
+                  ),
+                  backgroundColor: Colors.white.withValues(alpha: 0.06),
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                  onPressed: () {
+                    _hapticTap();
+                    final nowLabel = NotificationService.formatNowTime();
+                    final devId = _espIdCtrl.text.trim().isEmpty
+                        ? _draft.espDeviceId
+                        : _espIdCtrl.text.trim();
+                    final entry = EspLogEntry(
+                      timestamp: nowLabel,
+                      event: liveBoiler.isHeating
+                          ? (tr ? 'Modülasyon %${liveBoiler.flamePercent}' : 'Modulation %${liveBoiler.flamePercent}')
+                          : (tr ? 'Bekleme Telemetrisi' : 'Standby Telemetry'),
+                      detail:
+                          '$devId · ${widget.roomTemp.toStringAsFixed(1)}°C → ${_liveTargetTemp.toStringAsFixed(1)}°C · ${liveBoiler.waterPressureBar.toStringAsFixed(1)} Bar',
+                      category: liveBoiler.isHeating ? EspLogCategory.burner : EspLogCategory.system,
+                    );
+                    final next = _draft.copyWith(
+                      espDeviceId: devId,
+                      espLogs: EspLogService.appendLog(_draft.espLogs, entry),
+                    );
+                    setState(() {
+                      _draft = next;
+                      _espPingOk = true;
+                      _espPingStatus = tr
+                          ? 'Anlık telemetri kaydı NVS günlüğüne eklendi ($nowLabel).'
+                          : 'Live telemetry snapshot appended ($nowLabel).';
+                    });
+                    widget.onSaveSettings(next);
+                  },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.warning_amber_rounded, size: 14, color: Color(0xFFFBBF24)),
+                  label: Text(
+                    tr ? 'WDT Testi' : 'WDT Test',
+                    style: const TextStyle(fontSize: 11, color: Colors.white),
+                  ),
+                  backgroundColor: Colors.white.withValues(alpha: 0.06),
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                  onPressed: () {
+                    _hapticTap();
+                    final nowLabel = NotificationService.formatNowTime();
+                    final devId = _espIdCtrl.text.trim().isEmpty
+                        ? _draft.espDeviceId
+                        : _espIdCtrl.text.trim();
+                    final entry = EspLogEntry(
+                      timestamp: nowLabel,
+                      event: tr ? 'WDT Tetikleme Testi' : 'WDT Reset Self-Test',
+                      detail: tr
+                          ? '$devId · Çekirdek güvenli kurtarma doğrulandı'
+                          : '$devId · Core recovery verified',
+                      isWarning: true,
+                      category: EspLogCategory.watchdog,
+                    );
+                    final next = _draft.copyWith(
+                      espDeviceId: devId,
+                      espWdtResetCount: _draft.espWdtResetCount + 1,
+                      espLogs: EspLogService.appendLog(_draft.espLogs, entry),
+                    );
+                    setState(() {
+                      _draft = next;
+                      _espPingOk = true;
+                      _espPingStatus = tr
+                          ? 'WDT kurtarma testi kaydedildi (#${next.espWdtResetCount}).'
+                          : 'WDT recovery test logged (#${next.espWdtResetCount}).';
+                    });
+                    widget.onSaveSettings(next);
+                  },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.copy_all_rounded, size: 14, color: Color(0xFF10B981)),
+                  label: Text(
+                    tr ? 'Raporu Kopyala' : 'Copy Report',
+                    style: const TextStyle(fontSize: 11, color: Colors.white),
+                  ),
+                  backgroundColor: Colors.white.withValues(alpha: 0.06),
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                  onPressed: () async {
+                    _hapticTap();
+                    final report = EspLogService.exportLogsReport(
+                      settings: _draft.copyWith(
+                        espDeviceId: _espIdCtrl.text.trim().isEmpty
+                            ? _draft.espDeviceId
+                            : _espIdCtrl.text.trim(),
+                      ),
+                      roomTemp: widget.roomTemp,
+                      targetTemp: _liveTargetTemp,
+                      boiler: liveBoiler,
+                      lang: _lang,
+                    );
+                    await Clipboard.setData(ClipboardData(text: report));
+                    if (!mounted) return;
+                    setState(() {
+                      _espPingOk = true;
+                      _espPingStatus = tr
+                          ? 'ESP32 donanım raporu panoya kopyalandı (${_draft.espLogs.length} kayıt).'
+                          : 'ESP32 hardware report copied (${_draft.espLogs.length} logs).';
+                    });
+                  },
+                ),
+                if (_draft.espLogs.isNotEmpty)
+                  ActionChip(
+                    avatar: const Icon(Icons.delete_outline_rounded, size: 14, color: Color(0xFFF87171)),
+                    label: Text(
+                      tr ? 'Temizle' : 'Clear',
+                      style: const TextStyle(fontSize: 11, color: Colors.white),
+                    ),
+                    backgroundColor: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                    side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.35)),
+                    onPressed: () {
+                      _hapticTap();
+                      final next = _draft.copyWith(
+                        espLogs: const [],
+                        espOfflineBurnMinutes: 0,
+                        espWdtResetCount: 0,
+                      );
+                      setState(() {
+                        _draft = next;
+                        _espPingOk = true;
+                        _espPingStatus = tr
+                            ? 'ESP32 donanım günlüğü ve sayaçlar temizlendi.'
+                            : 'ESP32 hardware logs and counters cleared.';
+                      });
+                      widget.onSaveSettings(next);
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final filterOpt in <(EspLogCategory?, String)>[
+                    (null, tr ? 'Tümü (${_draft.espLogs.length})' : 'All (${_draft.espLogs.length})'),
+                    (EspLogCategory.burner, tr ? 'Yanma' : 'Burner'),
+                    (EspLogCategory.watchdog, tr ? 'WDT / Uyarı' : 'WDT / Alert'),
+                    (EspLogCategory.sync, tr ? 'Bulut' : 'Cloud'),
+                  ]) ...[
+                    ChoiceChip(
+                      label: Text(filterOpt.$2, style: const TextStyle(fontSize: 10.5)),
+                      selected: _espLogFilter == filterOpt.$1,
+                      selectedColor: const Color(0xFFFBBF24).withValues(alpha: 0.25),
+                      backgroundColor: Colors.white.withValues(alpha: 0.05),
+                      labelStyle: TextStyle(
+                        color: _espLogFilter == filterOpt.$1 ? const Color(0xFFFDE68A) : Colors.white70,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      side: BorderSide(
+                        color: _espLogFilter == filterOpt.$1
+                            ? const Color(0xFFFBBF24).withValues(alpha: 0.55)
+                            : Colors.white.withValues(alpha: 0.12),
+                      ),
+                      onSelected: (_) {
+                        _hapticTap();
+                        setState(() => _espLogFilter = filterOpt.$1);
+                      },
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                ],
+              ),
+            ),
             const SizedBox(height: 8),
-            if (_draft.espLogs.isEmpty)
-              Text(tr ? 'Kayıtlı donanım günlüğü yok.' : 'No hardware logs stored.', style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.50)))
+            if (filteredEspLogs.isEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.03),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                ),
+                child: Text(
+                  tr ? 'Bu filtrede kayıtlı ESP32 donanım günlüğü yok.' : 'No ESP32 hardware logs match this filter.',
+                  style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.55)),
+                ),
+              )
             else
-              for (final log in _draft.espLogs)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
+              for (final log in filteredEspLogs) ...[
+                Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: log.isWarning
+                        ? const Color(0xFFF59E0B).withValues(alpha: 0.10)
+                        : Colors.white.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: log.isWarning
+                          ? const Color(0xFFFBBF24).withValues(alpha: 0.35)
+                          : Colors.white.withValues(alpha: 0.09),
+                    ),
+                  ),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(log.timestamp, style: const TextStyle(fontSize: 11, color: Colors.white54)),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: Icon(
+                          log.category == EspLogCategory.burner
+                              ? Icons.local_fire_department_rounded
+                              : log.category == EspLogCategory.watchdog
+                                  ? Icons.warning_amber_rounded
+                                  : log.category == EspLogCategory.sync
+                                      ? Icons.cloud_done_outlined
+                                      : Icons.memory_rounded,
+                          size: 15,
+                          color: log.isWarning
+                              ? const Color(0xFFFBBF24)
+                              : log.category == EspLogCategory.burner
+                                  ? const Color(0xFFFB923C)
+                                  : log.category == EspLogCategory.sync
+                                      ? const Color(0xFF34D399)
+                                      : const Color(0xFF38BDF8),
+                        ),
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(
-                          '${log.event} · ${log.detail}',
-                          style: TextStyle(fontSize: 11, color: log.isWarning ? Colors.amber.shade300 : Colors.white70),
-                          overflow: TextOverflow.ellipsis,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    log.event,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: log.isWarning ? Colors.amber.shade200 : Colors.white,
+                                    ),
+                                  ),
+                                ),
+                                if (log.durationSeconds > 0) ...[
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF97316).withValues(alpha: 0.18),
+                                      borderRadius: BorderRadius.circular(7),
+                                    ),
+                                    child: Text(
+                                      EspLogService.formatDurationBadge(log.durationSeconds, _lang),
+                                      style: const TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFFFDBA74),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                ],
+                                Text(
+                                  log.timestamp,
+                                  style: const TextStyle(fontSize: 10.5, color: Colors.white54),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              log.detail,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.white.withValues(alpha: 0.68),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
+              ],
           ],
         );
 

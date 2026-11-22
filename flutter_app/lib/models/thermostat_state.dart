@@ -641,18 +641,57 @@ enum SettingsItemId {
   resetHistory,
 }
 
+enum EspLogCategory {
+  burner,
+  watchdog,
+  sync,
+  system,
+}
+
 class EspLogEntry {
   final String timestamp;
   final String event;
   final String detail;
   final bool isWarning;
+  final EspLogCategory category;
+  final int durationSeconds;
 
   const EspLogEntry({
     required this.timestamp,
     required this.event,
     required this.detail,
     this.isWarning = false,
+    this.category = EspLogCategory.system,
+    this.durationSeconds = 0,
   });
+
+  Map<String, dynamic> toJson() => {
+        'timestamp': timestamp,
+        'event': event,
+        'detail': detail,
+        'isWarning': isWarning,
+        'category': category.name,
+        'durationSeconds': durationSeconds,
+      };
+
+  factory EspLogEntry.fromJson(Map<String, dynamic> map) {
+    final rawCat = map['category'] as String?;
+    EspLogCategory cat = EspLogCategory.system;
+    for (final v in EspLogCategory.values) {
+      if (v.name == rawCat) {
+        cat = v;
+        break;
+      }
+    }
+    return EspLogEntry(
+      timestamp: (map['timestamp'] as String?) ?? '--:--',
+      event: (map['event'] as String?) ?? '',
+      detail: (map['detail'] as String?) ?? '',
+      isWarning: (map['isWarning'] as bool?) ?? false,
+      category: cat,
+      durationSeconds: (map['durationSeconds'] as num?)?.toInt() ?? 0,
+    );
+  }
 }
 
 enum SmartDisplayMode {
@@ -1060,6 +1099,11 @@ class SystemSettingsState {
   final String maleVoiceName;
   final String espDeviceId;
   final bool espOnline;
+  final bool espWdtEnabled;
+  final bool espOfflineBufferEnabled;
+  final String espLastPingAt;
+  final int espWdtResetCount;
+  final int espOfflineBurnMinutes;
   final String firebaseRtdbUrl;
   final bool cloudSyncEnabled;
   final List<EspLogEntry> espLogs;
@@ -1118,6 +1162,11 @@ class SystemSettingsState {
     this.maleVoiceName = '',
     required this.espDeviceId,
     required this.espOnline,
+    this.espWdtEnabled = true,
+    this.espOfflineBufferEnabled = true,
+    this.espLastPingAt = '',
+    this.espWdtResetCount = 1,
+    this.espOfflineBurnMinutes = 42,
     required this.firebaseRtdbUrl,
     required this.cloudSyncEnabled,
     required this.espLogs,
@@ -1191,12 +1240,35 @@ class SystemSettingsState {
         maleVoiceName: '',
         espDeviceId: 'ESP32-KOMBI-01',
         espOnline: false,
+        espWdtEnabled: true,
+        espOfflineBufferEnabled: true,
+        espLastPingAt: '',
+        espWdtResetCount: 1,
+        espOfflineBurnMinutes: 42,
         firebaseRtdbUrl: 'https://kombi-kontrol-default-rtdb.firebaseio.com',
         cloudSyncEnabled: false,
         espLogs: [
-          EspLogEntry(timestamp: '23:10', event: 'Modülasyon %36', detail: 'Oda 21.8°C → Hedef 22.5°C'),
-          EspLogEntry(timestamp: '20:45', event: 'Brülör Ateşleme', detail: 'Basınç 1.6 Bar normal'),
-          EspLogEntry(timestamp: '16:12', event: 'WDT Kontrolü', detail: 'Çevrimdışı tampon kaydedildi', isWarning: true),
+          EspLogEntry(
+            timestamp: '23:10',
+            event: 'Modülasyon %36',
+            detail: 'Oda 21.8°C → Hedef 22.5°C',
+            category: EspLogCategory.burner,
+            durationSeconds: 1080,
+          ),
+          EspLogEntry(
+            timestamp: '20:45',
+            event: 'Brülör Ateşleme',
+            detail: 'Basınç 1.6 Bar normal',
+            category: EspLogCategory.burner,
+            durationSeconds: 1440,
+          ),
+          EspLogEntry(
+            timestamp: '16:12',
+            event: 'WDT Kontrolü',
+            detail: 'Çevrimdışı tampon kaydedildi',
+            isWarning: true,
+            category: EspLogCategory.watchdog,
+          ),
         ],
       );
 
@@ -1274,6 +1346,11 @@ class SystemSettingsState {
     String? maleVoiceName,
     String? espDeviceId,
     bool? espOnline,
+    bool? espWdtEnabled,
+    bool? espOfflineBufferEnabled,
+    String? espLastPingAt,
+    int? espWdtResetCount,
+    int? espOfflineBurnMinutes,
     String? firebaseRtdbUrl,
     bool? cloudSyncEnabled,
     List<EspLogEntry>? espLogs,
@@ -1332,6 +1409,11 @@ class SystemSettingsState {
       maleVoiceName: maleVoiceName ?? this.maleVoiceName,
       espDeviceId: espDeviceId ?? this.espDeviceId,
       espOnline: espOnline ?? this.espOnline,
+      espWdtEnabled: espWdtEnabled ?? this.espWdtEnabled,
+      espOfflineBufferEnabled: espOfflineBufferEnabled ?? this.espOfflineBufferEnabled,
+      espLastPingAt: espLastPingAt ?? this.espLastPingAt,
+      espWdtResetCount: (espWdtResetCount ?? this.espWdtResetCount).clamp(0, 9999),
+      espOfflineBurnMinutes: (espOfflineBurnMinutes ?? this.espOfflineBurnMinutes).clamp(0, 999999),
       firebaseRtdbUrl: firebaseRtdbUrl ?? this.firebaseRtdbUrl,
       cloudSyncEnabled: cloudSyncEnabled ?? this.cloudSyncEnabled,
       espLogs: espLogs ?? this.espLogs,
@@ -1390,6 +1472,13 @@ class SystemSettingsState {
         'femaleVoiceName': femaleVoiceName,
         'maleVoiceName': maleVoiceName,
         'espDeviceId': espDeviceId,
+        'espOnline': espOnline,
+        'espWdtEnabled': espWdtEnabled,
+        'espOfflineBufferEnabled': espOfflineBufferEnabled,
+        'espLastPingAt': espLastPingAt,
+        'espWdtResetCount': espWdtResetCount,
+        'espOfflineBurnMinutes': espOfflineBurnMinutes,
+        'espLogs': espLogs.take(40).map((e) => e.toJson()).toList(),
         'firebaseRtdbUrl': firebaseRtdbUrl,
         'cloudSyncEnabled': cloudSyncEnabled,
       };
@@ -1516,6 +1605,26 @@ class SystemSettingsState {
       femaleVoiceName: (map['femaleVoiceName'] as String?) ?? defaults.femaleVoiceName,
       maleVoiceName: (map['maleVoiceName'] as String?) ?? defaults.maleVoiceName,
       espDeviceId: (map['espDeviceId'] as String?) ?? defaults.espDeviceId,
+      espOnline: (map['espOnline'] as bool?) ?? defaults.espOnline,
+      espWdtEnabled: (map['espWdtEnabled'] as bool?) ?? defaults.espWdtEnabled,
+      espOfflineBufferEnabled: (map['espOfflineBufferEnabled'] as bool?) ?? defaults.espOfflineBufferEnabled,
+      espLastPingAt: (map['espLastPingAt'] as String?) ?? defaults.espLastPingAt,
+      espWdtResetCount: (map['espWdtResetCount'] as num?)?.toInt() ?? defaults.espWdtResetCount,
+      espOfflineBurnMinutes: (map['espOfflineBurnMinutes'] as num?)?.toInt() ?? defaults.espOfflineBurnMinutes,
+      espLogs: () {
+        final raw = map['espLogs'];
+        if (raw is! List) return defaults.espLogs;
+        final list = <EspLogEntry>[];
+        for (final item in raw) {
+          if (item is Map<String, dynamic>) {
+            list.add(EspLogEntry.fromJson(item));
+          } else if (item is Map) {
+            list.add(EspLogEntry.fromJson(Map<String, dynamic>.from(item)));
+          }
+          if (list.length >= 40) break;
+        }
+        return list;
+      }(),
       firebaseRtdbUrl: (map['firebaseRtdbUrl'] as String?) ?? defaults.firebaseRtdbUrl,
       cloudSyncEnabled: (map['cloudSyncEnabled'] as bool?) ?? defaults.cloudSyncEnabled,
     );

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:termostat_flow/models/thermostat_state.dart';
 import 'package:termostat_flow/services/ai_call_service.dart';
 import 'package:termostat_flow/services/ambient_audio_service.dart';
+import 'package:termostat_flow/services/esp_log_service.dart';
 import 'package:termostat_flow/services/hardware_service.dart';
 import 'package:termostat_flow/services/notification_service.dart';
 import 'package:termostat_flow/services/vault_crypto_service.dart';
@@ -671,5 +672,68 @@ void main() {
       actionEn: actions.last.logActionEn,
     );
     expect(updated.first.actionTakenTr, 'Bildirimden: Kombi kapatıldı');
+  });
+
+  test('EspLogEntry and EspLogService persist hardware logs, filter categories, and export reports', () {
+    List<EspLogEntry> logs = const [];
+    for (int i = 1; i <= 45; i++) {
+      logs = EspLogService.appendLog(
+        logs,
+        EspLogEntry(
+          timestamp: '12:${(i % 60).toString().padLeft(2, '0')}',
+          event: i % 5 == 0 ? 'WDT Kontrolü #$i' : 'Brülör Döngüsü #$i',
+          detail: 'Detay $i',
+          isWarning: i % 5 == 0,
+          category: i % 5 == 0
+              ? EspLogCategory.watchdog
+              : (i % 3 == 0 ? EspLogCategory.sync : EspLogCategory.burner),
+          durationSeconds: i % 5 == 0 ? 0 : 900,
+        ),
+        maxEntries: 40,
+      );
+    }
+
+    expect(logs.length, 40);
+    expect(logs.first.event, 'WDT Kontrolü #45');
+    expect(EspLogService.filterLogs(logs, category: EspLogCategory.watchdog).length, 8);
+    expect(EspLogService.countWatchdogEvents(logs), 8);
+    expect(EspLogService.formatDurationBadge(45, LangCode.tr), '45 sn');
+    expect(EspLogService.formatDurationBadge(900, LangCode.tr), '15 dk');
+    expect(EspLogService.formatDurationBadge(3900, LangCode.tr), '1 sa 5 dk');
+
+    final settings = SystemSettingsState.defaults().copyWith(
+      espDeviceId: 'ESP32-TEST-99',
+      espOnline: true,
+      espWdtEnabled: false,
+      espOfflineBufferEnabled: true,
+      espLastPingAt: '14:05',
+      espWdtResetCount: 4,
+      espOfflineBurnMinutes: 120,
+      espLogs: logs,
+    );
+    final restored = SystemSettingsState.fromJson(settings.toJson());
+    expect(restored.espDeviceId, 'ESP32-TEST-99');
+    expect(restored.espOnline, isTrue);
+    expect(restored.espWdtEnabled, isFalse);
+    expect(restored.espOfflineBufferEnabled, isTrue);
+    expect(restored.espLastPingAt, '14:05');
+    expect(restored.espWdtResetCount, 4);
+    expect(restored.espOfflineBurnMinutes, 120);
+    expect(restored.espLogs.length, 40);
+    expect(restored.espLogs.first.category, EspLogCategory.watchdog);
+    expect(restored.espLogs.first.isWarning, isTrue);
+
+    final boiler = ThermostatMath.computeBoilerTelemetry(21.8, 22.5);
+    final report = EspLogService.exportLogsReport(
+      settings: restored,
+      roomTemp: 21.8,
+      targetTemp: 22.5,
+      boiler: boiler,
+      lang: LangCode.tr,
+    );
+    expect(report.contains('ESP32-TEST-99'), isTrue);
+    expect(report.contains('Çevrimiçi (14:05)'), isTrue);
+    expect(report.contains('120 dk yanma'), isTrue);
+    expect(report.contains('WDT Kontrolü #45'), isTrue);
   });
 }

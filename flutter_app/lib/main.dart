@@ -13,6 +13,7 @@ import 'screens/thermostat_screen.dart';
 import 'screens/widget_order_sheet.dart';
 import 'services/ai_call_service.dart';
 import 'services/ambient_audio_service.dart';
+import 'services/esp_log_service.dart';
 import 'services/firebase_sync_service.dart';
 import 'services/hardware_service.dart';
 import 'services/notification_service.dart';
@@ -98,6 +99,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   Timer? _aiCallDebounceTimer;
   bool? _pendingCallBaselineHeating;
   double? _pendingCallBaselineTarget;
+  DateTime? _heatingCycleStartedAt;
   DateTime? _lastWheelNavAt;
   bool _activeTabCanVertScroll = false;
 
@@ -110,6 +112,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   void initState() {
     super.initState();
     _syncPreferredVoices(_settings);
+    if (ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating) {
+      _heatingCycleStartedAt = DateTime.now();
+    }
     _loadPersisted();
     VoiceSpeechService.warmup();
     _resetIdleTimer();
@@ -246,6 +251,11 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             ];
           }
         });
+        if (ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating) {
+          _heatingCycleStartedAt ??= DateTime.now();
+        } else {
+          _heatingCycleStartedAt = null;
+        }
         _syncPageIndexToActiveTab(jump: true);
         _resetIdleTimer();
       } catch (_) {
@@ -333,6 +343,66 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     HardwareService.exitSmartDisplayHardware();
   }
 
+  void _appendEspLog(
+    EspLogEntry entry, {
+    bool? espOnline,
+    String? espLastPingAt,
+    int addBurnMinutes = 0,
+    int addWdtCount = 0,
+  }) {
+    if (!mounted) return;
+    setState(() {
+      _settings = _settings.copyWith(
+        espOnline: espOnline ?? _settings.espOnline,
+        espLastPingAt: espLastPingAt ?? _settings.espLastPingAt,
+        espOfflineBurnMinutes: _settings.espOfflineBurnMinutes + addBurnMinutes,
+        espWdtResetCount: _settings.espWdtResetCount + addWdtCount,
+        espLogs: EspLogService.appendLog(_settings.espLogs, entry),
+      );
+    });
+    _persist();
+  }
+
+  void _recordBoilerTransitionEspLog({
+    required bool prevHeating,
+    required double nextTargetTemp,
+  }) {
+    final nextBoiler = ThermostatMath.computeBoilerTelemetry(_roomTemp, nextTargetTemp);
+    final tr = _lang == LangCode.tr;
+    if (!prevHeating && nextBoiler.isHeating) {
+      _heatingCycleStartedAt = DateTime.now();
+      if (_settings.espOfflineBufferEnabled) {
+        _appendEspLog(
+          EspLogEntry(
+            timestamp: NotificationService.formatNowTime(),
+            event: tr ? 'Brülör Ateşleme' : 'Boiler Ignition',
+            detail: '${_roomTemp.toStringAsFixed(1)}°C → ${nextTargetTemp.toStringAsFixed(1)}°C · %${nextBoiler.flamePercent}',
+            category: EspLogCategory.burner,
+          ),
+        );
+      }
+    } else if (prevHeating && !nextBoiler.isHeating) {
+      final started = _heatingCycleStartedAt;
+      _heatingCycleStartedAt = null;
+      final elapsedSec = started != null
+          ? DateTime.now().difference(started).inSeconds.clamp(1, 86400)
+          : 0;
+      final addedMin = elapsedSec >= 60 ? (elapsedSec / 60).round() : 0;
+      if (_settings.espOfflineBufferEnabled) {
+        _appendEspLog(
+          EspLogEntry(
+            timestamp: NotificationService.formatNowTime(),
+            event: tr ? 'Yanma Döngüsü Tamamlandı' : 'Burn Cycle Completed',
+            detail: '${_roomTemp.toStringAsFixed(1)}°C → ${nextTargetTemp.toStringAsFixed(1)}°C · ${nextBoiler.waterPressureBar.toStringAsFixed(1)} Bar',
+            category: EspLogCategory.burner,
+            durationSeconds: elapsedSec,
+          ),
+          addBurnMinutes: addedMin,
+        );
+      }
+    }
+  }
+
   void _syncFirebaseBackground(double target) {
     if (!_settings.googleHomeLinked && !_settings.cloudSyncEnabled) return;
     final b = ThermostatMath.computeBoilerTelemetry(_roomTemp, target);
@@ -343,7 +413,44 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       roomTemp: _roomTemp,
       targetTemp: target,
       boiler: b,
-    );
+    ).then((res) {
+      if (!mounted) return;
+      final nowLabel = NotificationService.formatNowTime();
+      final wasOnline = _settings.espOnline;
+      if (res.ok) {
+        if (!wasOnline) {
+          _appendEspLog(
+            EspLogEntry(
+              timestamp: nowLabel,
+              event: _lang == LangCode.tr ? 'RTDB Senkronizasyon Sağlandı' : 'RTDB Sync Restored',
+              detail: '${_settings.espDeviceId} · ${target.toStringAsFixed(1)}°C',
+              category: EspLogCategory.sync,
+            ),
+            espOnline: true,
+            espLastPingAt: nowLabel,
+          );
+        } else {
+          setState(() {
+            _settings = _settings.copyWith(espOnline: true, espLastPingAt: nowLabel);
+          });
+          _persist();
+        }
+      } else if (wasOnline || _settings.espWdtEnabled) {
+        if (wasOnline) {
+          _appendEspLog(
+            EspLogEntry(
+              timestamp: nowLabel,
+              event: _lang == LangCode.tr ? 'WDT Bulut Bağlantı Kesintisi' : 'WDT Cloud Link Drop',
+              detail: res.messageTr,
+              isWarning: true,
+              category: EspLogCategory.watchdog,
+            ),
+            espOnline: false,
+            addWdtCount: _settings.espWdtEnabled ? 1 : 0,
+          );
+        }
+      }
+    });
   }
 
   @override
@@ -490,6 +597,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       _activePreset = ThermostatMath.findMatchingPreset(snapped)?.id;
     });
     _persist();
+    _recordBoilerTransitionEspLog(prevHeating: prevHeating, nextTargetTemp: snapped);
     _syncFirebaseBackground(snapped);
     if (!suppressAiCall && (snapped - prevTarget).abs() >= 0.05) {
       _scheduleSettledAiCallEvaluation(prevHeating: prevHeating, prevTarget: prevTarget);
@@ -506,6 +614,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       _activePreset = preset.id;
     });
     _persist();
+    _recordBoilerTransitionEspLog(prevHeating: prevHeating, nextTargetTemp: preset.temp);
     _syncFirebaseBackground(preset.temp);
     _scheduleSettledAiCallEvaluation(
       prevHeating: prevHeating,
@@ -909,6 +1018,11 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                               _schedule = ThermostatMath.defaultSchedule;
                                               _targetTemp = 22.5;
                                               _activePreset = PresetId.konfor;
+                                              _settings = _settings.copyWith(
+                                                espLogs: const [],
+                                                espOfflineBurnMinutes: 0,
+                                                espWdtResetCount: 0,
+                                              );
                                             });
                                             _persist();
                                           },
