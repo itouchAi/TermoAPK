@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../models/thermostat_state.dart';
+import 'voice_gender_classifier.dart';
 import 'web_speech_bridge.dart';
 
 /// Unified Text-to-Speech (TTS) and Speech-to-Text (STT) service
@@ -24,21 +25,36 @@ class VoiceSpeechService {
   static bool get isSpeaking => _isSpeaking;
   static String preferredFemaleVoice = '';
   static String preferredMaleVoice = '';
+  static String lastSpokenVoiceName = '';
+  static bool lastSpokenMatchedGender = true;
 
-  static Future<List<String>> listTurkishVoices() async {
+  static Future<List<VoiceOptionInfo>> listTurkishVoicesDetailed() async {
     if (kIsWeb && WebSpeechBridge.isSupported) {
-      return WebSpeechBridge.listTurkishVoices();
+      return WebSpeechBridge.listTurkishVoicesDetailed();
     }
     await _ensureVoicesLoaded();
     final voices = _cachedVoices ?? const [];
-    final out = <String>[];
+    final out = <VoiceOptionInfo>[];
+    final seen = <String>{};
     for (final v in voices) {
-      if ((v['locale'] ?? '').toLowerCase().startsWith('tr')) {
-        final name = (v['name'] ?? '').trim();
-        if (name.isNotEmpty && !out.contains(name)) out.add(name);
+      final locale = (v['locale'] ?? '').trim();
+      final name = (v['name'] ?? '').trim();
+      if (locale.toLowerCase().startsWith('tr') && name.isNotEmpty && seen.add(name)) {
+        out.add(
+          VoiceOptionInfo(
+            name: name,
+            locale: locale,
+            gender: VoiceGenderClassifier.classify(name),
+          ),
+        );
       }
     }
     return out;
+  }
+
+  static Future<List<String>> listTurkishVoices() async {
+    final detailed = await listTurkishVoicesDetailed();
+    return [for (final v in detailed) v.name];
   }
 
   static void warmup() {
@@ -98,17 +114,6 @@ class VoiceSpeechService {
     return out;
   }
 
-  static String _norm(String raw) => raw
-      .replaceAll('İ', 'i')
-      .toLowerCase()
-      .replaceAll('\u0307', '')
-      .replaceAll('ü', 'u')
-      .replaceAll('ö', 'o')
-      .replaceAll('ç', 'c')
-      .replaceAll('ş', 's')
-      .replaceAll('ğ', 'g')
-      .replaceAll('ı', 'i');
-
   static Future<void> _ensureVoicesLoaded() async {
     if (_cachedVoices != null && _cachedVoices!.isNotEmpty) return;
     try {
@@ -128,88 +133,6 @@ class VoiceSpeechService {
         await Future<void>.delayed(const Duration(milliseconds: 90));
       }
     } catch (_) {}
-  }
-
-  static Map<String, String>? _pickGenderedVoice({
-    required LangCode lang,
-    required bool female,
-  }) {
-    final voices = _cachedVoices;
-    if (voices == null || voices.isEmpty) return null;
-
-    final langPrefix = lang == LangCode.tr ? 'tr' : 'en';
-    final langVoices = voices
-        .where((v) => (v['locale'] ?? '').toLowerCase().startsWith(langPrefix))
-        .toList();
-    final pool = langVoices.isNotEmpty ? langVoices : voices;
-
-    const femaleKeys = [
-      'emel',
-      'google turkce',
-      'seda',
-      'yelda',
-      'defne',
-      'filiz',
-      'ayla',
-      'zeynep',
-      'ipek',
-      'esra',
-      'female',
-      'woman',
-      '#trf',
-      '#female',
-      '-efu-',
-      '-ama-',
-      '-osn-',
-      'tff',
-      'sfg',
-      'zira',
-      'samantha',
-      'jenny',
-      'aria',
-    ];
-    const maleKeys = [
-      'ahmet',
-      'tolga',
-      'mehmet',
-      'cem',
-      'can',
-      'murat',
-      'kerem',
-      'male',
-      'man',
-      '#trm',
-      '#male',
-      '-tmc-',
-      '-tma-',
-      '-mfm-',
-      '-cfs-',
-      'david',
-      'mark',
-      'daniel',
-      'guy',
-    ];
-
-    final targetKeys = female ? femaleKeys : maleKeys;
-    final oppositeKeys = female ? maleKeys : femaleKeys;
-
-    for (final v in pool) {
-      final nameLower = _norm(v['name'] ?? '');
-      final matchesTarget = targetKeys.any(nameLower.contains);
-      final matchesOpposite = oppositeKeys.any(nameLower.contains);
-      if (matchesTarget && !matchesOpposite) {
-        return v;
-      }
-    }
-
-    for (final v in pool) {
-      final nameLower = _norm(v['name'] ?? '');
-      if (!oppositeKeys.any(nameLower.contains)) {
-        return v;
-      }
-    }
-
-    return pool.isNotEmpty ? pool.first : null;
   }
 
   static Future<void> _configureNativeTts({
@@ -232,26 +155,40 @@ class VoiceSpeechService {
 
       final female = isFemaleCharacter(character);
       final preferredName = female ? preferredFemaleVoice : preferredMaleVoice;
-      Map<String, String>? chosen;
-      if (preferredName.trim().isNotEmpty && _cachedVoices != null) {
-        final want = _norm(preferredName.trim());
-        for (final v in _cachedVoices!) {
-          final n = _norm(v['name'] ?? '');
-          if (n == want || n.contains(want)) {
-            chosen = v;
-            break;
-          }
-        }
-      }
-      chosen ??= _pickGenderedVoice(lang: lang, female: female);
-      if (chosen != null) {
+      final rawVoices = _cachedVoices ?? const [];
+      final options = [
+        for (final v in rawVoices)
+          VoiceOptionInfo(
+            name: (v['name'] ?? '').trim(),
+            locale: (v['locale'] ?? '').trim(),
+            gender: VoiceGenderClassifier.classify(v['name'] ?? ''),
+          ),
+      ];
+
+      final pick = VoiceGenderClassifier.pickBestIndex(
+        options,
+        lang: lang,
+        female: female,
+        preferredVoiceName: preferredName,
+      );
+
+      if (pick != null && pick.index >= 0 && pick.index < rawVoices.length) {
+        final chosen = rawVoices[pick.index];
+        lastSpokenVoiceName = chosen['name'] ?? '';
+        lastSpokenMatchedGender = pick.matchedExpectedGender;
         await _tts.setVoice({
           'name': chosen['name'] ?? '',
           'locale': chosen['locale'] ?? (lang == LangCode.tr ? 'tr-TR' : 'en-US'),
         });
-        await _tts.setPitch(female ? 1.08 : 0.86);
+        await _tts.setPitch(
+          female
+              ? (pick.matchedExpectedGender ? 1.06 : 1.38)
+              : (pick.matchedExpectedGender ? 0.88 : 0.72),
+        );
       } else {
-        await _tts.setPitch(female ? 1.32 : 0.72);
+        lastSpokenVoiceName = '';
+        lastSpokenMatchedGender = false;
+        await _tts.setPitch(female ? 1.35 : 0.72);
       }
     } catch (_) {
       // Safe fallback in headless unit tests
@@ -284,9 +221,13 @@ class VoiceSpeechService {
         preferredVoiceName: preferredName,
         onComplete: () {
           _isSpeaking = false;
+          lastSpokenVoiceName = WebSpeechBridge.lastSpokenVoiceName;
+          lastSpokenMatchedGender = WebSpeechBridge.lastSpokenMatchedGender;
           onComplete?.call();
         },
       );
+      lastSpokenVoiceName = WebSpeechBridge.lastSpokenVoiceName;
+      lastSpokenMatchedGender = WebSpeechBridge.lastSpokenMatchedGender;
       return;
     }
 

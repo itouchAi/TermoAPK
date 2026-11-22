@@ -3,78 +3,26 @@ import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 import 'package:flutter/foundation.dart';
 import '../models/thermostat_state.dart';
+import 'voice_gender_classifier.dart';
 
 /// Direct browser Web Speech API (`speechSynthesis`, `getUserMedia`, `SpeechRecognition`)
 /// bridge using Dart 3 `dart:js_interop`:
-/// - Warms up `speechSynthesis.getVoices()` + `onvoiceschanged` so cloud female Turkish
-///   voices (`Google Türkçe`, `Microsoft Emel Online`) load before first speech.
-/// - Waits up to 1s if only a male local SAPI5 voice (`Microsoft Tolga`) is loaded so far.
-/// - Pre-requests `getUserMedia({audio: true})` inside the `Cevapla` tap gesture so hands-free
-///   listening starts automatically after Ela/Mert finishes speaking without an extra tap.
+/// - Uses `onvoiceschanged` + up to 1.8s async wait so cloud female Turkish voices
+///   (`Google Türkçe`, `Microsoft Emel Online`) load instead of returning early on local `Microsoft Tolga`.
+/// - Uses word-boundary VoiceGenderClassifier so `female` is never blocked by `male`.
+/// - Pre-requests `getUserMedia({audio: true})` inside the `Cevapla` tap gesture for hands-free listening.
 class WebSpeechBridge {
   WebSpeechBridge._();
 
   static bool get isSupported => true;
+  static String lastSpokenVoiceName = '';
+  static bool lastSpokenMatchedGender = true;
 
   static JSObject? _activeUtterance;
   static JSObject? _activeRecognition;
   static int _speakToken = 0;
   static bool _warmedUp = false;
   static bool _micGranted = false;
-
-  static const _femaleKeys = [
-    'emel',
-    'google turkce',
-    'yelda',
-    'filiz',
-    'seda',
-    'defne',
-    'ayla',
-    'zeynep',
-    'ipek',
-    'esra',
-    'female',
-    'woman',
-    '#trf',
-    '-efu-',
-    '-ama-',
-    'zira',
-    'jenny',
-    'aria',
-    'samantha',
-    'google us english',
-    'google uk english female',
-  ];
-
-  static const _maleKeys = [
-    'ahmet',
-    'tolga',
-    'mehmet',
-    'cem',
-    'can',
-    'murat',
-    'kerem',
-    'male',
-    'man',
-    '#trm',
-    '-tmc-',
-    'david',
-    'mark',
-    'daniel',
-    'guy',
-    'google uk english male',
-  ];
-
-  static String _norm(String raw) => raw
-      .replaceAll('İ', 'i')
-      .toLowerCase()
-      .replaceAll('\u0307', '')
-      .replaceAll('ü', 'u')
-      .replaceAll('ö', 'o')
-      .replaceAll('ç', 'c')
-      .replaceAll('ş', 's')
-      .replaceAll('ğ', 'g')
-      .replaceAll('ı', 'i');
 
   static String _strProp(JSObject obj, String key) {
     final val = obj.getProperty<JSAny?>(key.toJS);
@@ -131,21 +79,30 @@ class WebSpeechBridge {
     ];
   }
 
+  static List<VoiceOptionInfo> _toOptions(List<JSObject> rawVoices) {
+    return [
+      for (final v in rawVoices)
+        VoiceOptionInfo(
+          name: _strProp(v, 'name').trim(),
+          locale: _strProp(v, 'lang').trim(),
+          voiceUri: _strProp(v, 'voiceURI').trim(),
+          gender: VoiceGenderClassifier.classify(
+            _strProp(v, 'name'),
+            voiceUri: _strProp(v, 'voiceURI'),
+          ),
+        ),
+    ];
+  }
+
   static bool _hasTargetGenderVoice(
-    List<JSObject> voices, {
+    List<JSObject> rawVoices, {
     required LangCode lang,
     required bool female,
   }) {
     final prefix = lang == LangCode.tr ? 'tr' : 'en';
-    final pool = voices
-        .where((v) => _strProp(v, 'lang').toLowerCase().startsWith(prefix))
-        .toList();
-    if (pool.isEmpty) return false;
-    final targetKeys = female ? _femaleKeys : _maleKeys;
-    final oppKeys = female ? _maleKeys : _femaleKeys;
-    for (final v in pool) {
-      final label = _norm('${_strProp(v, 'name')} ${_strProp(v, 'voiceURI')}');
-      if (targetKeys.any(label.contains) && !oppKeys.any(label.contains)) {
+    final target = female ? VoiceGenderHint.female : VoiceGenderHint.male;
+    for (final opt in _toOptions(rawVoices)) {
+      if (opt.locale.toLowerCase().startsWith(prefix) && opt.gender == target) {
         return true;
       }
     }
@@ -163,80 +120,54 @@ class WebSpeechBridge {
       return voices;
     }
 
-    // Crucial: local Windows SAPI5 voices (e.g. Microsoft Tolga) appear at t=0ms
-    // before cloud female voices (`Google Türkçe` / `Microsoft Emel Online`) finish loading.
-    // Wait up to ~960ms for the target gender voice to populate.
-    for (int i = 0; i < 12; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 80));
-      voices = _readVoicesNow(synth);
-      if (_hasTargetGenderVoice(voices, lang: lang, female: female)) {
-        return voices;
+    // Local SAPI5 voices (`Microsoft Tolga`) appear at t=0ms before cloud female voices
+    // (`Google Türkçe` / `Microsoft Emel Online`) finish loading via `voiceschanged`.
+    final done = Completer<List<JSObject>>();
+    void finishIfReady() {
+      final latest = _readVoicesNow(synth);
+      if (!done.isCompleted && _hasTargetGenderVoice(latest, lang: lang, female: female)) {
+        done.complete(latest);
       }
     }
-    return voices;
+
+    synth.setProperty(
+      'onvoiceschanged'.toJS,
+      ((JSAny? _) {
+        finishIfReady();
+      }).toJS,
+    );
+
+    for (int i = 0; i < 18 && !done.isCompleted; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      voices = _readVoicesNow(synth);
+      if (_hasTargetGenderVoice(voices, lang: lang, female: female)) {
+        if (!done.isCompleted) done.complete(voices);
+        break;
+      }
+    }
+
+    return done.isCompleted ? await done.future : _readVoicesNow(synth);
   }
 
-  static Future<List<String>> listTurkishVoices() async {
+  static Future<List<VoiceOptionInfo>> listTurkishVoicesDetailed() async {
     final synth = _getSynthesis();
     if (synth == null) return const [];
     final voices = await _waitForVoices(synth, lang: LangCode.tr, female: true);
-    final result = <String>[];
-    for (final v in voices) {
-      final vLang = _strProp(v, 'lang').toLowerCase();
-      if (vLang.startsWith('tr')) {
-        final name = _strProp(v, 'name').trim();
-        if (name.isNotEmpty && !result.contains(name)) {
-          result.add(name);
-        }
+    final result = <VoiceOptionInfo>[];
+    final seen = <String>{};
+    for (final opt in _toOptions(voices)) {
+      if (opt.locale.toLowerCase().startsWith('tr') &&
+          opt.name.isNotEmpty &&
+          seen.add(opt.name)) {
+        result.add(opt);
       }
     }
     return result;
   }
 
-  static JSObject? _pickVoice(
-    List<JSObject> voices, {
-    required LangCode lang,
-    required bool female,
-    String? preferredVoiceName,
-  }) {
-    if (voices.isEmpty) return null;
-    final prefix = lang == LangCode.tr ? 'tr' : 'en';
-    final langVoices = voices.where((v) {
-      final vLang = _strProp(v, 'lang').toLowerCase();
-      return vLang.startsWith(prefix);
-    }).toList();
-    final pool = langVoices.isNotEmpty ? langVoices : voices;
-
-    if (preferredVoiceName != null && preferredVoiceName.trim().isNotEmpty) {
-      final want = _norm(preferredVoiceName.trim());
-      for (final v in pool) {
-        final name = _norm(_strProp(v, 'name'));
-        if (name == want || name.contains(want)) {
-          return v;
-        }
-      }
-    }
-
-    final targetKeys = female ? _femaleKeys : _maleKeys;
-    final oppositeKeys = female ? _maleKeys : _femaleKeys;
-
-    // 1. Exact target gender voice match
-    for (final v in pool) {
-      final label = _norm('${_strProp(v, 'name')} ${_strProp(v, 'voiceURI')}');
-      if (targetKeys.any(label.contains) && !oppositeKeys.any(label.contains)) {
-        return v;
-      }
-    }
-
-    // 2. Exclude opposite gender voices
-    for (final v in pool) {
-      final label = _norm('${_strProp(v, 'name')} ${_strProp(v, 'voiceURI')}');
-      if (!oppositeKeys.any(label.contains)) {
-        return v;
-      }
-    }
-
-    return pool.isNotEmpty ? pool.first : null;
+  static Future<List<String>> listTurkishVoices() async {
+    final detailed = await listTurkishVoicesDetailed();
+    return [for (final v in detailed) v.name];
   }
 
   static Future<void> speak(
@@ -248,6 +179,8 @@ class WebSpeechBridge {
   }) async {
     final synth = _getSynthesis();
     if (synth == null) {
+      lastSpokenVoiceName = '';
+      lastSpokenMatchedGender = false;
       onComplete?.call();
       return;
     }
@@ -261,22 +194,27 @@ class WebSpeechBridge {
       return;
     }
 
-    final voices = await _waitForVoices(synth, lang: lang, female: female);
+    final rawVoices = await _waitForVoices(synth, lang: lang, female: female);
     if (myToken != _speakToken) return;
 
-    final chosen = _pickVoice(
-      voices,
+    final options = _toOptions(rawVoices);
+    final pick = VoiceGenderClassifier.pickBestIndex(
+      options,
       lang: lang,
       female: female,
       preferredVoiceName: preferredVoiceName,
     );
-    final chosenLabel = chosen != null
-        ? _norm('${_strProp(chosen, 'name')} ${_strProp(chosen, 'voiceURI')}')
-        : '';
 
-    final matchedExpectedGender = female
-        ? !_maleKeys.any(chosenLabel.contains)
-        : !_femaleKeys.any(chosenLabel.contains);
+    final chosen = (pick != null && pick.index >= 0 && pick.index < rawVoices.length)
+        ? rawVoices[pick.index]
+        : null;
+    final chosenOpt = (pick != null && pick.index >= 0 && pick.index < options.length)
+        ? options[pick.index]
+        : null;
+    final matchedExpectedGender = pick?.matchedExpectedGender ?? false;
+
+    lastSpokenVoiceName = chosenOpt?.name ?? '';
+    lastSpokenMatchedGender = matchedExpectedGender;
 
     final utter = (ctorAny as JSFunction).callAsConstructor<JSObject>(text.toJS);
     utter.setProperty('lang'.toJS, (lang == LangCode.tr ? 'tr-TR' : 'en-US').toJS);
@@ -286,8 +224,8 @@ class WebSpeechBridge {
     utter.setProperty(
       'pitch'.toJS,
       (female
-              ? (matchedExpectedGender ? 1.04 : 1.52)
-              : (matchedExpectedGender ? 0.90 : 0.66))
+              ? (matchedExpectedGender ? 1.04 : 1.55)
+              : (matchedExpectedGender ? 0.90 : 0.65))
           .toJS,
     );
     utter.setProperty('rate'.toJS, (female ? 1.0 : 0.94).toJS);

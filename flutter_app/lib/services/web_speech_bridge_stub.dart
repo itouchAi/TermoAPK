@@ -1,14 +1,19 @@
 import 'package:flutter/foundation.dart';
 import '../models/thermostat_state.dart';
+import 'voice_gender_classifier.dart';
 
 class WebSpeechBridge {
   WebSpeechBridge._();
 
   static bool get isSupported => false;
+  static String lastSpokenVoiceName = '';
+  static bool lastSpokenMatchedGender = true;
 
   static void warmup() {}
 
   static Future<List<String>> listTurkishVoices() async => const [];
+
+  static Future<List<VoiceOptionInfo>> listTurkishVoicesDetailed() async => const [];
 
   static Future<String?> ensureMicPermission(LangCode lang) async => null;
 

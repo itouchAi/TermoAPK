@@ -8,6 +8,7 @@ import '../services/ai_call_service.dart';
 import '../services/ambient_audio_service.dart';
 import '../services/hardware_service.dart';
 import '../services/notification_service.dart';
+import '../services/voice_gender_classifier.dart';
 import '../services/voice_speech_service.dart';
 import '../widgets/termo_bot.dart';
 import 'google_home_sheet.dart';
@@ -113,8 +114,9 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
   HapticCapabilityInfo? _hapticCap;
   int? _lastTestedHapticMs;
   MascotBehavior _previewBehavior = MascotBehavior.idle;
-  List<String> _trVoices = const [];
+  List<VoiceOptionInfo> _trVoices = const [];
   bool _voicesLoaded = false;
+  String? _voiceTestStatus;
 
   final _firebaseUrlCtrl = TextEditingController();
   final _espIdCtrl = TextEditingController();
@@ -122,6 +124,17 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
   final _screensaverBgUrlCtrl = TextEditingController();
 
   static const _locations = ['Ev · İstanbul', 'Yazlık · İzmir', 'Ofis · Ankara'];
+
+  Future<void> _refreshTurkishVoices() async {
+    VoiceSpeechService.warmup();
+    final list = await VoiceSpeechService.listTurkishVoicesDetailed();
+    if (mounted) {
+      setState(() {
+        _trVoices = list;
+        _voicesLoaded = true;
+      });
+    }
+  }
 
   @override
   void initState() {
@@ -139,15 +152,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     HardwareService.detectHapticCapability().then((info) {
       if (mounted) setState(() => _hapticCap = info);
     });
-    VoiceSpeechService.warmup();
-    VoiceSpeechService.listTurkishVoices().then((list) {
-      if (mounted) {
-        setState(() {
-          _trVoices = list;
-          _voicesLoaded = true;
-        });
-      }
-    });
+    _refreshTurkishVoices();
   }
 
   @override
@@ -2991,23 +2996,50 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    tr ? 'Kadın / Erkek Ses Testi & Seçimi' : 'Female / Male Voice Test & Selector',
-                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF6EE7B7)),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        tr ? 'Kadın / Erkek Ses Testi & Seçimi' : 'Female / Male Voice Test & Selector',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF6EE7B7)),
+                      ),
+                      GestureDetector(
+                        onTap: () {
+                          _hapticTap();
+                          _refreshTurkishVoices();
+                        },
+                        child: Text(
+                          tr ? '↻ Sesleri Yenile' : '↻ Refresh Voices',
+                          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFF38BDF8)),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 6),
                   Row(
                     children: [
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: () {
+                          onPressed: () async {
                             _hapticTap();
                             VoiceSpeechService.preferredFemaleVoice = _draft.femaleVoiceName;
-                            VoiceSpeechService.speak(
+                            await VoiceSpeechService.speak(
                               tr ? 'Merhaba, ben Ela. Kadın ses testidir.' : 'Hello, this is Ela.',
                               lang: _lang,
                               character: MascotCharacter.ela,
                             );
+                            if (!mounted) return;
+                            final used = VoiceSpeechService.lastSpokenVoiceName;
+                            final matched = VoiceSpeechService.lastSpokenMatchedGender;
+                            setState(() {
+                              _voiceTestStatus = used.isEmpty
+                                  ? (tr ? 'Ela: Tarayıcı varsayılan sesi' : 'Ela: Browser default')
+                                  : (matched
+                                      ? 'Ela → $used'
+                                      : (tr
+                                          ? 'Ela → $used (Tarayıcıda kadın Türkçe ses yok, erkek yedeği kullanıldı)'
+                                          : 'Ela → $used (No female Turkish voice in browser)'));
+                            });
                           },
                           style: OutlinedButton.styleFrom(
                             side: BorderSide(color: const Color(0xFFEC4899).withValues(alpha: 0.5)),
@@ -3022,14 +3054,21 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                       const SizedBox(width: 6),
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: () {
+                          onPressed: () async {
                             _hapticTap();
                             VoiceSpeechService.preferredMaleVoice = _draft.maleVoiceName;
-                            VoiceSpeechService.speak(
+                            await VoiceSpeechService.speak(
                               tr ? 'Merhaba, ben Mert. Erkek ses testidir.' : 'Hello, this is Mert.',
                               lang: _lang,
                               character: MascotCharacter.mert,
                             );
+                            if (!mounted) return;
+                            final used = VoiceSpeechService.lastSpokenVoiceName;
+                            setState(() {
+                              _voiceTestStatus = used.isEmpty
+                                  ? (tr ? 'Mert: Tarayıcı varsayılan sesi' : 'Mert: Browser default')
+                                  : 'Mert → $used';
+                            });
                           },
                           style: OutlinedButton.styleFrom(
                             side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.5)),
@@ -3043,19 +3082,52 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                       ),
                     ],
                   ),
-                  if (_voicesLoaded) ...[
+                  if (_voiceTestStatus != null) ...[
                     const SizedBox(height: 6),
                     Text(
-                      _trVoices.isEmpty
-                          ? (tr
-                              ? 'Cihaz/Tarayıcıda Türkçe ses paketi algılanamadı.'
-                              : 'No Turkish voice pack detected in this browser.')
-                          : (tr
-                              ? 'Kadın ses paketi (${_trVoices.length} Türkçe ses bulundu):'
-                              : 'Female voice (${_trVoices.length} Turkish voices found):'),
-                      style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.65)),
+                      _voiceTestStatus!,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        color: _voiceTestStatus!.contains('yok') || _voiceTestStatus!.contains('No female')
+                            ? const Color(0xFFFBBF24)
+                            : const Color(0xFF6EE7B7),
+                      ),
                     ),
-                    if (_trVoices.isNotEmpty) ...[
+                  ],
+                  if (_voicesLoaded) ...[
+                    const SizedBox(height: 6),
+                    if (_trVoices.isEmpty)
+                      Text(
+                        tr
+                            ? 'Cihaz/Tarayıcıda Türkçe ses paketi algılanamadı.'
+                            : 'No Turkish voice pack detected in this browser.',
+                        style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.65)),
+                      )
+                    else ...[
+                      if (!_trVoices.any((v) => v.gender == VoiceGenderHint.female)) ...[
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.35)),
+                          ),
+                          child: Text(
+                            tr
+                                ? '⚠️ Bu tarayıcı yalnızca erkek Türkçe ses (${_trVoices.map((v) => v.name).join(', ')}) sunuyor. Windows\'ta Chrome yerine Microsoft Edge (Emel Online içerir) veya Android APK kullanırsanız Ela gerçek kadın sesiyle konuşur.'
+                                : '⚠️ This browser only exposes male Turkish voice(s): ${_trVoices.map((v) => v.name).join(', ')}. Use Microsoft Edge (includes Emel Online) or Android APK for native female speech.',
+                            style: const TextStyle(fontSize: 10, color: Color(0xFFFDE68A), height: 1.35),
+                          ),
+                        ),
+                      ],
+                      Text(
+                        tr
+                            ? 'Kadın (Ela) ses paketi (${_trVoices.length} Türkçe ses):'
+                            : 'Female (Ela) voice (${_trVoices.length} Turkish voices):',
+                        style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.72)),
+                      ),
                       const SizedBox(height: 4),
                       Wrap(
                         spacing: 5,
@@ -3071,15 +3143,48 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                               setState(() => _draft = _draft.copyWith(femaleVoiceName: ''));
                             },
                           ),
-                          for (final vName in _trVoices)
+                          for (final v in _trVoices)
                             ChoiceChip(
-                              label: Text(vName, style: const TextStyle(fontSize: 10, color: Colors.white)),
-                              selected: _draft.femaleVoiceName == vName,
+                              label: Text(v.labelTr(), style: const TextStyle(fontSize: 10, color: Colors.white)),
+                              selected: _draft.femaleVoiceName == v.name,
                               selectedColor: const Color(0xFFEC4899).withValues(alpha: 0.35),
                               backgroundColor: Colors.white.withValues(alpha: 0.06),
                               onSelected: (_) {
-                                VoiceSpeechService.preferredFemaleVoice = vName;
-                                setState(() => _draft = _draft.copyWith(femaleVoiceName: vName));
+                                VoiceSpeechService.preferredFemaleVoice = v.name;
+                                setState(() => _draft = _draft.copyWith(femaleVoiceName: v.name));
+                              },
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        tr ? 'Erkek (Mert) ses paketi:' : 'Male (Mert) voice:',
+                        style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.72)),
+                      ),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 5,
+                        runSpacing: 5,
+                        children: [
+                          ChoiceChip(
+                            label: Text(tr ? 'Otomatik' : 'Auto', style: const TextStyle(fontSize: 10, color: Colors.white)),
+                            selected: _draft.maleVoiceName.isEmpty,
+                            selectedColor: const Color(0xFF38BDF8).withValues(alpha: 0.35),
+                            backgroundColor: Colors.white.withValues(alpha: 0.06),
+                            onSelected: (_) {
+                              VoiceSpeechService.preferredMaleVoice = '';
+                              setState(() => _draft = _draft.copyWith(maleVoiceName: ''));
+                            },
+                          ),
+                          for (final v in _trVoices)
+                            ChoiceChip(
+                              label: Text(v.labelTr(), style: const TextStyle(fontSize: 10, color: Colors.white)),
+                              selected: _draft.maleVoiceName == v.name,
+                              selectedColor: const Color(0xFF38BDF8).withValues(alpha: 0.35),
+                              backgroundColor: Colors.white.withValues(alpha: 0.06),
+                              onSelected: (_) {
+                                VoiceSpeechService.preferredMaleVoice = v.name;
+                                setState(() => _draft = _draft.copyWith(maleVoiceName: v.name));
                               },
                             ),
                         ],

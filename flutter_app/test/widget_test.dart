@@ -6,6 +6,7 @@ import 'package:termostat_flow/services/ambient_audio_service.dart';
 import 'package:termostat_flow/services/hardware_service.dart';
 import 'package:termostat_flow/services/notification_service.dart';
 import 'package:termostat_flow/services/vault_crypto_service.dart';
+import 'package:termostat_flow/services/voice_gender_classifier.dart';
 import 'package:termostat_flow/services/voice_speech_service.dart';
 import 'package:termostat_flow/widgets/termo_bot.dart';
 
@@ -405,6 +406,73 @@ void main() {
       VoiceSpeechService.formatForSpeech('Hedef 20.0°C, oda 21.8°C.', lang: LangCode.tr),
       'Hedef 20 derece, oda 21.8 derece.',
     );
+
+    expect(VoiceGenderClassifier.classify('Google Türkçe'), VoiceGenderHint.female);
+    expect(
+      VoiceGenderClassifier.classify('Microsoft Emel Online (Natural) - Turkish (Turkey)'),
+      VoiceGenderHint.female,
+    );
+    expect(
+      VoiceGenderClassifier.classify('Microsoft Tolga - Turkish (Turkey)'),
+      VoiceGenderHint.male,
+    );
+    expect(
+      VoiceGenderClassifier.classify('Microsoft Ahmet Online (Natural) - Turkish (Turkey)'),
+      VoiceGenderHint.male,
+    );
+    // Word-boundary check: 'female' / 'samantha' must NOT be blocked by 'male' / 'man'
+    expect(VoiceGenderClassifier.classify('Turkish Female'), VoiceGenderHint.female);
+    expect(VoiceGenderClassifier.classify('Samantha'), VoiceGenderHint.female);
+
+    // Android Google TTS Turkish IDs
+    expect(VoiceGenderClassifier.classify('tr-tr-x-ama-local'), VoiceGenderHint.male);
+    expect(VoiceGenderClassifier.classify('tr-tr-x-tmc-network'), VoiceGenderHint.male);
+    expect(VoiceGenderClassifier.classify('tr-tr-x-cfs-local'), VoiceGenderHint.female);
+    expect(VoiceGenderClassifier.classify('tr-tr-x-efu-local'), VoiceGenderHint.female);
+    expect(VoiceGenderClassifier.classify('tr-tr-x-mfm-local'), VoiceGenderHint.female);
+
+    final androidVoices = [
+      VoiceOptionInfo(
+        name: 'tr-tr-x-ama-local',
+        locale: 'tr-TR',
+        gender: VoiceGenderClassifier.classify('tr-tr-x-ama-local'),
+      ),
+      VoiceOptionInfo(
+        name: 'tr-tr-x-cfs-local',
+        locale: 'tr-TR',
+        gender: VoiceGenderClassifier.classify('tr-tr-x-cfs-local'),
+      ),
+    ];
+    final femalePick = VoiceGenderClassifier.pickBestIndex(
+      androidVoices,
+      lang: LangCode.tr,
+      female: true,
+    );
+    expect(femalePick?.index, 1);
+    expect(femalePick?.matchedExpectedGender, isTrue);
+
+    final malePick = VoiceGenderClassifier.pickBestIndex(
+      androidVoices,
+      lang: LangCode.tr,
+      female: false,
+    );
+    expect(malePick?.index, 0);
+    expect(malePick?.matchedExpectedGender, isTrue);
+
+    final onlyTolga = [
+      VoiceOptionInfo(
+        name: 'Microsoft Tolga - Turkish (Turkey)',
+        locale: 'tr-TR',
+        gender: VoiceGenderClassifier.classify('Microsoft Tolga - Turkish (Turkey)'),
+      ),
+    ];
+    final tolgaFemaleFallback = VoiceGenderClassifier.pickBestIndex(
+      onlyTolga,
+      lang: LangCode.tr,
+      female: true,
+    );
+    expect(tolgaFemaleFallback?.index, 0);
+    expect(tolgaFemaleFallback?.matchedExpectedGender, isFalse);
   });
 
   test('AiCallService detects boiler shutdown, room temp questions, and closing thank-you replies', () {
