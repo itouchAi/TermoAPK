@@ -3,10 +3,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../models/thermostat_state.dart';
+import 'web_speech_bridge.dart';
 
 /// Unified Text-to-Speech (TTS) and Speech-to-Text (STT) service
 /// supporting character gender voices (female: Ela/Mirnav/Puki, male: TermoBot/Mert),
-/// natural Turkish temperature readout, and Web/Android mic permission handling.
+/// natural Turkish temperature readout, and reliable Web/Android mic permission prompts.
 class VoiceSpeechService {
   VoiceSpeechService._();
 
@@ -49,23 +50,36 @@ class VoiceSpeechService {
     return out;
   }
 
+  static String _norm(String raw) => raw
+      .replaceAll('İ', 'i')
+      .toLowerCase()
+      .replaceAll('\u0307', '')
+      .replaceAll('ü', 'u')
+      .replaceAll('ö', 'o')
+      .replaceAll('ç', 'c')
+      .replaceAll('ş', 's')
+      .replaceAll('ğ', 'g')
+      .replaceAll('ı', 'i');
+
   static Future<void> _ensureVoicesLoaded() async {
-    if (_cachedVoices != null) return;
+    if (_cachedVoices != null && _cachedVoices!.isNotEmpty) return;
     try {
-      final raw = await _tts.getVoices;
-      if (raw is List) {
-        _cachedVoices = [
-          for (final item in raw)
-            if (item is Map)
-              {
-                'name': (item['name'] ?? '').toString(),
-                'locale': (item['locale'] ?? '').toString(),
-              },
-        ];
+      for (int attempt = 0; attempt < 4; attempt++) {
+        final raw = await _tts.getVoices;
+        if (raw is List && raw.isNotEmpty) {
+          _cachedVoices = [
+            for (final item in raw)
+              if (item is Map)
+                {
+                  'name': (item['name'] ?? '').toString(),
+                  'locale': (item['locale'] ?? '').toString(),
+                },
+          ];
+          if (_cachedVoices!.isNotEmpty) return;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 90));
       }
-    } catch (_) {
-      _cachedVoices = const [];
-    }
+    } catch (_) {}
   }
 
   static Map<String, String>? _pickGenderedVoice({
@@ -83,23 +97,28 @@ class VoiceSpeechService {
 
     const femaleKeys = [
       'emel',
+      'google turkce',
       'seda',
       'yelda',
       'defne',
       'filiz',
       'ayla',
+      'zeynep',
+      'ipek',
+      'esra',
       'female',
       'woman',
       '#trf',
       '#female',
+      '-efu-',
+      '-ama-',
+      '-osn-',
       'tff',
       'sfg',
       'zira',
       'samantha',
       'jenny',
       'aria',
-      'google türkçe',
-      'google us english',
     ];
     const maleKeys = [
       'ahmet',
@@ -107,10 +126,16 @@ class VoiceSpeechService {
       'mehmet',
       'cem',
       'can',
+      'murat',
+      'kerem',
       'male',
       'man',
       '#trm',
       '#male',
+      '-tmc-',
+      '-tma-',
+      '-mfm-',
+      '-cfs-',
       'david',
       'mark',
       'daniel',
@@ -121,17 +146,25 @@ class VoiceSpeechService {
     final oppositeKeys = female ? maleKeys : femaleKeys;
 
     for (final v in pool) {
-      final nameLower = (v['name'] ?? '').toLowerCase();
-      final matchesTarget = targetKeys.any((k) => nameLower.contains(k));
-      final matchesOpposite = oppositeKeys.any((k) => nameLower.contains(k));
+      final nameLower = _norm(v['name'] ?? '');
+      final matchesTarget = targetKeys.any(nameLower.contains);
+      final matchesOpposite = oppositeKeys.any(nameLower.contains);
       if (matchesTarget && !matchesOpposite) {
         return v;
       }
     }
-    return null;
+
+    for (final v in pool) {
+      final nameLower = _norm(v['name'] ?? '');
+      if (!oppositeKeys.any(nameLower.contains)) {
+        return v;
+      }
+    }
+
+    return pool.isNotEmpty ? pool.first : null;
   }
 
-  static Future<void> _configureTts({
+  static Future<void> _configureNativeTts({
     required LangCode lang,
     required MascotCharacter character,
   }) async {
@@ -141,9 +174,9 @@ class VoiceSpeechService {
         _tts.setCompletionHandler(() => _isSpeaking = false);
         _tts.setCancelHandler(() => _isSpeaking = false);
         _tts.setErrorHandler((_) => _isSpeaking = false);
-        await _tts.awaitSpeakCompletion(false);
+        await _tts.awaitSpeakCompletion(true);
         await _tts.setVolume(1.0);
-        await _tts.setSpeechRate(kIsWeb ? 0.98 : 0.50);
+        await _tts.setSpeechRate(0.50);
       }
 
       await _tts.setLanguage(lang == LangCode.tr ? 'tr-TR' : 'en-US');
@@ -156,20 +189,9 @@ class VoiceSpeechService {
           'name': chosen['name'] ?? '',
           'locale': chosen['locale'] ?? (lang == LangCode.tr ? 'tr-TR' : 'en-US'),
         });
-        await _tts.setPitch(female ? 1.05 : 0.88);
+        await _tts.setPitch(female ? 1.08 : 0.86);
       } else {
-        final langPrefix = lang == LangCode.tr ? 'tr' : 'en';
-        final fallbackVoice = _cachedVoices?.firstWhere(
-          (v) => (v['locale'] ?? '').toLowerCase().startsWith(langPrefix),
-          orElse: () => const <String, String>{},
-        );
-        if (fallbackVoice != null && (fallbackVoice['name'] ?? '').isNotEmpty) {
-          await _tts.setVoice({
-            'name': fallbackVoice['name']!,
-            'locale': fallbackVoice['locale'] ?? (lang == LangCode.tr ? 'tr-TR' : 'en-US'),
-          });
-        }
-        await _tts.setPitch(female ? 1.28 : 0.74);
+        await _tts.setPitch(female ? 1.32 : 0.72);
       }
     } catch (_) {
       // Safe fallback in headless unit tests
@@ -188,27 +210,40 @@ class VoiceSpeechService {
       onComplete?.call();
       return;
     }
+
+    final female = isFemaleCharacter(character);
+
+    // Web uses direct WebSpeechBridge so voice list (`voiceschanged`) and gender selection work reliably
+    if (kIsWeb && WebSpeechBridge.isSupported) {
+      _isSpeaking = true;
+      await WebSpeechBridge.speak(
+        spoken,
+        lang: lang,
+        female: female,
+        onComplete: () {
+          _isSpeaking = false;
+          onComplete?.call();
+        },
+      );
+      return;
+    }
+
     try {
-      await _configureTts(lang: lang, character: character);
+      await _configureNativeTts(lang: lang, character: character);
       await _tts.stop();
       _isSpeaking = true;
-      _tts.setCompletionHandler(() {
+      var completed = false;
+      void finish() {
+        if (completed) return;
+        completed = true;
         _isSpeaking = false;
         onComplete?.call();
-      });
-      final res = await _tts.speak(spoken);
-      if (res != 1 && onComplete != null) {
-        // Fallback auto-complete timer if platform engine returns immediately
-        Timer(
-          Duration(milliseconds: (spoken.length * 65).clamp(1200, 4200)),
-          () {
-            if (_isSpeaking) {
-              _isSpeaking = false;
-              onComplete();
-            }
-          },
-        );
       }
+
+      _tts.setCompletionHandler(finish);
+      _tts.setErrorHandler((_) => finish());
+      await _tts.speak(spoken);
+      finish();
     } catch (_) {
       _isSpeaking = false;
       onComplete?.call();
@@ -217,16 +252,17 @@ class VoiceSpeechService {
 
   static Future<void> stopSpeaking() async {
     _isSpeaking = false;
+    if (kIsWeb && WebSpeechBridge.isSupported) {
+      WebSpeechBridge.stopSpeaking();
+      return;
+    }
     try {
       await _tts.stop();
     } catch (_) {}
   }
 
-  static Future<String> _resolveSpeechLocale(LangCode lang) async {
-    final preferred = lang == LangCode.tr
-        ? (kIsWeb ? 'tr-TR' : 'tr_TR')
-        : (kIsWeb ? 'en-US' : 'en_US');
-    if (kIsWeb) return preferred;
+  static Future<String> _resolveNativeSpeechLocale(LangCode lang) async {
+    final preferred = lang == LangCode.tr ? 'tr_TR' : 'en_US';
     try {
       final locales = await _stt.locales();
       final prefix = lang == LangCode.tr ? 'tr' : 'en';
@@ -247,8 +283,30 @@ class VoiceSpeechService {
     required ValueChanged<String> onStatusError,
     VoidCallback? onDone,
   }) async {
+    if (kIsWeb && WebSpeechBridge.isSupported) {
+      _isSpeaking = false;
+      _isListening = true;
+      final started = await WebSpeechBridge.startListening(
+        lang: lang,
+        onResultText: onResultText,
+        onFinalResult: (words) {
+          _isListening = false;
+          onFinalResult(words);
+        },
+        onStatusError: (err) {
+          _isListening = false;
+          onStatusError(err);
+        },
+        onDone: () {
+          _isListening = false;
+          onDone?.call();
+        },
+      );
+      if (!started) _isListening = false;
+      return started;
+    }
+
     try {
-      // Stop TTS without awaiting so browser user-activation chain stays intact for mic permission
       unawaited(stopSpeaking());
       if (_isListening) {
         unawaited(_stt.stop());
@@ -268,7 +326,7 @@ class VoiceSpeechService {
           if (msg.contains('not-allowed') || msg.contains('permission')) {
             onStatusError(
               lang == LangCode.tr
-                  ? 'Mikrofon izni reddedildi. Tarayıcı/telefon ayarlarından mikrofona izin verin.'
+                  ? 'Mikrofon izni reddedildi. Telefon ayarlarından mikrofona izin verin.'
                   : 'Microphone permission denied. Please allow mic access.',
             );
           } else {
@@ -286,13 +344,13 @@ class VoiceSpeechService {
         _isListening = false;
         onStatusError(
           lang == LangCode.tr
-              ? 'Mikrofon veya tarayıcı ses tanıma desteklenmiyor (Chrome/Edge veya Android APK kullanın).'
-              : 'Microphone speech recognition is not supported on this browser.',
+              ? 'Mikrofon veya ses tanıma servisi kullanılamıyor.'
+              : 'Microphone speech recognition is unavailable.',
         );
         return false;
       }
 
-      final localeId = await _resolveSpeechLocale(lang);
+      final localeId = await _resolveNativeSpeechLocale(lang);
       _isListening = true;
       await _stt.listen(
         onResult: (result) {
@@ -329,6 +387,10 @@ class VoiceSpeechService {
 
   static Future<void> stopListening() async {
     _isListening = false;
+    if (kIsWeb && WebSpeechBridge.isSupported) {
+      WebSpeechBridge.stopListening();
+      return;
+    }
     try {
       await _stt.stop();
     } catch (_) {}

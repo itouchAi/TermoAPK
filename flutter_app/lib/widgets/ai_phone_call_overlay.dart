@@ -267,25 +267,33 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     setState(() => _closingAfterReply = true);
 
     _closeDelayTimer?.cancel();
-    // Guaranteed fallback close if TTS doesn't fire completion within 3.6s
-    _closeDelayTimer = Timer(
-      Duration(milliseconds: _speakerMuted ? 1200 : 3600),
-      () {
+    if (_speakerMuted) {
+      _closeDelayTimer = Timer(const Duration(milliseconds: 1100), () {
         if (mounted) _declineOrHangup();
+      });
+      return;
+    }
+
+    final startedAt = DateTime.now();
+    final minSpeechMs = (spokenReply.length * 72 + 900).clamp(2400, 6800);
+
+    // Guaranteed max fail-safe close if browser engine stalls
+    _closeDelayTimer = Timer(Duration(milliseconds: minSpeechMs + 3200), () {
+      if (mounted) _declineOrHangup();
+    });
+
+    _speakAloud(
+      spokenReply,
+      onDone: () {
+        if (!mounted) return;
+        final elapsedMs = DateTime.now().difference(startedAt).inMilliseconds;
+        final remainingMs = math.max(750, minSpeechMs - elapsedMs);
+        _closeDelayTimer?.cancel();
+        _closeDelayTimer = Timer(Duration(milliseconds: remainingMs), () {
+          if (mounted) _declineOrHangup();
+        });
       },
     );
-
-    if (!_speakerMuted) {
-      _speakAloud(
-        spokenReply,
-        onDone: () {
-          _closeDelayTimer?.cancel();
-          _closeDelayTimer = Timer(const Duration(milliseconds: 450), () {
-            if (mounted) _declineOrHangup();
-          });
-        },
-      );
-    }
   }
 
   void _applyCallQuickTemp(double nextTemp, String replyTr, String replyEn) {
@@ -755,6 +763,7 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
 
                                       // Direct Microphone Permission & Voice Command Button
                                       GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
                                         onTap: _toggleCallMic,
                                         child: AnimatedContainer(
                                           duration: const Duration(milliseconds: 200),
@@ -851,6 +860,33 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                   ),
                                 ),
                                 const SizedBox(height: 10),
+                                if (widget.reason == AiCallReason.coldRoom ||
+                                    widget.reason == AiCallReason.hotRoom) ...[
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: _InCallQuickButton(
+                                          icon: Icons.check_circle_outline_rounded,
+                                          label: widget.reason == AiCallReason.coldRoom
+                                              ? (tr ? 'Evet, Kombiyi Aç' : 'Yes, Turn On')
+                                              : (tr ? 'Evet, Kapat' : 'Yes, Turn Off'),
+                                          accent: const Color(0xFF10B981),
+                                          onTap: () => _executeSpokenOrTypedCommand('evet'),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: _InCallQuickButton(
+                                          icon: Icons.close_rounded,
+                                          label: tr ? 'Hayır, Kalsın' : 'No, Keep',
+                                          accent: const Color(0xFFF59E0B),
+                                          onTap: () => _executeSpokenOrTypedCommand('hayır'),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                ],
                                 Row(
                                   children: [
                                     Expanded(

@@ -184,6 +184,7 @@ Future<void> showVoiceCommandSheet({
 
                   // Big Press-to-Speak Microphone Banner
                   GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: toggleMic,
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 220),
