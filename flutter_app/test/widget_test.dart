@@ -474,5 +474,27 @@ void main() {
     expect(yesOpenResp.handled, isTrue);
     expect(yesOpenResp.newTargetTemp, 22.5);
     expect(yesOpenResp.replyTr.contains('Teşekkürler'), isTrue);
+
+    final explicitClose = AiCallService.evaluateCallResponse(
+      rawInput: 'evet kapat',
+      callReason: AiCallReason.coldRoom,
+      boiler: heatingBoiler,
+      currentTargetTemp: 23.0,
+      lang: LangCode.tr,
+    );
+    expect(explicitClose.handled, isTrue);
+    expect(explicitClose.newTargetTemp, ThermostatMath.minTemp);
+    expect(explicitClose.replyTr.contains('Teşekkürler'), isTrue);
+
+    final noKeep = AiCallService.evaluateCallResponse(
+      rawInput: 'hayır',
+      callReason: AiCallReason.hotRoom,
+      boiler: heatingBoiler,
+      currentTargetTemp: 23.0,
+      lang: LangCode.tr,
+    );
+    expect(noKeep.handled, isTrue);
+    expect(noKeep.newTargetTemp, isNull);
+    expect(noKeep.replyTr.contains('Teşekkürler'), isTrue);
   });
 }

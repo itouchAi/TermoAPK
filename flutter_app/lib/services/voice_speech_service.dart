@@ -23,6 +23,36 @@ class VoiceSpeechService {
   static bool get isListening => _isListening;
   static bool get isSpeaking => _isSpeaking;
 
+  static void warmup() {
+    if (kIsWeb && WebSpeechBridge.isSupported) {
+      WebSpeechBridge.warmup();
+    } else {
+      _ensureVoicesLoaded();
+    }
+  }
+
+  /// Requests microphone permission upfront inside a user tap (`Cevapla` / mic open)
+  /// so hands-free listening can start automatically right after assistant finishes speaking.
+  static Future<String?> ensureMicPermission(LangCode lang) async {
+    if (kIsWeb && WebSpeechBridge.isSupported) {
+      return WebSpeechBridge.ensureMicPermission(lang);
+    }
+    try {
+      final ok = await _stt.initialize();
+      _sttAvailable = ok;
+      if (!ok) {
+        return lang == LangCode.tr
+            ? 'Mikrofon veya ses tanıma servisi kullanılamıyor.'
+            : 'Microphone speech recognition is unavailable.';
+      }
+      return null;
+    } catch (_) {
+      return lang == LangCode.tr
+          ? 'Mikrofon izni alınamadı.'
+          : 'Could not obtain microphone permission.';
+    }
+  }
+
   /// Female characters: Ela, Mırnav (kedi), Puki (tavşan).
   /// Male characters: TermoBot (robot), Mert (erkek asistan).
   static bool isFemaleCharacter(MascotCharacter character) {
@@ -275,13 +305,14 @@ class VoiceSpeechService {
     return preferred;
   }
 
-  /// Starts live microphone speech recognition directly within a user tap gesture.
+  /// Starts live microphone speech recognition.
   static Future<bool> startListening({
     required LangCode lang,
     required ValueChanged<String> onResultText,
     required ValueChanged<String> onFinalResult,
     required ValueChanged<String> onStatusError,
     VoidCallback? onDone,
+    bool skipPermissionPrompt = false,
   }) async {
     if (kIsWeb && WebSpeechBridge.isSupported) {
       _isSpeaking = false;
@@ -301,6 +332,7 @@ class VoiceSpeechService {
           _isListening = false;
           onDone?.call();
         },
+        skipPermissionPrompt: skipPermissionPrompt,
       );
       if (!started) _isListening = false;
       return started;

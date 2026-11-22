@@ -89,6 +89,7 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     )..repeat();
 
     _startRingingHardware();
+    VoiceSpeechService.warmup();
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) => _onSecondTick());
   }
 
@@ -198,6 +199,18 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     });
   }
 
+  String? _micPermissionError;
+
+  Future<void> _unlockMicPermissionOnAnswer() async {
+    final err = await VoiceSpeechService.ensureMicPermission(widget.lang);
+    if (mounted && err != null) {
+      setState(() {
+        _micPermissionError = err;
+        _heardPreview = err;
+      });
+    }
+  }
+
   void _answerCall() {
     if (_phase != _CallPhase.ringing) return;
     AmbientAudioService.stopRingtone();
@@ -208,6 +221,9 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
       );
     }
     AmbientAudioService.playCallChime(answered: true);
+
+    // Pre-request microphone permission synchronously within the `Cevapla` tap gesture
+    unawaited(_unlockMicPermissionOnAnswer());
 
     final meta = MascotMeta.of(widget.character);
     final brief = AiCallService.buildVoiceScript(
@@ -228,7 +244,20 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     });
 
     if (widget.voiceBriefEnabled && !_speakerMuted) {
-      _speakAloud(brief);
+      _speakAloud(
+        brief,
+        onDone: () {
+          if (mounted && !_closingAfterReply && _phase == _CallPhase.answered) {
+            unawaited(_startHandsFreeListening(skipPermissionPrompt: true));
+          }
+        },
+      );
+    } else {
+      Future<void>.delayed(const Duration(milliseconds: 350), () {
+        if (mounted && !_closingAfterReply && _phase == _CallPhase.answered) {
+          unawaited(_startHandsFreeListening(skipPermissionPrompt: true));
+        }
+      });
     }
   }
 
@@ -298,6 +327,7 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
 
   void _applyCallQuickTemp(double nextTemp, String replyTr, String replyEn) {
     if (_closingAfterReply) return;
+    VoiceSpeechService.stopListening();
     final snapped = ThermostatMath.snapTemperature(nextTemp);
     widget.onAdjustTargetTemp(snapped);
     if (widget.hapticEnabled) {
@@ -308,6 +338,7 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     }
     final msg = widget.lang == LangCode.tr ? replyTr : replyEn;
     setState(() {
+      _listeningCommand = false;
       _quickActionAck = '✓ $msg';
       _spokenChars = 9999;
     });
@@ -316,6 +347,7 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
 
   void _executeSpokenOrTypedCommand(String raw) {
     if (_closingAfterReply) return;
+    VoiceSpeechService.stopListening();
     final res = AiCallService.evaluateCallResponse(
       rawInput: raw,
       callReason: widget.reason,
@@ -334,6 +366,7 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
       }
     }
     setState(() {
+      _listeningCommand = false;
       _heardPreview = raw.trim().isNotEmpty ? '"${raw.trim()}"' : null;
       _quickActionAck = res.handled ? '✓ $reply' : reply;
       _spokenChars = 9999;
@@ -343,24 +376,32 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     if (res.handled) {
       _speakConfirmationAndAutoHangup(reply);
     } else if (!_speakerMuted) {
-      _speakAloud(reply);
+      _speakAloud(
+        reply,
+        onDone: () {
+          if (mounted && !_closingAfterReply && _phase == _CallPhase.answered) {
+            unawaited(_startHandsFreeListening(skipPermissionPrompt: true));
+          }
+        },
+      );
     }
   }
 
-  Future<void> _toggleCallMic() async {
-    if (_closingAfterReply) return;
-    if (_listeningCommand) {
-      await VoiceSpeechService.stopListening();
-      if (mounted) setState(() => _listeningCommand = false);
-      return;
-    }
+  Future<void> _startHandsFreeListening({bool skipPermissionPrompt = false}) async {
+    if (_closingAfterReply || _listeningCommand || _phase != _CallPhase.answered) return;
+    if (_micPermissionError != null && skipPermissionPrompt) return;
+
     setState(() {
       _listeningCommand = true;
       _ttsPlaying = false;
-      _heardPreview = widget.lang == LangCode.tr ? 'Dinleniyor... Konuşun' : 'Listening... Speak now';
+      _heardPreview = widget.lang == LangCode.tr
+          ? 'Sizi dinliyorum... Konuşabilirsiniz'
+          : 'Listening... Please speak';
     });
+
     final ok = await VoiceSpeechService.startListening(
       lang: widget.lang,
+      skipPermissionPrompt: skipPermissionPrompt,
       onResultText: (words) {
         if (mounted) {
           setState(() {
@@ -391,6 +432,17 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     if (!ok && mounted) {
       setState(() => _listeningCommand = false);
     }
+  }
+
+  Future<void> _toggleCallMic() async {
+    if (_closingAfterReply) return;
+    if (_listeningCommand) {
+      await VoiceSpeechService.stopListening();
+      if (mounted) setState(() => _listeningCommand = false);
+      return;
+    }
+    _micPermissionError = null;
+    await _startHandsFreeListening(skipPermissionPrompt: false);
   }
 
   @override
@@ -792,9 +844,13 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                               Expanded(
                                                 child: Text(
                                                   _heardPreview ??
-                                                      (tr
-                                                          ? 'Mikrofona Dokun ve Konuş ("Kombiyi kapat", "Evet", "20 derece")'
-                                                          : 'Tap Mic & Speak ("Turn off boiler", "Yes", "Set 20")'),
+                                                      (_ttsPlaying
+                                                          ? (tr
+                                                              ? 'Asistan konuşuyor, bitince otomatik dinlenecek...'
+                                                              : 'Speaking, mic starts automatically next...')
+                                                          : (tr
+                                                              ? 'Dinlenmediyse tekrar başlatmak için dokunun ("Kombiyi kapat", "Evet")'
+                                                              : 'Tap to re-listen ("Turn off boiler", "Yes")')),
                                                   style: TextStyle(
                                                     fontSize: 11.5,
                                                     fontWeight: FontWeight.w700,

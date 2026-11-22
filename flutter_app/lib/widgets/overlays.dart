@@ -39,6 +39,9 @@ Future<void> showVoiceCommandSheet({
           'Open weather',
         ];
 
+  var autoStarted = false;
+  VoiceSpeechService.warmup();
+
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -110,6 +113,13 @@ Future<void> showVoiceCommandSheet({
             if (!ok && ctx.mounted) {
               setSheetState(() => listening = false);
             }
+          }
+
+          if (!autoStarted) {
+            autoStarted = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (ctx.mounted) toggleMic();
+            });
           }
 
           return Padding(

@@ -6,6 +6,10 @@ class WebSpeechBridge {
 
   static bool get isSupported => false;
 
+  static void warmup() {}
+
+  static Future<String?> ensureMicPermission(LangCode lang) async => null;
+
   static Future<void> speak(
     String text, {
     required LangCode lang,
@@ -23,6 +27,7 @@ class WebSpeechBridge {
     required ValueChanged<String> onFinalResult,
     required ValueChanged<String> onStatusError,
     VoidCallback? onDone,
+    bool skipPermissionPrompt = false,
   }) async {
     return false;
   }

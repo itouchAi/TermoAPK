@@ -233,14 +233,45 @@ class AiCallService {
     final text = rawInput.trim().toLowerCase();
     final tr = lang == LangCode.tr;
 
-    // 1) Contextual affirmative ("evet", "olur", "tamam", "yes", "sure")
+    // 1) Explicit open/close affirmative phrases
+    if (text == 'evet kapat' ||
+        text == 'evet kapatalım' ||
+        text == 'tamam kapat' ||
+        text == 'kapatalım' ||
+        text == 'kapat') {
+      return const VoiceCommandResult(
+        handled: true,
+        newTargetTemp: ThermostatMath.minTemp,
+        replyTr: 'Kombi kapatılıyor. Teşekkürler.',
+        replyEn: 'Turning off the boiler. Thank you.',
+      );
+    }
+    if (text == 'evet aç' ||
+        text == 'evet açalım' ||
+        text == 'tamam aç' ||
+        text == 'açalım' ||
+        text == 'aç') {
+      return const VoiceCommandResult(
+        handled: true,
+        newTargetTemp: 22.5,
+        newPreset: PresetId.konfor,
+        replyTr: 'Kombi açılıyor ve sıcaklık 22.5 dereceye ayarlanıyor. Teşekkürler.',
+        replyEn: 'Turning on the boiler at 22.5 degrees. Thank you.',
+      );
+    }
+
+    // 2) Contextual affirmative ("evet", "olur", "tamam", "tabii", "peki", "yes", "sure")
     final isAffirmative = text == 'evet' ||
         text.startsWith('evet ') ||
         text == 'olur' ||
         text == 'tamam' ||
-        text == 'açalım' ||
-        text == 'kapatalım' ||
+        text == 'tabii' ||
+        text == 'tabi' ||
+        text == 'peki' ||
+        text == 'onay' ||
+        text == 'onaylıyorum' ||
         text == 'yes' ||
+        text == 'sure' ||
         text == 'ok';
     final isNegative = text == 'hayır' ||
         text.startsWith('hayır ') ||
@@ -248,6 +279,8 @@ class AiCallService {
         text == 'kalsın' ||
         text == 'kapatma' ||
         text == 'açma' ||
+        text == 'istemiyorum' ||
+        text == 'vazgeç' ||
         text == 'no';
 
     if (isAffirmative) {

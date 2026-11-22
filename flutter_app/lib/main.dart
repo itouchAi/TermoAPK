@@ -99,6 +99,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   void initState() {
     super.initState();
     _loadPersisted();
+    VoiceSpeechService.warmup();
     _resetIdleTimer();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
