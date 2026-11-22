@@ -1105,7 +1105,14 @@ class SystemSettingsState {
   final int espWdtResetCount;
   final int espOfflineBurnMinutes;
   final String firebaseRtdbUrl;
+  final String firebaseApiKey;
+  final String firebaseNodePath;
   final bool cloudSyncEnabled;
+  final int cloudSyncIntervalSeconds;
+  final bool cloudAutoPullEnabled;
+  final String cloudLastSyncAt;
+  final bool cloudLastSyncOk;
+  final String cloudLastSyncMessage;
   final List<EspLogEntry> espLogs;
 
   const SystemSettingsState({
@@ -1168,7 +1175,14 @@ class SystemSettingsState {
     this.espWdtResetCount = 1,
     this.espOfflineBurnMinutes = 42,
     required this.firebaseRtdbUrl,
+    this.firebaseApiKey = '',
+    this.firebaseNodePath = 'kombi',
     required this.cloudSyncEnabled,
+    this.cloudSyncIntervalSeconds = 30,
+    this.cloudAutoPullEnabled = false,
+    this.cloudLastSyncAt = '',
+    this.cloudLastSyncOk = false,
+    this.cloudLastSyncMessage = '',
     required this.espLogs,
   });
 
@@ -1246,7 +1260,14 @@ class SystemSettingsState {
         espWdtResetCount: 1,
         espOfflineBurnMinutes: 42,
         firebaseRtdbUrl: 'https://kombi-kontrol-default-rtdb.firebaseio.com',
+        firebaseApiKey: '',
+        firebaseNodePath: 'kombi',
         cloudSyncEnabled: false,
+        cloudSyncIntervalSeconds: 30,
+        cloudAutoPullEnabled: false,
+        cloudLastSyncAt: '',
+        cloudLastSyncOk: false,
+        cloudLastSyncMessage: '',
         espLogs: [
           EspLogEntry(
             timestamp: '23:10',
@@ -1352,7 +1373,14 @@ class SystemSettingsState {
     int? espWdtResetCount,
     int? espOfflineBurnMinutes,
     String? firebaseRtdbUrl,
+    String? firebaseApiKey,
+    String? firebaseNodePath,
     bool? cloudSyncEnabled,
+    int? cloudSyncIntervalSeconds,
+    bool? cloudAutoPullEnabled,
+    String? cloudLastSyncAt,
+    bool? cloudLastSyncOk,
+    String? cloudLastSyncMessage,
     List<EspLogEntry>? espLogs,
   }) {
     return SystemSettingsState(
@@ -1415,7 +1443,14 @@ class SystemSettingsState {
       espWdtResetCount: (espWdtResetCount ?? this.espWdtResetCount).clamp(0, 9999),
       espOfflineBurnMinutes: (espOfflineBurnMinutes ?? this.espOfflineBurnMinutes).clamp(0, 999999),
       firebaseRtdbUrl: firebaseRtdbUrl ?? this.firebaseRtdbUrl,
+      firebaseApiKey: firebaseApiKey ?? this.firebaseApiKey,
+      firebaseNodePath: firebaseNodePath ?? this.firebaseNodePath,
       cloudSyncEnabled: cloudSyncEnabled ?? this.cloudSyncEnabled,
+      cloudSyncIntervalSeconds: (cloudSyncIntervalSeconds ?? this.cloudSyncIntervalSeconds).clamp(0, 3600),
+      cloudAutoPullEnabled: cloudAutoPullEnabled ?? this.cloudAutoPullEnabled,
+      cloudLastSyncAt: cloudLastSyncAt ?? this.cloudLastSyncAt,
+      cloudLastSyncOk: cloudLastSyncOk ?? this.cloudLastSyncOk,
+      cloudLastSyncMessage: cloudLastSyncMessage ?? this.cloudLastSyncMessage,
       espLogs: espLogs ?? this.espLogs,
     );
   }
@@ -1480,7 +1515,14 @@ class SystemSettingsState {
         'espOfflineBurnMinutes': espOfflineBurnMinutes,
         'espLogs': espLogs.take(40).map((e) => e.toJson()).toList(),
         'firebaseRtdbUrl': firebaseRtdbUrl,
+        'firebaseApiKey': firebaseApiKey,
+        'firebaseNodePath': firebaseNodePath,
         'cloudSyncEnabled': cloudSyncEnabled,
+        'cloudSyncIntervalSeconds': cloudSyncIntervalSeconds,
+        'cloudAutoPullEnabled': cloudAutoPullEnabled,
+        'cloudLastSyncAt': cloudLastSyncAt,
+        'cloudLastSyncOk': cloudLastSyncOk,
+        'cloudLastSyncMessage': cloudLastSyncMessage,
       };
 
   /// Generates a PIN-derived encrypted JSON backup envelope for zero-knowledge export.
@@ -1626,7 +1668,14 @@ class SystemSettingsState {
         return list;
       }(),
       firebaseRtdbUrl: (map['firebaseRtdbUrl'] as String?) ?? defaults.firebaseRtdbUrl,
+      firebaseApiKey: (map['firebaseApiKey'] as String?) ?? defaults.firebaseApiKey,
+      firebaseNodePath: (map['firebaseNodePath'] as String?) ?? defaults.firebaseNodePath,
       cloudSyncEnabled: (map['cloudSyncEnabled'] as bool?) ?? defaults.cloudSyncEnabled,
+      cloudSyncIntervalSeconds: (map['cloudSyncIntervalSeconds'] as num?)?.toInt() ?? defaults.cloudSyncIntervalSeconds,
+      cloudAutoPullEnabled: (map['cloudAutoPullEnabled'] as bool?) ?? defaults.cloudAutoPullEnabled,
+      cloudLastSyncAt: (map['cloudLastSyncAt'] as String?) ?? defaults.cloudLastSyncAt,
+      cloudLastSyncOk: (map['cloudLastSyncOk'] as bool?) ?? defaults.cloudLastSyncOk,
+      cloudLastSyncMessage: (map['cloudLastSyncMessage'] as String?) ?? defaults.cloudLastSyncMessage,
     );
   }
 }

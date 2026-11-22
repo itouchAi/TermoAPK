@@ -139,6 +139,8 @@ class EspLogService {
 
   static Future<EspPingResult> testDeviceConnection({
     required String baseUrl,
+    String? apiKey,
+    String nodePath = 'kombi',
     required String espDeviceId,
     required String roomName,
     required double roomTemp,
@@ -149,11 +151,17 @@ class EspLogService {
     final nowLabel = NotificationService.formatNowTime();
     final tr = lang == LangCode.tr;
     final sw = Stopwatch()..start();
-    final pull = await FirebaseSyncService.pullState(baseUrl: baseUrl);
+    final pull = await FirebaseSyncService.pullState(
+      baseUrl: baseUrl,
+      apiKey: apiKey,
+      nodePath: nodePath,
+    );
     FirebaseSyncResult push = pull;
     if (pull.ok) {
       push = await FirebaseSyncService.pushState(
         baseUrl: baseUrl,
+        apiKey: apiKey,
+        nodePath: nodePath,
         roomName: roomName,
         espDeviceId: espDeviceId,
         roomTemp: roomTemp,

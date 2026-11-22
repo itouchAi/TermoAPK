@@ -122,6 +122,8 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
     }
     final res = await FirebaseSyncService.pushState(
       baseUrl: _settings.firebaseRtdbUrl,
+      apiKey: _settings.firebaseApiKey,
+      nodePath: _settings.firebaseNodePath,
       roomName: _settings.googleHomeRoom,
       espDeviceId: _settings.espDeviceId,
       roomTemp: widget.roomTemp,
@@ -143,7 +145,11 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
       _syncing = true;
       _syncStatus = null;
     });
-    final res = await FirebaseSyncService.pullState(baseUrl: _settings.firebaseRtdbUrl);
+    final res = await FirebaseSyncService.pullState(
+      baseUrl: _settings.firebaseRtdbUrl,
+      apiKey: _settings.firebaseApiKey,
+      nodePath: _settings.firebaseNodePath,
+    );
     if (!mounted) return;
     if (res.ok && res.remoteTargetTemp != null) {
       widget.onApplyTargetTemp(res.remoteTargetTemp!);

@@ -5,6 +5,7 @@ import '../models/thermostat_state.dart';
 class FirebaseSyncResult {
   final bool ok;
   final int? statusCode;
+  final int? latencyMs;
   final String messageTr;
   final String messageEn;
   final double? remoteTargetTemp;
@@ -12,6 +13,7 @@ class FirebaseSyncResult {
   const FirebaseSyncResult({
     required this.ok,
     this.statusCode,
+    this.latencyMs,
     required this.messageTr,
     required this.messageEn,
     this.remoteTargetTemp,
@@ -21,27 +23,88 @@ class FirebaseSyncResult {
 class FirebaseSyncService {
   FirebaseSyncService._();
 
-  static Uri? _buildEndpoint(String baseUrl, String? apiKey) {
+  static String sanitizeNodePath(String raw) {
+    var cleaned = raw.trim().replaceAll(RegExp(r'\.json$'), '');
+    cleaned = cleaned.replaceAll(RegExp(r'^/+|/+$'), '');
+    cleaned = cleaned.replaceAll(RegExp(r'[^a-zA-Z0-9_\-/]'), '');
+    return cleaned.isEmpty ? 'kombi' : cleaned;
+  }
+
+  static bool validateRtdbUrl(String raw) {
+    final trimmed = raw.trim().replaceAll(RegExp(r'/+$'), '');
+    if (trimmed.isEmpty) return false;
+    final uri = Uri.tryParse(trimmed);
+    if (uri == null || !uri.hasAuthority) return false;
+    return uri.scheme == 'https' || uri.scheme == 'http';
+  }
+
+  static Uri? _buildEndpoint(
+    String baseUrl,
+    String? apiKey, {
+    String nodePath = 'kombi',
+  }) {
+    if (!validateRtdbUrl(baseUrl)) return null;
     final trimmed = baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
-    if (trimmed.isEmpty || (!trimmed.startsWith('https://') && !trimmed.startsWith('http://'))) {
-      return null;
-    }
+    final safeNode = sanitizeNodePath(nodePath);
     final key = apiKey?.trim() ?? '';
-    final suffix = key.isNotEmpty ? '/kombi.json?auth=${Uri.encodeComponent(key)}' : '/kombi.json';
+    final suffix = key.isNotEmpty
+        ? '/$safeNode.json?auth=${Uri.encodeComponent(key)}'
+        : '/$safeNode.json';
     return Uri.tryParse('$trimmed$suffix');
+  }
+
+  static Map<String, dynamic> buildPayload({
+    required String roomName,
+    required String espDeviceId,
+    required double roomTemp,
+    required double targetTemp,
+    required BoilerTelemetry boiler,
+    DateTime? timestamp,
+  }) {
+    return {
+      'roomTemp': roomTemp,
+      'targetTemp': targetTemp,
+      'boilerActive': boiler.isHeating,
+      'flamePercent': boiler.flamePercent,
+      'pressureBar': boiler.waterPressureBar,
+      'roomName': roomName,
+      'espDeviceId': espDeviceId,
+      'updatedAt': (timestamp ?? DateTime.now()).toUtc().toIso8601String(),
+    };
+  }
+
+  static String buildPayloadPreviewJson({
+    required String roomName,
+    required String espDeviceId,
+    required double roomTemp,
+    required double targetTemp,
+    required BoilerTelemetry boiler,
+    DateTime? timestamp,
+  }) {
+    return const JsonEncoder.withIndent('  ').convert(
+      buildPayload(
+        roomName: roomName,
+        espDeviceId: espDeviceId,
+        roomTemp: roomTemp,
+        targetTemp: targetTemp,
+        boiler: boiler,
+        timestamp: timestamp,
+      ),
+    );
   }
 
   /// Pushes live thermostat & boiler telemetry to Firebase Realtime Database via HTTP PATCH.
   static Future<FirebaseSyncResult> pushState({
     required String baseUrl,
     String? apiKey,
+    String nodePath = 'kombi',
     required String roomName,
     required String espDeviceId,
     required double roomTemp,
     required double targetTemp,
     required BoilerTelemetry boiler,
   }) async {
-    final uri = _buildEndpoint(baseUrl, apiKey);
+    final uri = _buildEndpoint(baseUrl, apiKey, nodePath: nodePath);
     if (uri == null) {
       return const FirebaseSyncResult(
         ok: false,
@@ -50,41 +113,48 @@ class FirebaseSyncService {
       );
     }
 
+    final sw = Stopwatch()..start();
     try {
       final resp = await http
           .patch(
             uri,
             headers: const {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'roomTemp': roomTemp,
-              'targetTemp': targetTemp,
-              'boilerActive': boiler.isHeating,
-              'flamePercent': boiler.flamePercent,
-              'pressureBar': boiler.waterPressureBar,
-              'roomName': roomName,
-              'espDeviceId': espDeviceId,
-              'updatedAt': DateTime.now().toUtc().toIso8601String(),
-            }),
+            body: jsonEncode(
+              buildPayload(
+                roomName: roomName,
+                espDeviceId: espDeviceId,
+                roomTemp: roomTemp,
+                targetTemp: targetTemp,
+                boiler: boiler,
+              ),
+            ),
           )
           .timeout(const Duration(seconds: 7));
+      sw.stop();
+      final ms = sw.elapsedMilliseconds;
 
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        final safeNode = sanitizeNodePath(nodePath);
         return FirebaseSyncResult(
           ok: true,
           statusCode: resp.statusCode,
-          messageTr: 'Firebase RTDB senkronize edildi (HTTP ${resp.statusCode}).',
-          messageEn: 'Firebase RTDB synced (HTTP ${resp.statusCode}).',
+          latencyMs: ms,
+          messageTr: 'RTDB /$safeNode senkronize edildi (HTTP ${resp.statusCode} · ${ms}ms).',
+          messageEn: 'RTDB /$safeNode synced (HTTP ${resp.statusCode} · ${ms}ms).',
         );
       }
       return FirebaseSyncResult(
         ok: false,
         statusCode: resp.statusCode,
+        latencyMs: ms,
         messageTr: 'Firebase HTTP ${resp.statusCode}: ${resp.body.isEmpty ? 'Erişim reddedildi (Kuralları veya API anahtarını kontrol edin)' : resp.body}',
         messageEn: 'Firebase HTTP ${resp.statusCode}: ${resp.body.isEmpty ? 'Permission denied' : resp.body}',
       );
     } catch (e) {
+      sw.stop();
       return FirebaseSyncResult(
         ok: false,
+        latencyMs: sw.elapsedMilliseconds,
         messageTr: 'Bağlantı hatası: $e',
         messageEn: 'Connection error: $e',
       );
@@ -95,8 +165,9 @@ class FirebaseSyncService {
   static Future<FirebaseSyncResult> pullState({
     required String baseUrl,
     String? apiKey,
+    String nodePath = 'kombi',
   }) async {
-    final uri = _buildEndpoint(baseUrl, apiKey);
+    final uri = _buildEndpoint(baseUrl, apiKey, nodePath: nodePath);
     if (uri == null) {
       return const FirebaseSyncResult(
         ok: false,
@@ -105,8 +176,12 @@ class FirebaseSyncService {
       );
     }
 
+    final sw = Stopwatch()..start();
     try {
       final resp = await http.get(uri).timeout(const Duration(seconds: 7));
+      sw.stop();
+      final ms = sw.elapsedMilliseconds;
+      final safeNode = sanitizeNodePath(nodePath);
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
         final decoded = jsonDecode(resp.body);
         double? target;
@@ -116,24 +191,28 @@ class FirebaseSyncService {
         return FirebaseSyncResult(
           ok: true,
           statusCode: resp.statusCode,
+          latencyMs: ms,
           remoteTargetTemp: target,
           messageTr: target != null
-              ? 'Firebase\'den çekildi: Hedef ${target.toStringAsFixed(1)}°C'
-              : 'Firebase bağlı (kombi düğümü henüz boş).',
+              ? 'RTDB /$safeNode çekildi: Hedef ${target.toStringAsFixed(1)}°C (${ms}ms)'
+              : 'Firebase bağlı (/$safeNode düğümü henüz boş · ${ms}ms).',
           messageEn: target != null
-              ? 'Pulled from Firebase: Target ${target.toStringAsFixed(1)}°C'
-              : 'Firebase connected (kombi node empty).',
+              ? 'Pulled from /$safeNode: Target ${target.toStringAsFixed(1)}°C (${ms}ms)'
+              : 'Firebase connected (/$safeNode node empty · ${ms}ms).',
         );
       }
       return FirebaseSyncResult(
         ok: false,
         statusCode: resp.statusCode,
+        latencyMs: ms,
         messageTr: 'Firebase okuma hatası (HTTP ${resp.statusCode}).',
         messageEn: 'Firebase read error (HTTP ${resp.statusCode}).',
       );
     } catch (e) {
+      sw.stop();
       return FirebaseSyncResult(
         ok: false,
+        latencyMs: sw.elapsedMilliseconds,
         messageTr: 'Bağlantı hatası: $e',
         messageEn: 'Connection error: $e',
       );

@@ -7,6 +7,7 @@ import '../models/thermostat_state.dart';
 import '../services/ai_call_service.dart';
 import '../services/ambient_audio_service.dart';
 import '../services/esp_log_service.dart';
+import '../services/firebase_sync_service.dart';
 import '../services/hardware_service.dart';
 import '../services/notification_service.dart';
 import '../services/voice_gender_classifier.dart';
@@ -123,13 +124,94 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
   bool _espPingBusy = false;
   String? _espPingStatus;
   bool _espPingOk = true;
+  bool _cloudSyncBusy = false;
+  String? _cloudSyncStatus;
+  bool _cloudSyncOk = true;
+  bool _showFirebaseKey = false;
+  bool _showCloudPayloadPreview = false;
 
   final _firebaseUrlCtrl = TextEditingController();
+  final _firebaseApiKeyCtrl = TextEditingController();
+  final _firebaseNodeCtrl = TextEditingController();
   final _espIdCtrl = TextEditingController();
   final _customAudioCtrl = TextEditingController();
   final _screensaverBgUrlCtrl = TextEditingController();
 
   static const _locations = ['Ev · İstanbul', 'Yazlık · İzmir', 'Ofis · Ankara'];
+
+  Future<void> _runCloudPush({bool pullInstead = false}) async {
+    if (_cloudSyncBusy) return;
+    _hapticTap();
+    final rtdbUrl = _firebaseUrlCtrl.text.trim().isEmpty
+        ? _draft.firebaseRtdbUrl
+        : _firebaseUrlCtrl.text.trim();
+    final apiKey = _firebaseApiKeyCtrl.text.trim();
+    final nodePath = FirebaseSyncService.sanitizeNodePath(
+      _firebaseNodeCtrl.text.trim().isEmpty ? _draft.firebaseNodePath : _firebaseNodeCtrl.text.trim(),
+    );
+    setState(() {
+      _cloudSyncBusy = true;
+      _cloudSyncStatus = null;
+    });
+
+    final liveBoiler = ThermostatMath.computeBoilerTelemetry(widget.roomTemp, _liveTargetTemp);
+    final res = pullInstead
+        ? await FirebaseSyncService.pullState(
+            baseUrl: rtdbUrl,
+            apiKey: apiKey,
+            nodePath: nodePath,
+          )
+        : await FirebaseSyncService.pushState(
+            baseUrl: rtdbUrl,
+            apiKey: apiKey,
+            nodePath: nodePath,
+            roomName: _draft.googleHomeRoom,
+            espDeviceId: _espIdCtrl.text.trim().isEmpty ? _draft.espDeviceId : _espIdCtrl.text.trim(),
+            roomTemp: widget.roomTemp,
+            targetTemp: _liveTargetTemp,
+            boiler: liveBoiler,
+          );
+    if (!mounted) return;
+    final nowLabel = NotificationService.formatNowTime();
+    final msg = _lang == LangCode.tr ? res.messageTr : res.messageEn;
+
+    if (pullInstead && res.ok && res.remoteTargetTemp != null) {
+      _liveTargetTemp = res.remoteTargetTemp!;
+      widget.onChangeTargetTemp(res.remoteTargetTemp!);
+    }
+
+    final nextDraft = _draft.copyWith(
+      firebaseRtdbUrl: rtdbUrl,
+      firebaseApiKey: apiKey,
+      firebaseNodePath: nodePath,
+      cloudLastSyncAt: nowLabel,
+      cloudLastSyncOk: res.ok,
+      cloudLastSyncMessage: msg,
+      espOnline: res.ok ? true : _draft.espOnline,
+      espLastPingAt: res.ok ? nowLabel : _draft.espLastPingAt,
+      espLogs: EspLogService.appendLog(
+        _draft.espLogs,
+        EspLogEntry(
+          timestamp: nowLabel,
+          event: res.ok
+              ? (pullInstead
+                  ? (_lang == LangCode.tr ? 'RTDB Manuel Çekme' : 'RTDB Manual Pull')
+                  : (_lang == LangCode.tr ? 'RTDB Manuel Gönderim' : 'RTDB Manual Push'))
+              : (_lang == LangCode.tr ? 'RTDB Senkronizasyon Hatası' : 'RTDB Sync Error'),
+          detail: msg,
+          isWarning: !res.ok,
+          category: res.ok ? EspLogCategory.sync : EspLogCategory.watchdog,
+        ),
+      ),
+    );
+    setState(() {
+      _cloudSyncBusy = false;
+      _cloudSyncOk = res.ok;
+      _cloudSyncStatus = msg;
+      _draft = nextDraft;
+    });
+    widget.onSaveSettings(nextDraft);
+  }
 
   Future<void> _runEspConnectionTest() async {
     if (_espPingBusy) return;
@@ -140,6 +222,10 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     final rtdbUrl = _firebaseUrlCtrl.text.trim().isEmpty
         ? _draft.firebaseRtdbUrl
         : _firebaseUrlCtrl.text.trim();
+    final apiKey = _firebaseApiKeyCtrl.text.trim();
+    final nodePath = FirebaseSyncService.sanitizeNodePath(
+      _firebaseNodeCtrl.text.trim().isEmpty ? _draft.firebaseNodePath : _firebaseNodeCtrl.text.trim(),
+    );
     setState(() {
       _espPingBusy = true;
       _espPingStatus = null;
@@ -147,6 +233,8 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     final liveBoiler = ThermostatMath.computeBoilerTelemetry(widget.roomTemp, _liveTargetTemp);
     final res = await EspLogService.testDeviceConnection(
       baseUrl: rtdbUrl,
+      apiKey: apiKey,
+      nodePath: nodePath,
       espDeviceId: deviceId,
       roomName: _draft.googleHomeRoom,
       roomTemp: widget.roomTemp,
@@ -193,6 +281,8 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     _location = widget.locationName;
     _liveTargetTemp = widget.targetTemp;
     _firebaseUrlCtrl.text = _draft.firebaseRtdbUrl;
+    _firebaseApiKeyCtrl.text = _draft.firebaseApiKey;
+    _firebaseNodeCtrl.text = _draft.firebaseNodePath;
     _espIdCtrl.text = _draft.espDeviceId;
     _customAudioCtrl.text = _draft.customAudioLabel;
     if (_draft.screensaverCustomBgSource.startsWith('http')) {
@@ -210,6 +300,8 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
       AmbientAudioService.stop();
     }
     _firebaseUrlCtrl.dispose();
+    _firebaseApiKeyCtrl.dispose();
+    _firebaseNodeCtrl.dispose();
     _espIdCtrl.dispose();
     _customAudioCtrl.dispose();
     _screensaverBgUrlCtrl.dispose();
@@ -622,8 +714,15 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                         onPressed: () {
                           _hapticTap();
                           final typedEspId = _espIdCtrl.text.trim();
+                          final sanitizedNode = FirebaseSyncService.sanitizeNodePath(
+                            _firebaseNodeCtrl.text.trim().isEmpty
+                                ? _draft.firebaseNodePath
+                                : _firebaseNodeCtrl.text.trim(),
+                          );
                           final updated = _draft.copyWith(
                             firebaseRtdbUrl: _firebaseUrlCtrl.text.trim(),
+                            firebaseApiKey: _firebaseApiKeyCtrl.text.trim(),
+                            firebaseNodePath: sanitizedNode,
                             espDeviceId: typedEspId.isEmpty ? _draft.espDeviceId : typedEspId,
                             customAudioLabel: _customAudioCtrl.text.trim(),
                             customAudioSource: _resolveAudioSource(),
@@ -1019,12 +1118,20 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           ),
         );
       case SettingsItemId.cloudSync:
+        final safeNode = FirebaseSyncService.sanitizeNodePath(_draft.firebaseNodePath);
+        final intervalShort = _draft.cloudSyncIntervalSeconds == 0
+            ? (tr ? 'Manuel' : 'Manual')
+            : '${_draft.cloudSyncIntervalSeconds}sn';
         return _CardMeta(
           icon: Icons.sync_rounded,
           iconColor: const Color(0xFF38BDF8),
           title: tr ? 'Bulut Senkronizasyon & Veritabanı' : 'Cloud Sync & Database',
-          tag: 'Firebase RTDB',
-          subtitle: tr ? 'Firebase gerçek zamanlı veri senkronizasyonu' : 'Firebase realtime telemetry sync',
+          tag: 'RTDB · /$safeNode · $intervalShort',
+          subtitle: _draft.cloudLastSyncAt.isNotEmpty
+              ? (tr
+                  ? 'Son eşitleme ${_draft.cloudLastSyncAt} · ${_draft.cloudLastSyncOk ? 'Başarılı' : 'Hatalı'}'
+                  : 'Last sync ${_draft.cloudLastSyncAt} · ${_draft.cloudLastSyncOk ? 'OK' : 'Error'}')
+              : (tr ? 'Firebase gerçek zamanlı veri senkronizasyonu' : 'Firebase realtime telemetry sync'),
           trailingAction: _ActionPill(
             label: _draft.cloudSyncEnabled ? (tr ? 'Bağlı' : 'Synced') : (tr ? 'Çevrimdışı' : 'Offline'),
             active: _draft.cloudSyncEnabled,
@@ -3846,20 +3953,303 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
         );
 
       case SettingsItemId.cloudSync:
+        final liveBoiler = ThermostatMath.computeBoilerTelemetry(widget.roomTemp, _liveTargetTemp);
+        final activeNode = FirebaseSyncService.sanitizeNodePath(
+          _firebaseNodeCtrl.text.trim().isEmpty ? _draft.firebaseNodePath : _firebaseNodeCtrl.text.trim(),
+        );
+        final urlValid = FirebaseSyncService.validateRtdbUrl(
+          _firebaseUrlCtrl.text.trim().isEmpty ? _draft.firebaseRtdbUrl : _firebaseUrlCtrl.text.trim(),
+        );
+        final statusText = _cloudSyncStatus ??
+            (_draft.cloudLastSyncMessage.isNotEmpty ? _draft.cloudLastSyncMessage : null);
+        final statusIsOk = _cloudSyncStatus != null ? _cloudSyncOk : _draft.cloudLastSyncOk;
+        final payloadPreview = FirebaseSyncService.buildPayloadPreviewJson(
+          roomName: _draft.googleHomeRoom,
+          espDeviceId: _espIdCtrl.text.trim().isEmpty ? _draft.espDeviceId : _espIdCtrl.text.trim(),
+          roomTemp: widget.roomTemp,
+          targetTemp: _liveTargetTemp,
+          boiler: liveBoiler,
+        );
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _DarkTextField(controller: _firebaseUrlCtrl, hint: 'Firebase RTDB URL'),
-            const SizedBox(height: 8),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _draft.cloudSyncEnabled,
-              title: Text(tr ? 'Gerçek Zamanlı Bulut Senkronizasyonu' : 'Realtime Cloud Sync', style: const TextStyle(fontSize: 12.5, color: Colors.white)),
-              onChanged: (v) {
-                _hapticTap();
-                setState(() => _draft = _draft.copyWith(cloudSyncEnabled: v));
-              },
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                _InfoBadge(
+                  text: _draft.cloudSyncEnabled
+                      ? (tr
+                          ? 'Senkron Açık${_draft.cloudLastSyncAt.isNotEmpty ? ' · ${_draft.cloudLastSyncAt}' : ''}'
+                          : 'Sync On${_draft.cloudLastSyncAt.isNotEmpty ? ' · ${_draft.cloudLastSyncAt}' : ''}')
+                      : (tr ? 'Beklemede' : 'Standby'),
+                  color: _draft.cloudSyncEnabled ? const Color(0xFF10B981) : const Color(0xFFE11D48),
+                ),
+                _InfoBadge(
+                  text: '/$activeNode.json',
+                  color: const Color(0xFF38BDF8),
+                ),
+                _InfoBadge(
+                  text: urlValid
+                      ? (tr ? 'URL Geçerli' : 'URL Valid')
+                      : (tr ? 'URL Geçersiz' : 'Invalid URL'),
+                  color: urlValid ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                ),
+              ],
             ),
+            const SizedBox(height: 10),
+            _DarkTextField(
+              controller: _firebaseUrlCtrl,
+              hint: 'Firebase RTDB URL (https://...firebaseio.com)',
+              keyboardType: TextInputType.url,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: _DarkTextField(
+                    controller: _firebaseNodeCtrl,
+                    hint: tr ? 'Düğüm (kombi)' : 'Node (kombi)',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  flex: 3,
+                  child: _DarkTextField(
+                    controller: _firebaseApiKeyCtrl,
+                    hint: tr ? 'RTDB Auth / Secret (opsiyonel)' : 'RTDB Auth / Secret (optional)',
+                    obscure: !_showFirebaseKey,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  onPressed: () {
+                    _hapticTap();
+                    setState(() => _showFirebaseKey = !_showFirebaseKey);
+                  },
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.white.withValues(alpha: 0.06),
+                    side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                  ),
+                  icon: Icon(
+                    _showFirebaseKey ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    size: 17,
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: _MiniToggleTile(
+                    label: tr ? 'Gerçek Zamanlı Sync' : 'Realtime Sync',
+                    value: _draft.cloudSyncEnabled,
+                    activeColor: const Color(0xFF38BDF8),
+                    onTap: () {
+                      _hapticTap();
+                      final next = _draft.copyWith(cloudSyncEnabled: !_draft.cloudSyncEnabled);
+                      setState(() => _draft = next);
+                      widget.onSaveSettings(next);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _MiniToggleTile(
+                    label: tr ? 'Uzaktan Hedefi Çek' : 'Auto-Pull Target',
+                    value: _draft.cloudAutoPullEnabled,
+                    activeColor: const Color(0xFF10B981),
+                    onTap: () {
+                      _hapticTap();
+                      final next = _draft.copyWith(
+                        cloudAutoPullEnabled: !_draft.cloudAutoPullEnabled,
+                      );
+                      setState(() => _draft = next);
+                      widget.onSaveSettings(next);
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              tr ? 'Otomatik Senkronizasyon Periyodu' : 'Auto Sync Interval',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.65)),
+            ),
+            const SizedBox(height: 6),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final opt in <(int, String)>[
+                    (0, tr ? 'Manuel' : 'Manual'),
+                    (15, tr ? '15 sn' : '15s'),
+                    (30, tr ? '30 sn' : '30s'),
+                    (60, tr ? '60 sn' : '60s'),
+                    (180, tr ? '3 dk' : '3m'),
+                  ]) ...[
+                    ChoiceChip(
+                      label: Text(opt.$2, style: const TextStyle(fontSize: 10.5)),
+                      selected: _draft.cloudSyncIntervalSeconds == opt.$1,
+                      selectedColor: const Color(0xFF38BDF8).withValues(alpha: 0.25),
+                      backgroundColor: Colors.white.withValues(alpha: 0.05),
+                      labelStyle: TextStyle(
+                        color: _draft.cloudSyncIntervalSeconds == opt.$1 ? const Color(0xFFBAE6FD) : Colors.white70,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      side: BorderSide(
+                        color: _draft.cloudSyncIntervalSeconds == opt.$1
+                            ? const Color(0xFF38BDF8).withValues(alpha: 0.55)
+                            : Colors.white.withValues(alpha: 0.12),
+                      ),
+                      onSelected: (_) {
+                        _hapticTap();
+                        final next = _draft.copyWith(cloudSyncIntervalSeconds: opt.$1);
+                        setState(() => _draft = next);
+                        widget.onSaveSettings(next);
+                      },
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _cloudSyncBusy ? null : () => _runCloudPush(pullInstead: false),
+                    icon: _cloudSyncBusy
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF6EE7B7)),
+                          )
+                        : const Icon(Icons.cloud_upload_outlined, size: 16),
+                    label: Text(
+                      tr ? 'Buluta Gönder' : 'Push to RTDB',
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF6EE7B7),
+                      side: BorderSide(color: const Color(0xFF10B981).withValues(alpha: 0.45)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _cloudSyncBusy ? null : () => _runCloudPush(pullInstead: true),
+                    icon: const Icon(Icons.cloud_download_outlined, size: 16),
+                    label: Text(
+                      tr ? 'Buluttan Çek' : 'Pull from RTDB',
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF7DD3FC),
+                      side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.45)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (statusText != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: (statusIsOk ? const Color(0xFF10B981) : const Color(0xFFE11D48)).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: (statusIsOk ? const Color(0xFF10B981) : const Color(0xFFE11D48)).withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Text(
+                  statusText,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: statusIsOk ? const Color(0xFFA7F3D0) : const Color(0xFFFECDD3),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                ActionChip(
+                  avatar: Icon(
+                    _showCloudPayloadPreview ? Icons.code_off_rounded : Icons.data_object_rounded,
+                    size: 14,
+                    color: const Color(0xFF38BDF8),
+                  ),
+                  label: Text(
+                    _showCloudPayloadPreview
+                        ? (tr ? 'JSON Önizlemeyi Gizle' : 'Hide JSON Preview')
+                        : (tr ? 'Canlı JSON Önizleme' : 'Live JSON Preview'),
+                    style: const TextStyle(fontSize: 11, color: Colors.white),
+                  ),
+                  backgroundColor: Colors.white.withValues(alpha: 0.06),
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                  onPressed: () {
+                    _hapticTap();
+                    setState(() => _showCloudPayloadPreview = !_showCloudPayloadPreview);
+                  },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.copy_rounded, size: 14, color: Color(0xFF10B981)),
+                  label: Text(
+                    tr ? 'JSON Kopyala' : 'Copy JSON',
+                    style: const TextStyle(fontSize: 11, color: Colors.white),
+                  ),
+                  backgroundColor: Colors.white.withValues(alpha: 0.06),
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                  onPressed: () async {
+                    _hapticTap();
+                    await Clipboard.setData(ClipboardData(text: payloadPreview));
+                    if (!mounted) return;
+                    setState(() {
+                      _cloudSyncOk = true;
+                      _cloudSyncStatus = tr
+                          ? '/$activeNode.json telemetri yükü panoya kopyalandı.'
+                          : '/$activeNode.json telemetry payload copied.';
+                    });
+                  },
+                ),
+              ],
+            ),
+            if (_showCloudPayloadPreview) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.48),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+                ),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Text(
+                    payloadPreview,
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      fontFamily: 'monospace',
+                      color: Color(0xFFBAE6FD),
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ],
         );
 

@@ -163,6 +163,11 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           isUserChange: false,
         );
       }
+
+      final syncInterval = _settings.cloudSyncIntervalSeconds;
+      if (_settings.cloudSyncEnabled && syncInterval > 0 && _thermalTicks % syncInterval == 0) {
+        _syncFirebaseBackground(_targetTemp, allowAutoPull: _settings.cloudAutoPullEnabled);
+      }
     });
     _automationTimer = Timer.periodic(const Duration(hours: 3), (_) {
       if (!mounted || !_settings.notifications3hEnabled) return;
@@ -403,11 +408,13 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     }
   }
 
-  void _syncFirebaseBackground(double target) {
+  void _syncFirebaseBackground(double target, {bool allowAutoPull = false}) {
     if (!_settings.googleHomeLinked && !_settings.cloudSyncEnabled) return;
     final b = ThermostatMath.computeBoilerTelemetry(_roomTemp, target);
     FirebaseSyncService.pushState(
       baseUrl: _settings.firebaseRtdbUrl,
+      apiKey: _settings.firebaseApiKey,
+      nodePath: _settings.firebaseNodePath,
       roomName: _settings.googleHomeRoom,
       espDeviceId: _settings.espDeviceId,
       roomTemp: _roomTemp,
@@ -417,6 +424,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       if (!mounted) return;
       final nowLabel = NotificationService.formatNowTime();
       final wasOnline = _settings.espOnline;
+      final syncMsg = _lang == LangCode.tr ? res.messageTr : res.messageEn;
       if (res.ok) {
         if (!wasOnline) {
           _appendEspLog(
@@ -429,13 +437,50 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             espOnline: true,
             espLastPingAt: nowLabel,
           );
-        } else {
-          setState(() {
-            _settings = _settings.copyWith(espOnline: true, espLastPingAt: nowLabel);
-          });
-          _persist();
         }
-      } else if (wasOnline || _settings.espWdtEnabled) {
+        setState(() {
+          _settings = _settings.copyWith(
+            espOnline: true,
+            espLastPingAt: nowLabel,
+            cloudLastSyncAt: nowLabel,
+            cloudLastSyncOk: true,
+            cloudLastSyncMessage: syncMsg,
+          );
+        });
+        _persist();
+
+        if (allowAutoPull && _settings.cloudAutoPullEnabled) {
+          FirebaseSyncService.pullState(
+            baseUrl: _settings.firebaseRtdbUrl,
+            apiKey: _settings.firebaseApiKey,
+            nodePath: _settings.firebaseNodePath,
+          ).then((pullRes) {
+            if (!mounted || !pullRes.ok || pullRes.remoteTargetTemp == null) return;
+            final remoteTemp = pullRes.remoteTargetTemp!;
+            if ((remoteTemp - _targetTemp).abs() >= 0.05) {
+              setState(() {
+                _targetTemp = remoteTemp;
+                _activePreset = ThermostatMath.findMatchingPreset(remoteTemp)?.id;
+                _settings = _settings.copyWith(
+                  cloudLastSyncAt: NotificationService.formatNowTime(),
+                  cloudLastSyncOk: true,
+                  cloudLastSyncMessage: _lang == LangCode.tr ? pullRes.messageTr : pullRes.messageEn,
+                );
+              });
+              _persist();
+            }
+          });
+        }
+      } else {
+        setState(() {
+          _settings = _settings.copyWith(
+            espOnline: false,
+            cloudLastSyncAt: nowLabel,
+            cloudLastSyncOk: false,
+            cloudLastSyncMessage: syncMsg,
+          );
+        });
+        _persist();
         if (wasOnline) {
           _appendEspLog(
             EspLogEntry(
@@ -1022,6 +1067,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                                 espLogs: const [],
                                                 espOfflineBurnMinutes: 0,
                                                 espWdtResetCount: 0,
+                                                cloudLastSyncAt: '',
+                                                cloudLastSyncOk: false,
+                                                cloudLastSyncMessage: '',
                                               );
                                             });
                                             _persist();

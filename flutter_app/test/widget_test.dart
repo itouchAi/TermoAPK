@@ -4,6 +4,7 @@ import 'package:termostat_flow/models/thermostat_state.dart';
 import 'package:termostat_flow/services/ai_call_service.dart';
 import 'package:termostat_flow/services/ambient_audio_service.dart';
 import 'package:termostat_flow/services/esp_log_service.dart';
+import 'package:termostat_flow/services/firebase_sync_service.dart';
 import 'package:termostat_flow/services/hardware_service.dart';
 import 'package:termostat_flow/services/notification_service.dart';
 import 'package:termostat_flow/services/vault_crypto_service.dart';
@@ -735,5 +736,54 @@ void main() {
     expect(report.contains('Çevrimiçi (14:05)'), isTrue);
     expect(report.contains('120 dk yanma'), isTrue);
     expect(report.contains('WDT Kontrolü #45'), isTrue);
+  });
+
+  test('FirebaseSyncService validates URLs, sanitizes node paths, builds JSON preview, and persists Cloud Sync settings', () {
+    expect(FirebaseSyncService.sanitizeNodePath(' /kombi.json '), 'kombi');
+    expect(FirebaseSyncService.sanitizeNodePath('/ev/salon/'), 'ev/salon');
+    expect(FirebaseSyncService.sanitizeNodePath('   '), 'kombi');
+
+    expect(FirebaseSyncService.validateRtdbUrl('https://kombi-kontrol-default-rtdb.firebaseio.com'), isTrue);
+    expect(FirebaseSyncService.validateRtdbUrl('ftp://invalid-host'), isFalse);
+    expect(FirebaseSyncService.validateRtdbUrl(''), isFalse);
+
+    final boiler = ThermostatMath.computeBoilerTelemetry(21.8, 22.5);
+    final preview = FirebaseSyncService.buildPayloadPreviewJson(
+      roomName: 'Salon',
+      espDeviceId: 'ESP32-KOMBI-01',
+      roomTemp: 21.8,
+      targetTemp: 22.5,
+      boiler: boiler,
+      timestamp: DateTime.utc(2026, 11, 22, 12, 0, 0),
+    );
+    final parsed = jsonDecode(preview) as Map<String, dynamic>;
+    expect(parsed['roomTemp'], 21.8);
+    expect(parsed['targetTemp'], 22.5);
+    expect(parsed['boilerActive'], isTrue);
+    expect(parsed['roomName'], 'Salon');
+    expect(parsed['espDeviceId'], 'ESP32-KOMBI-01');
+
+    final settings = SystemSettingsState.defaults().copyWith(
+      firebaseApiKey: 'secret-token-123',
+      firebaseNodePath: 'ev/kombi',
+      cloudSyncEnabled: true,
+      cloudSyncIntervalSeconds: 60,
+      cloudAutoPullEnabled: true,
+      cloudLastSyncAt: '14:32',
+      cloudLastSyncOk: true,
+      cloudLastSyncMessage: 'RTDB /ev/kombi senkronize edildi',
+    );
+    final restored = SystemSettingsState.fromJson(settings.toJson());
+    expect(restored.firebaseApiKey, 'secret-token-123');
+    expect(restored.firebaseNodePath, 'ev/kombi');
+    expect(restored.cloudSyncEnabled, isTrue);
+    expect(restored.cloudSyncIntervalSeconds, 60);
+    expect(restored.cloudAutoPullEnabled, isTrue);
+    expect(restored.cloudLastSyncAt, '14:32');
+    expect(restored.cloudLastSyncOk, isTrue);
+    expect(restored.cloudLastSyncMessage, 'RTDB /ev/kombi senkronize edildi');
+
+    expect(settings.copyWith(cloudSyncIntervalSeconds: 9999).cloudSyncIntervalSeconds, 3600);
+    expect(settings.copyWith(cloudSyncIntervalSeconds: -10).cloudSyncIntervalSeconds, 0);
   });
 }
