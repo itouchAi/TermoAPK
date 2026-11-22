@@ -496,5 +496,52 @@ void main() {
     expect(noKeep.handled, isTrue);
     expect(noKeep.newTargetTemp, isNull);
     expect(noKeep.replyTr.contains('Teşekkürler'), isTrue);
+
+    // User-initiated boiler ON -> OFF within 10s works without 60s lock
+    final userOff = AiCallService.evaluateTrigger(
+      enabled: true,
+      triggerMode: AiCallTriggerMode.ignitionAndSafety,
+      wasHeating: true,
+      nextBoiler: standbyBoiler,
+      safety: safeGuard,
+      roomTemp: 21.8,
+      targetTemp: 18.0,
+      prevTargetTemp: 24.0,
+      isUserChange: true,
+      lastCallAt: t0.subtract(const Duration(seconds: 10)),
+      now: t0,
+    );
+    expect(userOff.shouldCall, isTrue);
+    expect(userOff.reason, AiCallReason.boilerOff);
+
+    // Cranking target temp to MAX (29.0C) triggers urgent high-heat warning
+    final maxBoiler = ThermostatMath.computeBoilerTelemetry(21.8, 29.0);
+    final maxPush = AiCallService.evaluateTrigger(
+      enabled: true,
+      triggerMode: AiCallTriggerMode.ignitionAndSafety,
+      wasHeating: true,
+      nextBoiler: maxBoiler,
+      safety: safeGuard,
+      roomTemp: 21.8,
+      targetTemp: 29.0,
+      prevTargetTemp: 24.0,
+      isUserChange: true,
+      lastCallAt: t0.subtract(const Duration(seconds: 10)),
+      now: t0,
+    );
+    expect(maxPush.shouldCall, isTrue);
+    expect(maxPush.reason, AiCallReason.hotRoom);
+    expect(maxPush.urgent, isTrue);
+
+    final lowerResp = AiCallService.evaluateCallResponse(
+      rawInput: 'düşür',
+      callReason: AiCallReason.hotRoom,
+      boiler: maxBoiler,
+      currentTargetTemp: 29.0,
+      lang: LangCode.tr,
+    );
+    expect(lowerResp.handled, isTrue);
+    expect(lowerResp.newTargetTemp, 22.5);
+    expect(lowerResp.replyTr.contains('Teşekkürler'), isTrue);
   });
 }

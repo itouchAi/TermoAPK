@@ -22,6 +22,24 @@ class VoiceSpeechService {
 
   static bool get isListening => _isListening;
   static bool get isSpeaking => _isSpeaking;
+  static String preferredFemaleVoice = '';
+  static String preferredMaleVoice = '';
+
+  static Future<List<String>> listTurkishVoices() async {
+    if (kIsWeb && WebSpeechBridge.isSupported) {
+      return WebSpeechBridge.listTurkishVoices();
+    }
+    await _ensureVoicesLoaded();
+    final voices = _cachedVoices ?? const [];
+    final out = <String>[];
+    for (final v in voices) {
+      if ((v['locale'] ?? '').toLowerCase().startsWith('tr')) {
+        final name = (v['name'] ?? '').trim();
+        if (name.isNotEmpty && !out.contains(name)) out.add(name);
+      }
+    }
+    return out;
+  }
 
   static void warmup() {
     if (kIsWeb && WebSpeechBridge.isSupported) {
@@ -213,7 +231,19 @@ class VoiceSpeechService {
       await _ensureVoicesLoaded();
 
       final female = isFemaleCharacter(character);
-      final chosen = _pickGenderedVoice(lang: lang, female: female);
+      final preferredName = female ? preferredFemaleVoice : preferredMaleVoice;
+      Map<String, String>? chosen;
+      if (preferredName.trim().isNotEmpty && _cachedVoices != null) {
+        final want = _norm(preferredName.trim());
+        for (final v in _cachedVoices!) {
+          final n = _norm(v['name'] ?? '');
+          if (n == want || n.contains(want)) {
+            chosen = v;
+            break;
+          }
+        }
+      }
+      chosen ??= _pickGenderedVoice(lang: lang, female: female);
       if (chosen != null) {
         await _tts.setVoice({
           'name': chosen['name'] ?? '',
@@ -242,6 +272,7 @@ class VoiceSpeechService {
     }
 
     final female = isFemaleCharacter(character);
+    final preferredName = female ? preferredFemaleVoice : preferredMaleVoice;
 
     // Web uses direct WebSpeechBridge so voice list (`voiceschanged`) and gender selection work reliably
     if (kIsWeb && WebSpeechBridge.isSupported) {
@@ -250,6 +281,7 @@ class VoiceSpeechService {
         spoken,
         lang: lang,
         female: female,
+        preferredVoiceName: preferredName,
         onComplete: () {
           _isSpeaking = false;
           onComplete?.call();

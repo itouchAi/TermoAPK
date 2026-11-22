@@ -66,7 +66,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
   final PageController _pageController = PageController(viewportFraction: 1.0);
   TabId _activeTab = TabId.termo;
-  final double _roomTemp = 21.8;
+  double _roomTemp = 21.8;
   double _targetTemp = 22.5;
   PresetId? _activePreset = PresetId.konfor;
   LangCode _lang = LangCode.tr;
@@ -88,23 +88,48 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   int _slideIndex = 0;
   int _slideTicks = 0;
   int _ambientElapsedSeconds = 0;
+  int _thermalTicks = 0;
 
   Timer? _clockTimer;
   Timer? _idleTimer;
   Timer? _automationTimer;
+  Timer? _aiCallDebounceTimer;
+  bool? _pendingCallBaselineHeating;
+  double? _pendingCallBaselineTarget;
   DateTime? _lastWheelNavAt;
   bool _activeTabCanVertScroll = false;
+
+  void _syncPreferredVoices(SystemSettingsState s) {
+    VoiceSpeechService.preferredFemaleVoice = s.femaleVoiceName;
+    VoiceSpeechService.preferredMaleVoice = s.maleVoiceName;
+  }
 
   @override
   void initState() {
     super.initState();
+    _syncPreferredVoices(_settings);
     _loadPersisted();
     VoiceSpeechService.warmup();
     _resetIdleTimer();
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
-      if (_ambientMode || _visual.theme == AppThemeMode.autoSmart) {
+      _thermalTicks++;
+      final shouldDrift = _thermalTicks % 15 == 0;
+      double? driftedRoom;
+      if (shouldDrift) {
+        final boiler = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp);
+        if (boiler.isHeating && _roomTemp < _targetTemp - 0.1) {
+          driftedRoom = double.parse((_roomTemp + 0.1).clamp(10.0, 32.0).toStringAsFixed(1));
+        } else if (!boiler.isHeating && _roomTemp > 17.2) {
+          driftedRoom = double.parse((_roomTemp - 0.1).clamp(10.0, 32.0).toStringAsFixed(1));
+        }
+      }
+
+      if (driftedRoom != null || _ambientMode || _visual.theme == AppThemeMode.autoSmart) {
         setState(() {
+          if (driftedRoom != null) {
+            _roomTemp = driftedRoom;
+          }
           _now = DateTime.now();
           if (_ambientMode) {
             _ambientElapsedSeconds++;
@@ -121,6 +146,15 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             }
           }
         });
+      }
+
+      if (driftedRoom != null && _thermalTicks % 60 == 0) {
+        final curHeating = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating;
+        _evaluateBoilerAiCallTrigger(
+          wasHeating: curHeating,
+          nextTargetTemp: _targetTemp,
+          isUserChange: false,
+        );
       }
     });
     _automationTimer = Timer.periodic(const Duration(hours: 3), (_) {
@@ -187,6 +221,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           _locationName = (map['locationName'] as String?) ?? _locationName;
           _settings = loadedSettings;
           _visual = loadedVisual;
+          _syncPreferredVoices(loadedSettings);
           final rawSched = map['schedule'];
           if (rawSched is List) {
             final byId = <String, Map<String, dynamic>>{};
@@ -314,6 +349,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     _clockTimer?.cancel();
     _idleTimer?.cancel();
     _automationTimer?.cancel();
+    _aiCallDebounceTimer?.cancel();
     _pageController.dispose();
     AmbientAudioService.stop();
     AmbientAudioService.stopRingtone();
@@ -368,6 +404,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   void _launchAiCall({
     required AiCallReason reason,
     required bool urgent,
+    bool trackCooldown = true,
   }) {
     if (!mounted || _aiCallOpen) return;
     _idleTimer?.cancel();
@@ -379,13 +416,17 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       _aiCallReason = reason;
       _aiCallUrgent = urgent;
       _aiCallOpen = true;
-      _lastAiCallAt = DateTime.now();
+      if (trackCooldown) {
+        _lastAiCallAt = DateTime.now();
+      }
     });
   }
 
   void _evaluateBoilerAiCallTrigger({
     required bool wasHeating,
     required double nextTargetTemp,
+    double? prevTargetTemp,
+    bool isUserChange = false,
   }) {
     if (_aiCallOpen || _modalSheetOpen || _showBootCeremony) return;
     final nextBoiler = ThermostatMath.computeBoilerTelemetry(_roomTemp, nextTargetTemp);
@@ -401,6 +442,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       nextBoiler: nextBoiler,
       safety: safety,
       roomTemp: _roomTemp,
+      targetTemp: nextTargetTemp,
+      prevTargetTemp: prevTargetTemp,
+      isUserChange: isUserChange,
       lastCallAt: _lastAiCallAt,
     );
     if (decision.shouldCall && decision.reason != null) {
@@ -408,8 +452,32 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     }
   }
 
+  void _scheduleSettledAiCallEvaluation({
+    required bool prevHeating,
+    required double prevTarget,
+    Duration delay = const Duration(milliseconds: 900),
+  }) {
+    _pendingCallBaselineHeating ??= prevHeating;
+    _pendingCallBaselineTarget ??= prevTarget;
+    _aiCallDebounceTimer?.cancel();
+    _aiCallDebounceTimer = Timer(delay, () {
+      final baselineHeating = _pendingCallBaselineHeating ?? prevHeating;
+      final baselineTarget = _pendingCallBaselineTarget ?? prevTarget;
+      _pendingCallBaselineHeating = null;
+      _pendingCallBaselineTarget = null;
+      if (!mounted) return;
+      _evaluateBoilerAiCallTrigger(
+        wasHeating: baselineHeating,
+        nextTargetTemp: _targetTemp,
+        prevTargetTemp: baselineTarget,
+        isUserChange: true,
+      );
+    });
+  }
+
   void _changeTarget(double next, {bool suppressAiCall = false}) {
     final prevHeating = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating;
+    final prevTarget = _targetTemp;
     final snapped = ThermostatMath.snapTemperature(next);
     if ((snapped - _targetTemp).abs() >= 0.05) {
       _triggerHaptic();
@@ -421,13 +489,14 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     });
     _persist();
     _syncFirebaseBackground(snapped);
-    if (!suppressAiCall) {
-      _evaluateBoilerAiCallTrigger(wasHeating: prevHeating, nextTargetTemp: snapped);
+    if (!suppressAiCall && (snapped - prevTarget).abs() >= 0.05) {
+      _scheduleSettledAiCallEvaluation(prevHeating: prevHeating, prevTarget: prevTarget);
     }
   }
 
   void _selectPreset(ThermostatPreset preset) {
     final prevHeating = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating;
+    final prevTarget = _targetTemp;
     _triggerHaptic();
     _resetIdleTimer();
     setState(() {
@@ -436,7 +505,11 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     });
     _persist();
     _syncFirebaseBackground(preset.temp);
-    _evaluateBoilerAiCallTrigger(wasHeating: prevHeating, nextTargetTemp: preset.temp);
+    _scheduleSettledAiCallEvaluation(
+      prevHeating: prevHeating,
+      prevTarget: prevTarget,
+      delay: const Duration(milliseconds: 280),
+    );
   }
 
   void _updateVisual(VisualCustomizationState next) {
@@ -809,7 +882,10 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                           onChangeLocation: (loc) => setState(() => _locationName = loc),
                                           onChangeTargetTemp: _changeTarget,
                                           onSaveSettings: (updated) {
-                                            setState(() => _settings = updated);
+                                            setState(() {
+                                              _settings = updated;
+                                              _syncPreferredVoices(updated);
+                                            });
                                             _resetIdleTimer();
                                             _persist();
                                           },
@@ -821,6 +897,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                             reason: reason,
                                             urgent: reason == AiCallReason.safetyAlert ||
                                                 reason == AiCallReason.hotRoom,
+                                            trackCooldown: false,
                                           ),
                                           onReplayBootCeremony: () => setState(() {
                                             _showBootCeremony = true;

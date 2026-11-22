@@ -176,10 +176,28 @@ class WebSpeechBridge {
     return voices;
   }
 
+  static Future<List<String>> listTurkishVoices() async {
+    final synth = _getSynthesis();
+    if (synth == null) return const [];
+    final voices = await _waitForVoices(synth, lang: LangCode.tr, female: true);
+    final result = <String>[];
+    for (final v in voices) {
+      final vLang = _strProp(v, 'lang').toLowerCase();
+      if (vLang.startsWith('tr')) {
+        final name = _strProp(v, 'name').trim();
+        if (name.isNotEmpty && !result.contains(name)) {
+          result.add(name);
+        }
+      }
+    }
+    return result;
+  }
+
   static JSObject? _pickVoice(
     List<JSObject> voices, {
     required LangCode lang,
     required bool female,
+    String? preferredVoiceName,
   }) {
     if (voices.isEmpty) return null;
     final prefix = lang == LangCode.tr ? 'tr' : 'en';
@@ -188,6 +206,16 @@ class WebSpeechBridge {
       return vLang.startsWith(prefix);
     }).toList();
     final pool = langVoices.isNotEmpty ? langVoices : voices;
+
+    if (preferredVoiceName != null && preferredVoiceName.trim().isNotEmpty) {
+      final want = _norm(preferredVoiceName.trim());
+      for (final v in pool) {
+        final name = _norm(_strProp(v, 'name'));
+        if (name == want || name.contains(want)) {
+          return v;
+        }
+      }
+    }
 
     final targetKeys = female ? _femaleKeys : _maleKeys;
     final oppositeKeys = female ? _maleKeys : _femaleKeys;
@@ -215,6 +243,7 @@ class WebSpeechBridge {
     String text, {
     required LangCode lang,
     required bool female,
+    String? preferredVoiceName,
     VoidCallback? onComplete,
   }) async {
     final synth = _getSynthesis();
@@ -235,7 +264,12 @@ class WebSpeechBridge {
     final voices = await _waitForVoices(synth, lang: lang, female: female);
     if (myToken != _speakToken) return;
 
-    final chosen = _pickVoice(voices, lang: lang, female: female);
+    final chosen = _pickVoice(
+      voices,
+      lang: lang,
+      female: female,
+      preferredVoiceName: preferredVoiceName,
+    );
     final chosenLabel = chosen != null
         ? _norm('${_strProp(chosen, 'name')} ${_strProp(chosen, 'voiceURI')}')
         : '';

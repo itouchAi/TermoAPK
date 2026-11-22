@@ -17,8 +17,11 @@ class AiCallService {
   AiCallService._();
 
   static const Duration defaultCooldown = Duration(seconds: 60);
+  static const Duration userActionCooldown = Duration(seconds: 4);
   static const double coldRoomThresholdC = 17.5;
   static const double hotRoomThresholdC = 26.5;
+  static const double highTargetTempThresholdC = 28.0;
+  static const double lowTargetTempThresholdC = 14.5;
 
   /// Formats `20.0` -> `20` and `21.8` -> `21.8` for natural speech readout.
   static String formatSpokenNumber(double value) {
@@ -27,7 +30,7 @@ class AiCallService {
   }
 
   /// Evaluates whether the AI phone call assistant should ring on boiler state
-  /// changes (ignition / shutoff) or room temperature / safety thresholds.
+  /// changes (ignition / shutoff), high target extremes, or room temperature / safety thresholds.
   static AiCallTriggerDecision evaluateTrigger({
     required bool enabled,
     required AiCallTriggerMode triggerMode,
@@ -35,23 +38,35 @@ class AiCallService {
     required BoilerTelemetry nextBoiler,
     required SafetyGuardStatus safety,
     double roomTemp = 21.8,
+    double targetTemp = 22.5,
+    double? prevTargetTemp,
+    bool isUserChange = false,
     DateTime? lastCallAt,
     DateTime? now,
-    Duration cooldown = defaultCooldown,
+    Duration? cooldown,
   }) {
     if (!enabled) {
       return const AiCallTriggerDecision(shouldCall: false);
     }
 
     final checkNow = now ?? DateTime.now();
-    if (lastCallAt != null && checkNow.difference(lastCallAt) < cooldown) {
+    final effectiveCooldown = cooldown ?? (isUserChange ? userActionCooldown : defaultCooldown);
+    if (lastCallAt != null && checkNow.difference(lastCallAt) < effectiveCooldown) {
       return const AiCallTriggerDecision(shouldCall: false);
     }
 
     final ignitionDetected = !wasHeating && nextBoiler.isHeating;
     final shutdownDetected = wasHeating && !nextBoiler.isHeating;
-    final isCold = safety.freezeRisk || roomTemp <= coldRoomThresholdC;
-    final isHot = safety.overheat || roomTemp >= hotRoomThresholdC;
+    final isColdRoom = safety.freezeRisk || roomTemp <= coldRoomThresholdC;
+    final isHotRoom = safety.overheat || roomTemp >= hotRoomThresholdC;
+    final isHighTargetPush = isUserChange &&
+        nextBoiler.isHeating &&
+        targetTemp >= highTargetTempThresholdC &&
+        (prevTargetTemp == null || prevTargetTemp < highTargetTempThresholdC || ignitionDetected);
+    final isLowTargetDrop = isUserChange &&
+        !nextBoiler.isHeating &&
+        targetTemp <= lowTargetTempThresholdC &&
+        (prevTargetTemp == null || prevTargetTemp > lowTargetTempThresholdC);
 
     switch (triggerMode) {
       case AiCallTriggerMode.onIgnition:
@@ -79,18 +94,25 @@ class AiCallService {
             urgent: true,
           );
         }
-        if (isCold && !nextBoiler.isHeating) {
-          return AiCallTriggerDecision(
+        if (isHighTargetPush) {
+          return const AiCallTriggerDecision(
             shouldCall: true,
-            reason: AiCallReason.coldRoom,
-            urgent: safety.freezeRisk,
+            reason: AiCallReason.hotRoom,
+            urgent: true,
           );
         }
-        if (isHot && nextBoiler.isHeating) {
+        if (isHotRoom && nextBoiler.isHeating) {
           return AiCallTriggerDecision(
             shouldCall: true,
             reason: AiCallReason.hotRoom,
             urgent: safety.overheat,
+          );
+        }
+        if (isColdRoom && !nextBoiler.isHeating) {
+          return AiCallTriggerDecision(
+            shouldCall: true,
+            reason: AiCallReason.coldRoom,
+            urgent: safety.freezeRisk,
           );
         }
         if (ignitionDetected) {
@@ -107,6 +129,13 @@ class AiCallService {
             urgent: false,
           );
         }
+        if (isLowTargetDrop) {
+          return const AiCallTriggerDecision(
+            shouldCall: true,
+            reason: AiCallReason.coldRoom,
+            urgent: false,
+          );
+        }
         return const AiCallTriggerDecision(shouldCall: false);
 
       case AiCallTriggerMode.criticalOnly:
@@ -117,14 +146,21 @@ class AiCallService {
             urgent: true,
           );
         }
-        if (isCold && !nextBoiler.isHeating) {
+        if (isHighTargetPush) {
+          return const AiCallTriggerDecision(
+            shouldCall: true,
+            reason: AiCallReason.hotRoom,
+            urgent: true,
+          );
+        }
+        if (isColdRoom && !nextBoiler.isHeating) {
           return const AiCallTriggerDecision(
             shouldCall: true,
             reason: AiCallReason.coldRoom,
             urgent: true,
           );
         }
-        if (isHot && nextBoiler.isHeating) {
+        if (isHotRoom && nextBoiler.isHeating) {
           return const AiCallTriggerDecision(
             shouldCall: true,
             reason: AiCallReason.hotRoom,
@@ -151,8 +187,9 @@ class AiCallService {
     AiCallReason reason,
     BoilerTelemetry boiler,
     SafetyGuardStatus safety,
-    LangCode lang,
-  ) {
+    LangCode lang, {
+    double? targetTemp,
+  }) {
     final tr = lang == LangCode.tr;
     switch (reason) {
       case AiCallReason.ignition:
@@ -160,8 +197,11 @@ class AiCallService {
       case AiCallReason.boilerOff:
         return tr ? '⏸ Kombi Kapatıldı' : '⏸ Boiler Turned Off';
       case AiCallReason.coldRoom:
-        return tr ? '❄️ Ev Sıcaklığı Düştü · Açalım mı?' : '❄️ Room Is Cold · Turn On?';
+        return tr ? '❄️ Düşük Sıcaklık · Açalım mı?' : '❄️ Low Temperature · Turn On?';
       case AiCallReason.hotRoom:
+        if (targetTemp != null && targetTemp >= highTargetTempThresholdC) {
+          return tr ? '⚠️ Yüksek Hedef Sıcaklık · Kısalım mı?' : '⚠️ High Target Temp · Lower It?';
+        }
         return tr ? '☀️ Ev Sıcaklığı Yükseldi · Kapatalım mı?' : '☀️ Room Is Warm · Turn Off?';
       case AiCallReason.safetyAlert:
         return '⚠️ ${safety.headline(lang)}';
@@ -172,8 +212,7 @@ class AiCallService {
     }
   }
 
-  /// Concise, natural spoken briefing with full word units (`derece` / `degrees`),
-  /// avoiding unnecessary technical figures.
+  /// Concise, natural spoken briefing with full word units (`derece` / `degrees`).
   static String buildVoiceScript({
     required AiCallReason reason,
     required String assistantName,
@@ -195,13 +234,18 @@ class AiCallService {
             : 'Hello, this is $assistantName. The boiler has ignited and target temperature is set to $target degrees.';
       case AiCallReason.boilerOff:
         return tr
-            ? 'Merhaba, ben $assistantName. Kombi kapatıldı ve ısıtma bekleme moduna alındı.'
-            : 'Hello, this is $assistantName. The boiler has been turned off and placed in standby.';
+            ? 'Merhaba, ben $assistantName. Kombi kapatıldı, ev sıcaklığı $room derece.'
+            : 'Hello, this is $assistantName. The boiler has been turned off; room temperature is $room degrees.';
       case AiCallReason.coldRoom:
         return tr
-            ? 'Merhaba, ben $assistantName. Ev sıcaklığı $room dereceye düştü. Kombiyi açalım mı?'
-            : 'Hello, this is $assistantName. Room temperature dropped to $room degrees. Should I turn on the boiler?';
+            ? 'Merhaba, ben $assistantName. Ev sıcaklığı $room derece, ortam soğuk. Kombiyi açalım mı?'
+            : 'Hello, this is $assistantName. Room temperature is $room degrees. Should I turn on the boiler?';
       case AiCallReason.hotRoom:
+        if (roomTemp < hotRoomThresholdC && targetTemp >= highTargetTempThresholdC) {
+          return tr
+              ? 'Dikkat, ben $assistantName. Kombi hedef sıcaklığı $target derece ile maksimum seviyeye getirildi. Oda şu an $room derece, kombiyi kapatalım mı yoksa 22.5 dereceye düşürelim mi?'
+              : 'Attention, this is $assistantName. Target temperature is raised to $target degrees while the room is $room degrees. Should I turn off the boiler or lower it?';
+        }
         return tr
             ? 'Merhaba, ben $assistantName. Ev sıcaklığı $room dereceye yükseldi. Kombiyi kapatalım mı?'
             : 'Hello, this is $assistantName. Room temperature rose to $room degrees. Should I turn off the boiler?';
@@ -233,7 +277,7 @@ class AiCallService {
     final text = rawInput.trim().toLowerCase();
     final tr = lang == LangCode.tr;
 
-    // 1) Explicit open/close affirmative phrases
+    // 1) Explicit open/close/lower affirmative phrases
     if (text == 'evet kapat' ||
         text == 'evet kapatalım' ||
         text == 'tamam kapat' ||
@@ -244,6 +288,15 @@ class AiCallService {
         newTargetTemp: ThermostatMath.minTemp,
         replyTr: 'Kombi kapatılıyor. Teşekkürler.',
         replyEn: 'Turning off the boiler. Thank you.',
+      );
+    }
+    if (text.contains('düşür') || text.contains('kıs') || text.contains('lower')) {
+      return const VoiceCommandResult(
+        handled: true,
+        newTargetTemp: 22.5,
+        newPreset: PresetId.konfor,
+        replyTr: 'Sıcaklık 22.5 dereceye düşürülüyor. Teşekkürler.',
+        replyEn: 'Lowering target temperature to 22.5 degrees. Thank you.',
       );
     }
     if (text == 'evet aç' ||
@@ -310,7 +363,7 @@ class AiCallService {
       );
     }
 
-    // 2) Full thermostat voice command parsing
+    // 3) Full thermostat voice command parsing
     final parsed = ThermostatMath.parseVoiceCommand(
       rawInput,
       currentTargetTemp: currentTargetTemp,

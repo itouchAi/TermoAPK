@@ -929,6 +929,8 @@ class SystemSettingsState {
   final bool aiCallMissedAlertEnabled;
   final bool aiCallVoiceBriefEnabled;
   final String aiCallLastOutcome;
+  final String femaleVoiceName;
+  final String maleVoiceName;
   final String espDeviceId;
   final bool espOnline;
   final String firebaseRtdbUrl;
@@ -984,6 +986,8 @@ class SystemSettingsState {
     required this.aiCallMissedAlertEnabled,
     required this.aiCallVoiceBriefEnabled,
     required this.aiCallLastOutcome,
+    this.femaleVoiceName = '',
+    this.maleVoiceName = '',
     required this.espDeviceId,
     required this.espOnline,
     required this.firebaseRtdbUrl,
@@ -1050,10 +1054,12 @@ class SystemSettingsState {
         mascotScale: 1.0,
         aiPhoneCallEnabled: true,
         aiCallRingSeconds: 10,
-        aiCallTriggerMode: AiCallTriggerMode.onIgnition,
+        aiCallTriggerMode: AiCallTriggerMode.ignitionAndSafety,
         aiCallMissedAlertEnabled: true,
         aiCallVoiceBriefEnabled: true,
         aiCallLastOutcome: '',
+        femaleVoiceName: '',
+        maleVoiceName: '',
         espDeviceId: 'ESP32-KOMBI-01',
         espOnline: false,
         firebaseRtdbUrl: 'https://kombi-kontrol-default-rtdb.firebaseio.com',
@@ -1134,6 +1140,8 @@ class SystemSettingsState {
     bool? aiCallMissedAlertEnabled,
     bool? aiCallVoiceBriefEnabled,
     String? aiCallLastOutcome,
+    String? femaleVoiceName,
+    String? maleVoiceName,
     String? espDeviceId,
     bool? espOnline,
     String? firebaseRtdbUrl,
@@ -1189,6 +1197,8 @@ class SystemSettingsState {
       aiCallMissedAlertEnabled: aiCallMissedAlertEnabled ?? this.aiCallMissedAlertEnabled,
       aiCallVoiceBriefEnabled: aiCallVoiceBriefEnabled ?? this.aiCallVoiceBriefEnabled,
       aiCallLastOutcome: aiCallLastOutcome ?? this.aiCallLastOutcome,
+      femaleVoiceName: femaleVoiceName ?? this.femaleVoiceName,
+      maleVoiceName: maleVoiceName ?? this.maleVoiceName,
       espDeviceId: espDeviceId ?? this.espDeviceId,
       espOnline: espOnline ?? this.espOnline,
       firebaseRtdbUrl: firebaseRtdbUrl ?? this.firebaseRtdbUrl,
@@ -1245,6 +1255,8 @@ class SystemSettingsState {
         'aiCallMissedAlertEnabled': aiCallMissedAlertEnabled,
         'aiCallVoiceBriefEnabled': aiCallVoiceBriefEnabled,
         'aiCallLastOutcome': aiCallLastOutcome,
+        'femaleVoiceName': femaleVoiceName,
+        'maleVoiceName': maleVoiceName,
         'espDeviceId': espDeviceId,
         'firebaseRtdbUrl': firebaseRtdbUrl,
         'cloudSyncEnabled': cloudSyncEnabled,
@@ -1355,6 +1367,8 @@ class SystemSettingsState {
       aiCallMissedAlertEnabled: (map['aiCallMissedAlertEnabled'] as bool?) ?? defaults.aiCallMissedAlertEnabled,
       aiCallVoiceBriefEnabled: (map['aiCallVoiceBriefEnabled'] as bool?) ?? defaults.aiCallVoiceBriefEnabled,
       aiCallLastOutcome: (map['aiCallLastOutcome'] as String?) ?? defaults.aiCallLastOutcome,
+      femaleVoiceName: (map['femaleVoiceName'] as String?) ?? defaults.femaleVoiceName,
+      maleVoiceName: (map['maleVoiceName'] as String?) ?? defaults.maleVoiceName,
       espDeviceId: (map['espDeviceId'] as String?) ?? defaults.espDeviceId,
       firebaseRtdbUrl: (map['firebaseRtdbUrl'] as String?) ?? defaults.firebaseRtdbUrl,
       cloudSyncEnabled: (map['cloudSyncEnabled'] as bool?) ?? defaults.cloudSyncEnabled,

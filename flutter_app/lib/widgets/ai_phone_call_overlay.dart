@@ -469,6 +469,7 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
       widget.boiler,
       widget.safety,
       widget.lang,
+      targetTemp: widget.targetTemp,
     );
     final fullScript = _fullTranscript(meta);
     final visibleScript = _phase == _CallPhase.answered
@@ -922,12 +923,22 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                     children: [
                                       Expanded(
                                         child: _InCallQuickButton(
-                                          icon: Icons.check_circle_outline_rounded,
+                                          icon: widget.reason == AiCallReason.hotRoom &&
+                                                  widget.targetTemp >= AiCallService.highTargetTempThresholdC
+                                              ? Icons.thermostat_rounded
+                                              : Icons.check_circle_outline_rounded,
                                           label: widget.reason == AiCallReason.coldRoom
                                               ? (tr ? 'Evet, Kombiyi Aç' : 'Yes, Turn On')
-                                              : (tr ? 'Evet, Kapat' : 'Yes, Turn Off'),
+                                              : (widget.targetTemp >= AiCallService.highTargetTempThresholdC
+                                                  ? (tr ? "22.5°'ye Düşür" : 'Lower to 22.5°')
+                                                  : (tr ? 'Evet, Kapat' : 'Yes, Turn Off')),
                                           accent: const Color(0xFF10B981),
-                                          onTap: () => _executeSpokenOrTypedCommand('evet'),
+                                          onTap: () => _executeSpokenOrTypedCommand(
+                                            widget.reason == AiCallReason.hotRoom &&
+                                                    widget.targetTemp >= AiCallService.highTargetTempThresholdC
+                                                ? 'düşür'
+                                                : 'evet',
+                                          ),
                                         ),
                                       ),
                                       const SizedBox(width: 6),

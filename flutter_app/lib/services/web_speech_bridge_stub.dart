@@ -8,12 +8,15 @@ class WebSpeechBridge {
 
   static void warmup() {}
 
+  static Future<List<String>> listTurkishVoices() async => const [];
+
   static Future<String?> ensureMicPermission(LangCode lang) async => null;
 
   static Future<void> speak(
     String text, {
     required LangCode lang,
     required bool female,
+    String? preferredVoiceName,
     VoidCallback? onComplete,
   }) async {
     onComplete?.call();
