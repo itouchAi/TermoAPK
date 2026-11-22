@@ -34,6 +34,7 @@ class AiPhoneCallOverlay extends StatefulWidget {
   final ValueChanged<double> onAdjustTargetTemp;
   final VoidCallback onMissedCallNotify;
   final ValueChanged<String> onCloseWithOutcome;
+  final ValueChanged<AiCallLogEntry>? onFinishCall;
 
   const AiPhoneCallOverlay({
     super.key,
@@ -55,6 +56,7 @@ class AiPhoneCallOverlay extends StatefulWidget {
     required this.onAdjustTargetTemp,
     required this.onMissedCallNotify,
     required this.onCloseWithOutcome,
+    this.onFinishCall,
   });
 
   @override
@@ -76,8 +78,12 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
   bool _listeningCommand = false;
   bool _ttsPlaying = false;
   bool _closingAfterReply = false;
+  bool _emittedFinish = false;
   String? _quickActionAck;
   String? _heardPreview;
+  String? _commandSummaryTr;
+  String? _commandSummaryEn;
+  double? _updatedTargetTemp;
 
   @override
   void initState() {
@@ -195,8 +201,72 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
         : (widget.missedAlertEnabled ? '$ts · Missed (Alert sent)' : '$ts · Missed');
 
     _closeDelayTimer = Timer(const Duration(milliseconds: 2100), () {
-      if (mounted) widget.onCloseWithOutcome(outcome);
+      if (mounted) {
+        _emitFinishAndClose(
+          status: AiCallStatus.missed,
+          durationSeconds: 0,
+          outcomeText: outcome,
+        );
+      }
     });
+  }
+
+  void _emitFinishAndClose({
+    required AiCallStatus status,
+    required int durationSeconds,
+    required String outcomeText,
+  }) {
+    if (_emittedFinish) return;
+    _emittedFinish = true;
+
+    final effectiveTarget = _updatedTargetTemp ?? widget.targetTemp;
+    final summaryTr = AiCallService.buildAlertHeadline(
+      widget.reason,
+      roomTemp: widget.roomTemp,
+      targetTemp: widget.targetTemp,
+      boilerHeating: widget.boiler.isHeating,
+      lang: LangCode.tr,
+    );
+    final summaryEn = AiCallService.buildAlertHeadline(
+      widget.reason,
+      roomTemp: widget.roomTemp,
+      targetTemp: widget.targetTemp,
+      boilerHeating: widget.boiler.isHeating,
+      lang: LangCode.en,
+    );
+
+    final String actionTr;
+    final String actionEn;
+    if (status == AiCallStatus.answered) {
+      actionTr = _commandSummaryTr ?? 'Görüşme yapıldı (ayar değiştirilmedi)';
+      actionEn = _commandSummaryEn ?? 'Call answered (no changes)';
+    } else if (status == AiCallStatus.declined) {
+      actionTr = 'Meşgule atıldı (işlem yapılmadı)';
+      actionEn = 'Declined / busy (no action taken)';
+    } else {
+      actionTr = 'Cevapsız bırakıldı';
+      actionEn = 'Missed call';
+    }
+
+    final entry = AiCallLogEntry(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      timestamp: NotificationService.formatNowTime(),
+      character: widget.character,
+      reason: widget.reason,
+      status: status,
+      durationSeconds: durationSeconds,
+      summaryTr: summaryTr,
+      summaryEn: summaryEn,
+      actionTakenTr: actionTr,
+      actionTakenEn: actionEn,
+      roomTemp: widget.roomTemp,
+      targetTemp: effectiveTarget,
+      boilerHeating: widget.boiler.isHeating,
+      urgent: widget.urgent,
+    );
+
+    widget.onFinishCall?.call(entry);
+    widget.onCloseWithOutcome(outcomeText);
   }
 
   String? _micPermissionError;
@@ -277,18 +347,30 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     AmbientAudioService.playCallChime(answered: false);
     final tr = widget.lang == LangCode.tr;
     final ts = NotificationService.formatNowTime();
+    final AiCallStatus status;
+    final int durationSeconds;
     final String outcome;
     if (_phase == _CallPhase.answered) {
+      status = AiCallStatus.answered;
+      durationSeconds = _callSeconds;
       final dur = AiCallService.formatCallDuration(_callSeconds);
       outcome = tr ? '$ts · Cevaplandı ($dur)' : '$ts · Answered ($dur)';
     } else if (_phase == _CallPhase.missed) {
+      status = AiCallStatus.missed;
+      durationSeconds = 0;
       outcome = tr
           ? (widget.missedAlertEnabled ? '$ts · Cevapsız (Uyarı gönderildi)' : '$ts · Cevapsız')
           : (widget.missedAlertEnabled ? '$ts · Missed (Alert sent)' : '$ts · Missed');
     } else {
-      outcome = tr ? '$ts · Reddedildi' : '$ts · Declined';
+      status = AiCallStatus.declined;
+      durationSeconds = 0;
+      outcome = tr ? '$ts · Meşgule atıldı' : '$ts · Declined';
     }
-    widget.onCloseWithOutcome(outcome);
+    _emitFinishAndClose(
+      status: status,
+      durationSeconds: durationSeconds,
+      outcomeText: outcome,
+    );
   }
 
   void _speakConfirmationAndAutoHangup(String spokenReply) {
@@ -329,6 +411,15 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     if (_closingAfterReply) return;
     VoiceSpeechService.stopListening();
     final snapped = ThermostatMath.snapTemperature(nextTemp);
+    _updatedTargetTemp = snapped;
+    if (snapped <= ThermostatMath.minTemp) {
+      _commandSummaryTr = 'Komut: Kombi kapatıldı';
+      _commandSummaryEn = 'Command: Boiler turned off';
+    } else {
+      final tStr = AiCallService.formatSpokenNumber(snapped);
+      _commandSummaryTr = 'Komut: Hedef $tStr°C ayarlandı';
+      _commandSummaryEn = 'Command: Target set to $tStr°C';
+    }
     widget.onAdjustTargetTemp(snapped);
     if (widget.hapticEnabled) {
       HardwareService.vibrateMs(
@@ -356,13 +447,30 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
       lang: widget.lang,
     );
     final reply = widget.lang == LangCode.tr ? res.replyTr : res.replyEn;
-    if (res.handled && res.newTargetTemp != null) {
-      widget.onAdjustTargetTemp(res.newTargetTemp!);
-      if (widget.hapticEnabled) {
-        HardwareService.vibrateMs(
-          50,
-          amplitude: HardwareService.scaledAmplitude(155, widget.hapticStrength),
-        );
+    if (res.handled) {
+      final spoken = raw.trim();
+      final prefixTr = spoken.isNotEmpty ? 'Komut ("$spoken"): ' : 'Komut: ';
+      final prefixEn = spoken.isNotEmpty ? 'Command ("$spoken"): ' : 'Command: ';
+      if (res.newTargetTemp != null) {
+        _updatedTargetTemp = res.newTargetTemp;
+        if (res.newTargetTemp! <= ThermostatMath.minTemp) {
+          _commandSummaryTr = '${prefixTr}Kombi kapatıldı';
+          _commandSummaryEn = '${prefixEn}Boiler turned off';
+        } else {
+          final tStr = AiCallService.formatSpokenNumber(res.newTargetTemp!);
+          _commandSummaryTr = '${prefixTr}Hedef $tStr°C';
+          _commandSummaryEn = '${prefixEn}Target $tStr°C';
+        }
+        widget.onAdjustTargetTemp(res.newTargetTemp!);
+        if (widget.hapticEnabled) {
+          HardwareService.vibrateMs(
+            50,
+            amplitude: HardwareService.scaledAmplitude(155, widget.hapticStrength),
+          );
+        }
+      } else {
+        _commandSummaryTr = '${prefixTr}Mevcut ayar korundu';
+        _commandSummaryEn = '${prefixEn}Kept current settings';
       }
     }
     setState(() {

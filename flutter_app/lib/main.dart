@@ -20,6 +20,7 @@ import 'services/voice_speech_service.dart';
 import 'widgets/ai_phone_call_overlay.dart';
 import 'widgets/boot_ceremony_overlay.dart';
 import 'widgets/flow_tab_bar.dart';
+import 'widgets/missed_call_alert.dart';
 import 'widgets/overlays.dart';
 import 'widgets/termo_bot.dart';
 import 'widgets/weather_effects_layer.dart';
@@ -81,6 +82,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   AiCallReason _aiCallReason = AiCallReason.ignition;
   bool _aiCallUrgent = false;
   DateTime? _lastAiCallAt;
+  AiCallLogEntry? _pendingMissedCallAlert;
   bool _voiceOpen = false;
   bool _modalSheetOpen = false;
   bool _showBootCeremony = false;
@@ -1104,6 +1106,20 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                         : '$_locationName · Room ${_roomTemp.toStringAsFixed(1)}°C / Target ${_targetTemp.toStringAsFixed(1)}°C · ${boiler.statusTextEn}',
                   );
                 },
+                onFinishCall: (entry) {
+                  final nextHistory = AiCallService.appendCallHistory(
+                    _settings.aiCallHistory,
+                    entry,
+                    maxEntries: 10,
+                  );
+                  setState(() {
+                    _settings = _settings.copyWith(aiCallHistory: nextHistory);
+                    if (entry.status == AiCallStatus.missed ||
+                        entry.status == AiCallStatus.declined) {
+                      _pendingMissedCallAlert = entry;
+                    }
+                  });
+                },
                 onCloseWithOutcome: (outcome) {
                   setState(() {
                     _aiCallOpen = false;
@@ -1112,6 +1128,63 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                   _persist();
                   _resetIdleTimer();
                 },
+              ),
+
+            // Top Persistent Banner on Missed or Declined AI Call
+            if (_pendingMissedCallAlert != null &&
+                !_aiCallOpen &&
+                !_ambientMode &&
+                !_screensaverPreview &&
+                !_showBootCeremony)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: SafeArea(
+                  bottom: false,
+                  child: TopCallNotificationBanner(
+                    entry: _pendingMissedCallAlert!,
+                    lang: _lang,
+                    onTapBanner: () {
+                      final entry = _pendingMissedCallAlert!;
+                      _triggerHaptic();
+                      _modalSheetOpen = true;
+                      _idleTimer?.cancel();
+                      showMissedCallActionDialog(
+                        context: context,
+                        entry: entry,
+                        lang: _lang,
+                        onApplyAction: (act) {
+                          _changeTarget(act.targetTemp, suppressAiCall: true);
+                          setState(() {
+                            _settings = _settings.copyWith(
+                              aiCallHistory: AiCallService.updateCallHistoryAction(
+                                _settings.aiCallHistory,
+                                entry.id,
+                                actionTr: act.logActionTr,
+                                actionEn: act.logActionEn,
+                              ),
+                            );
+                            _pendingMissedCallAlert = null;
+                          });
+                          _persist();
+                        },
+                        onDismissWithoutAction: () {
+                          if (mounted) {
+                            setState(() => _pendingMissedCallAlert = null);
+                          }
+                        },
+                      ).whenComplete(() {
+                        _modalSheetOpen = false;
+                        if (mounted) _resetIdleTimer();
+                      });
+                    },
+                    onDismiss: () {
+                      _triggerHaptic();
+                      setState(() => _pendingMissedCallAlert = null);
+                    },
+                  ),
+                ),
               ),
 
             // Interactive Multi-Stage Boot Calibration Ceremony

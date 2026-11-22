@@ -612,4 +612,64 @@ void main() {
     expect(lowerResp.newTargetTemp, 22.5);
     expect(lowerResp.replyTr.contains('Teşekkürler'), isTrue);
   });
+
+  test('AiCallLogEntry and AiCallService maintain last 10 calls and suggested actions', () {
+    List<AiCallLogEntry> history = const [];
+    for (int i = 1; i <= 12; i++) {
+      history = AiCallService.appendCallHistory(
+        history,
+        AiCallLogEntry(
+          id: 'call_$i',
+          timestamp: '14:${i.toString().padLeft(2, '0')}',
+          character: MascotCharacter.ela,
+          reason: i % 2 == 0 ? AiCallReason.hotRoom : AiCallReason.boilerOff,
+          status: i == 12 ? AiCallStatus.missed : AiCallStatus.answered,
+          durationSeconds: i == 12 ? 0 : i * 3,
+          summaryTr: AiCallService.buildAlertHeadline(
+            i % 2 == 0 ? AiCallReason.hotRoom : AiCallReason.boilerOff,
+            roomTemp: 21.8,
+            targetTemp: i % 2 == 0 ? 29.0 : 16.0,
+            boilerHeating: i % 2 == 0,
+            lang: LangCode.tr,
+          ),
+          summaryEn: 'Summary $i',
+          actionTakenTr: i == 12 ? 'Cevapsız bırakıldı' : 'Komut: Kombi kapatıldı',
+          actionTakenEn: 'Action $i',
+          roomTemp: 21.8,
+          targetTemp: i % 2 == 0 ? 29.0 : 16.0,
+          boilerHeating: i % 2 == 0,
+          urgent: i % 2 == 0,
+        ),
+        maxEntries: 10,
+      );
+    }
+
+    // Keeps at most 10 entries, newest first
+    expect(history.length, 10);
+    expect(history.first.id, 'call_12');
+    expect(history.last.id, 'call_3');
+
+    // JSON round-trip via SystemSettingsState
+    final settings = SystemSettingsState.defaults().copyWith(aiCallHistory: history);
+    final restored = SystemSettingsState.fromJson(settings.toJson());
+    expect(restored.aiCallHistory.length, 10);
+    expect(restored.aiCallHistory.first.status, AiCallStatus.missed);
+    expect(restored.aiCallHistory.first.character, MascotCharacter.ela);
+    expect(restored.aiCallHistory.first.summaryTr.contains('maksimum'), isTrue);
+
+    // Suggested actions for high-target missed call include lower to 22.5, Eco, and turn off
+    final actions = AiCallService.suggestedActionsForEntry(restored.aiCallHistory.first);
+    expect(actions.length, 3);
+    expect(actions.first.targetTemp, 22.5);
+    expect(actions.last.targetTemp, ThermostatMath.minTemp);
+
+    // Updating recorded action from top notification banner updates matching entry
+    final updated = AiCallService.updateCallHistoryAction(
+      restored.aiCallHistory,
+      'call_12',
+      actionTr: actions.last.logActionTr,
+      actionEn: actions.last.logActionEn,
+    );
+    expect(updated.first.actionTakenTr, 'Bildirimden: Kombi kapatıldı');
+  });
 }

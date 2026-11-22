@@ -13,6 +13,24 @@ class AiCallTriggerDecision {
   });
 }
 
+class AiCallQuickAction {
+  final String labelTr;
+  final String labelEn;
+  final double targetTemp;
+  final String logActionTr;
+  final String logActionEn;
+  final bool isDanger;
+
+  const AiCallQuickAction({
+    required this.labelTr,
+    required this.labelEn,
+    required this.targetTemp,
+    required this.logActionTr,
+    required this.logActionEn,
+    this.isDanger = false,
+  });
+}
+
 class AiCallService {
   AiCallService._();
 
@@ -410,5 +428,234 @@ class AiCallService {
     final m = (safe ~/ 60).toString().padLeft(2, '0');
     final s = (safe % 60).toString().padLeft(2, '0');
     return '$m:$s';
+  }
+
+  /// Concise human-readable event message shown in call history and missed/declined alert dialogs.
+  static String buildAlertHeadline(
+    AiCallReason reason, {
+    required double roomTemp,
+    required double targetTemp,
+    required bool boilerHeating,
+    required LangCode lang,
+  }) {
+    final tr = lang == LangCode.tr;
+    final room = formatSpokenNumber(roomTemp);
+    final target = formatSpokenNumber(targetTemp);
+    switch (reason) {
+      case AiCallReason.ignition:
+        return tr
+            ? 'Kombi açıldı / ateşlendi. Hedef sıcaklık $target°C (Oda $room°C).'
+            : 'Boiler turned on / ignited. Target set to $target°C (Room $room°C).';
+      case AiCallReason.boilerOff:
+        return tr
+            ? 'Kombi kapatıldı ve ısıtma durduruldu (Oda $room°C, Hedef $target°C).'
+            : 'Boiler turned off and heating paused (Room $room°C, Target $target°C).';
+      case AiCallReason.coldRoom:
+        return tr
+            ? 'Ev sıcaklığı $room°C ile düşük seviyeye indi; kombi şu an kapalı.'
+            : 'Room temperature dropped to $room°C while the boiler is off.';
+      case AiCallReason.hotRoom:
+        if (targetTemp >= highTargetTempThresholdC) {
+          return tr
+              ? 'Hedef sıcaklık $target°C ile maksimum seviyeye alındı (Oda $room°C).'
+              : 'Target temperature was raised to maximum ($target°C) while room is $room°C.';
+        }
+        return tr
+            ? 'Ev sıcaklığı $room°C ile yüksek seviyeye ulaştı (Hedef $target°C).'
+            : 'Room temperature reached $room°C (Target $target°C).';
+      case AiCallReason.safetyAlert:
+        return tr
+            ? 'Kritik kombi emniyet uyarısı algılandı! Lütfen cihazı ve basıncı kontrol edin.'
+            : 'Critical boiler safety alert detected! Please inspect pressure and status.';
+      case AiCallReason.manualTest:
+        return boilerHeating
+            ? (tr
+                ? 'Asistan araması: Kombi aktif çalışıyor (Hedef $target°C, Oda $room°C).'
+                : 'Assistant call: Boiler active (Target $target°C, Room $room°C).')
+            : (tr
+                ? 'Asistan araması: Kombi şu an kapalı (Oda $room°C, Hedef $target°C).'
+                : 'Assistant call: Boiler idle (Room $room°C, Target $target°C).');
+    }
+  }
+
+  /// Context-specific actions presented when tapping a missed/declined call banner or history item.
+  static List<AiCallQuickAction> suggestedActionsForEntry(AiCallLogEntry entry) {
+    switch (entry.reason) {
+      case AiCallReason.hotRoom:
+        if (entry.targetTemp >= highTargetTempThresholdC) {
+          return const [
+            AiCallQuickAction(
+              labelTr: "22.5°C'ye Düşür (Konfor)",
+              labelEn: 'Lower to 22.5°C (Comfort)',
+              targetTemp: 22.5,
+              logActionTr: "Bildirimden: 22.5°C Konfor'a düşürüldü",
+              logActionEn: 'From alert: Lowered to 22.5°C Comfort',
+            ),
+            AiCallQuickAction(
+              labelTr: 'Eko Moduna Al (20°C)',
+              labelEn: 'Set Eco Mode (20°C)',
+              targetTemp: 20.0,
+              logActionTr: "Bildirimden: Eko (20°C)'ya alındı",
+              logActionEn: 'From alert: Set Eco (20°C)',
+            ),
+            AiCallQuickAction(
+              labelTr: 'Kombiyi Kapat',
+              labelEn: 'Turn Off Boiler',
+              targetTemp: ThermostatMath.minTemp,
+              logActionTr: 'Bildirimden: Kombi kapatıldı',
+              logActionEn: 'From alert: Boiler turned off',
+              isDanger: true,
+            ),
+          ];
+        }
+        return const [
+          AiCallQuickAction(
+            labelTr: 'Kombiyi Kapat',
+            labelEn: 'Turn Off Boiler',
+            targetTemp: ThermostatMath.minTemp,
+            logActionTr: 'Bildirimden: Kombi kapatıldı',
+            logActionEn: 'From alert: Boiler turned off',
+            isDanger: true,
+          ),
+          AiCallQuickAction(
+            labelTr: 'Eko Moduna Al (20°C)',
+            labelEn: 'Set Eco Mode (20°C)',
+            targetTemp: 20.0,
+            logActionTr: "Bildirimden: Eko (20°C)'ya alındı",
+            logActionEn: 'From alert: Set Eco (20°C)',
+          ),
+        ];
+
+      case AiCallReason.coldRoom:
+      case AiCallReason.boilerOff:
+        return const [
+          AiCallQuickAction(
+            labelTr: 'Kombiyi Aç (22.5°C)',
+            labelEn: 'Turn On Boiler (22.5°C)',
+            targetTemp: 22.5,
+            logActionTr: 'Bildirimden: Kombi açıldı (22.5°C)',
+            logActionEn: 'From alert: Boiler turned on (22.5°C)',
+          ),
+          AiCallQuickAction(
+            labelTr: 'Eko Modunda Aç (20°C)',
+            labelEn: 'Open in Eco (20°C)',
+            targetTemp: 20.0,
+            logActionTr: 'Bildirimden: Eko (20°C) ile açıldı',
+            logActionEn: 'From alert: Opened in Eco (20°C)',
+          ),
+          AiCallQuickAction(
+            labelTr: 'Hızlı Isıt / Boost (25°C)',
+            labelEn: 'Boost Heat (25°C)',
+            targetTemp: 25.0,
+            logActionTr: 'Bildirimden: Boost (25°C) açıldı',
+            logActionEn: 'From alert: Boost (25°C) activated',
+          ),
+        ];
+
+      case AiCallReason.ignition:
+        return const [
+          AiCallQuickAction(
+            labelTr: 'Eko Moduna Düşür (20°C)',
+            labelEn: 'Lower to Eco (20°C)',
+            targetTemp: 20.0,
+            logActionTr: "Bildirimden: Eko (20°C)'ya düşürüldü",
+            logActionEn: 'From alert: Lowered to Eco (20°C)',
+          ),
+          AiCallQuickAction(
+            labelTr: 'Kombiyi Kapat',
+            labelEn: 'Turn Off Boiler',
+            targetTemp: ThermostatMath.minTemp,
+            logActionTr: 'Bildirimden: Kombi kapatıldı',
+            logActionEn: 'From alert: Boiler turned off',
+            isDanger: true,
+          ),
+        ];
+
+      case AiCallReason.safetyAlert:
+        return const [
+          AiCallQuickAction(
+            labelTr: 'Güvenlik İçin Kombiyi Kapat',
+            labelEn: 'Turn Off Boiler Safely',
+            targetTemp: ThermostatMath.minTemp,
+            logActionTr: 'Bildirimden: Emniyet için kombi kapatıldı',
+            logActionEn: 'From alert: Boiler shut off for safety',
+            isDanger: true,
+          ),
+          AiCallQuickAction(
+            labelTr: 'Eko Düşük Güç (20°C)',
+            labelEn: 'Eco Low Load (20°C)',
+            targetTemp: 20.0,
+            logActionTr: "Bildirimden: Eko (20°C)'ya alındı",
+            logActionEn: 'From alert: Set Eco (20°C)',
+          ),
+        ];
+
+      case AiCallReason.manualTest:
+        if (entry.boilerHeating) {
+          return const [
+            AiCallQuickAction(
+              labelTr: 'Eko Moduna Al (20°C)',
+              labelEn: 'Set Eco Mode (20°C)',
+              targetTemp: 20.0,
+              logActionTr: "Bildirimden: Eko (20°C)'ya alındı",
+              logActionEn: 'From alert: Set Eco (20°C)',
+            ),
+            AiCallQuickAction(
+              labelTr: 'Kombiyi Kapat',
+              labelEn: 'Turn Off Boiler',
+              targetTemp: ThermostatMath.minTemp,
+              logActionTr: 'Bildirimden: Kombi kapatıldı',
+              logActionEn: 'From alert: Boiler turned off',
+              isDanger: true,
+            ),
+          ];
+        }
+        return const [
+          AiCallQuickAction(
+            labelTr: 'Kombiyi Aç (22.5°C)',
+            labelEn: 'Turn On Boiler (22.5°C)',
+            targetTemp: 22.5,
+            logActionTr: 'Bildirimden: Kombi açıldı (22.5°C)',
+            logActionEn: 'From alert: Boiler turned on (22.5°C)',
+          ),
+          AiCallQuickAction(
+            labelTr: 'Eko Modu (20°C)',
+            labelEn: 'Eco Mode (20°C)',
+            targetTemp: 20.0,
+            logActionTr: "Bildirimden: Eko (20°C)'ya alındı",
+            logActionEn: 'From alert: Set Eco (20°C)',
+          ),
+        ];
+    }
+  }
+
+  /// Prepends [entry] and keeps at most [maxEntries] recent calls (default 10).
+  static List<AiCallLogEntry> appendCallHistory(
+    List<AiCallLogEntry> existing,
+    AiCallLogEntry entry, {
+    int maxEntries = 10,
+  }) {
+    final next = <AiCallLogEntry>[
+      entry,
+      ...existing.where((e) => e.id != entry.id),
+    ];
+    if (next.length <= maxEntries) return next;
+    return next.sublist(0, maxEntries);
+  }
+
+  /// Updates the recorded action of a call log entry by [entryId].
+  static List<AiCallLogEntry> updateCallHistoryAction(
+    List<AiCallLogEntry> existing,
+    String entryId, {
+    required String actionTr,
+    required String actionEn,
+  }) {
+    return [
+      for (final item in existing)
+        if (item.id == entryId)
+          item.copyWith(actionTakenTr: actionTr, actionTakenEn: actionEn)
+        else
+          item,
+    ];
   }
 }

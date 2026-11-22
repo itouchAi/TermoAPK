@@ -10,6 +10,7 @@ import '../services/hardware_service.dart';
 import '../services/notification_service.dart';
 import '../services/voice_gender_classifier.dart';
 import '../services/voice_speech_service.dart';
+import '../widgets/missed_call_alert.dart';
 import '../widgets/termo_bot.dart';
 import 'google_home_sheet.dart';
 import 'vault_center_sheet.dart';
@@ -2977,7 +2978,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        tr ? 'Son Arama Kaydı: ${_draft.aiCallLastOutcome}' : 'Last Call Log: ${_draft.aiCallLastOutcome}',
+                        tr ? 'Son Arama Özeti: ${_draft.aiCallLastOutcome}' : 'Last Call Log: ${_draft.aiCallLastOutcome}',
                         style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white70),
                       ),
                     ),
@@ -2985,6 +2986,147 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 ),
               ),
             ],
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        tr
+                            ? 'Son 10 Arama Kaydı (${_draft.aiCallHistory.length}/10)'
+                            : 'Last 10 Call Records (${_draft.aiCallHistory.length}/10)',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF6EE7B7)),
+                      ),
+                      if (_draft.aiCallHistory.isNotEmpty)
+                        GestureDetector(
+                          onTap: () {
+                            _hapticTap();
+                            final cleared = _draft.copyWith(aiCallHistory: const [], aiCallLastOutcome: '');
+                            setState(() => _draft = cleared);
+                            widget.onSaveSettings(cleared);
+                          },
+                          child: Text(
+                            tr ? 'Temizle' : 'Clear',
+                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFFF87171)),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  if (_draft.aiCallHistory.isEmpty)
+                    Text(
+                      tr
+                          ? 'Henüz kayıtlı arama yok. Cevaplanan, cevapsız kalan ve meşgule atılan son 10 çağrı burada listelenir.'
+                          : 'No call records yet. Your last 10 answered, missed, or declined calls appear here.',
+                      style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.56), height: 1.35),
+                    )
+                  else
+                    for (final entry in _draft.aiCallHistory) ...[
+                      Builder(
+                        builder: (_) {
+                          final m = MascotMeta.of(entry.character);
+                          final badgeColor = entry.status == AiCallStatus.answered
+                              ? const Color(0xFF10B981)
+                              : (entry.status == AiCallStatus.declined
+                                  ? const Color(0xFFEF4444)
+                                  : const Color(0xFFF59E0B));
+                          final summary = tr ? entry.summaryTr : entry.summaryEn;
+                          final actionText = tr ? entry.actionTakenTr : entry.actionTakenEn;
+                          return GestureDetector(
+                            onTap: () {
+                              _hapticTap();
+                              showMissedCallActionDialog(
+                                context: context,
+                                entry: entry,
+                                lang: _lang,
+                                onApplyAction: (act) {
+                                  widget.onChangeTargetTemp(act.targetTemp);
+                                  final updatedHistory = AiCallService.updateCallHistoryAction(
+                                    _draft.aiCallHistory,
+                                    entry.id,
+                                    actionTr: act.logActionTr,
+                                    actionEn: act.logActionEn,
+                                  );
+                                  final nextSettings = _draft.copyWith(aiCallHistory: updatedHistory);
+                                  setState(() {
+                                    _liveTargetTemp = act.targetTemp;
+                                    _draft = nextSettings;
+                                  });
+                                  widget.onSaveSettings(nextSettings);
+                                },
+                              );
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 6),
+                              padding: const EdgeInsets.all(9),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.035),
+                                borderRadius: BorderRadius.circular(11),
+                                border: Border.all(color: badgeColor.withValues(alpha: 0.28)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: badgeColor.withValues(alpha: 0.16),
+                                          borderRadius: BorderRadius.circular(7),
+                                        ),
+                                        child: Text(
+                                          entry.statusLabel(_lang),
+                                          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: badgeColor),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          '${m.name} · ${entry.timestamp}',
+                                          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      Text(
+                                        '${entry.durationSeconds} sn',
+                                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white.withValues(alpha: 0.65)),
+                                      ),
+                                    ],
+                                  ),
+                                  if (summary.isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      summary,
+                                      style: const TextStyle(fontSize: 11, color: Colors.white, height: 1.3),
+                                    ),
+                                  ],
+                                  if (actionText.isNotEmpty) ...[
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      '${tr ? 'İşlem' : 'Action'}: $actionText',
+                                      style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFF93C5FD)),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                ],
+              ),
+            ),
             const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.all(10),

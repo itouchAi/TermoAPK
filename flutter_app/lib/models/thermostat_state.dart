@@ -736,6 +736,132 @@ enum AiCallReason {
   manualTest,
 }
 
+enum AiCallStatus {
+  answered,
+  missed,
+  declined,
+}
+
+class AiCallLogEntry {
+  final String id;
+  final String timestamp;
+  final MascotCharacter character;
+  final AiCallReason reason;
+  final AiCallStatus status;
+  final int durationSeconds;
+  final String summaryTr;
+  final String summaryEn;
+  final String actionTakenTr;
+  final String actionTakenEn;
+  final double roomTemp;
+  final double targetTemp;
+  final bool boilerHeating;
+  final bool urgent;
+
+  const AiCallLogEntry({
+    required this.id,
+    required this.timestamp,
+    required this.character,
+    required this.reason,
+    required this.status,
+    required this.durationSeconds,
+    required this.summaryTr,
+    required this.summaryEn,
+    required this.actionTakenTr,
+    required this.actionTakenEn,
+    required this.roomTemp,
+    required this.targetTemp,
+    required this.boilerHeating,
+    this.urgent = false,
+  });
+
+  AiCallLogEntry copyWith({
+    String? actionTakenTr,
+    String? actionTakenEn,
+    AiCallStatus? status,
+    int? durationSeconds,
+  }) {
+    return AiCallLogEntry(
+      id: id,
+      timestamp: timestamp,
+      character: character,
+      reason: reason,
+      status: status ?? this.status,
+      durationSeconds: durationSeconds ?? this.durationSeconds,
+      summaryTr: summaryTr,
+      summaryEn: summaryEn,
+      actionTakenTr: actionTakenTr ?? this.actionTakenTr,
+      actionTakenEn: actionTakenEn ?? this.actionTakenEn,
+      roomTemp: roomTemp,
+      targetTemp: targetTemp,
+      boilerHeating: boilerHeating,
+      urgent: urgent,
+    );
+  }
+
+  String formattedDuration() {
+    final safe = durationSeconds < 0 ? 0 : durationSeconds;
+    final m = (safe ~/ 60).toString().padLeft(2, '0');
+    final s = (safe % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  String statusLabel(LangCode lang) {
+    final tr = lang == LangCode.tr;
+    switch (status) {
+      case AiCallStatus.answered:
+        return tr ? 'Cevaplandı · ${formattedDuration()}' : 'Answered · ${formattedDuration()}';
+      case AiCallStatus.missed:
+        return tr ? 'Cevapsız Arama' : 'Missed Call';
+      case AiCallStatus.declined:
+        return tr ? 'Meşgule Atıldı' : 'Declined / Busy';
+    }
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'timestamp': timestamp,
+        'character': character.name,
+        'reason': reason.name,
+        'status': status.name,
+        'durationSeconds': durationSeconds,
+        'summaryTr': summaryTr,
+        'summaryEn': summaryEn,
+        'actionTakenTr': actionTakenTr,
+        'actionTakenEn': actionTakenEn,
+        'roomTemp': roomTemp,
+        'targetTemp': targetTemp,
+        'boilerHeating': boilerHeating,
+        'urgent': urgent,
+      };
+
+  static T _parseEnum<T extends Enum>(String? raw, List<T> values, T fallback) {
+    for (final v in values) {
+      if (v.name == raw) return v;
+    }
+    return fallback;
+  }
+
+  factory AiCallLogEntry.fromJson(Map<String, dynamic> map) {
+    return AiCallLogEntry(
+      id: (map['id'] as String?) ?? DateTime.now().microsecondsSinceEpoch.toString(),
+      timestamp: (map['timestamp'] as String?) ?? '--:--',
+      character: _parseEnum(map['character'] as String?, MascotCharacter.values, MascotCharacter.ela),
+      reason: _parseEnum(map['reason'] as String?, AiCallReason.values, AiCallReason.manualTest),
+      status: _parseEnum(map['status'] as String?, AiCallStatus.values, AiCallStatus.missed),
+      durationSeconds: (map['durationSeconds'] as num?)?.toInt() ?? 0,
+      summaryTr: (map['summaryTr'] as String?) ?? '',
+      summaryEn: (map['summaryEn'] as String?) ?? '',
+      actionTakenTr: (map['actionTakenTr'] as String?) ?? '',
+      actionTakenEn: (map['actionTakenEn'] as String?) ?? '',
+      roomTemp: (map['roomTemp'] as num?)?.toDouble() ?? 21.8,
+      targetTemp: (map['targetTemp'] as num?)?.toDouble() ?? 22.5,
+      boilerHeating: (map['boilerHeating'] as bool?) ?? false,
+      urgent: (map['urgent'] as bool?) ?? false,
+    );
+  }
+}
+
 class HourlyWeatherSlot {
   final String hour;
   final int temp;
@@ -929,6 +1055,7 @@ class SystemSettingsState {
   final bool aiCallMissedAlertEnabled;
   final bool aiCallVoiceBriefEnabled;
   final String aiCallLastOutcome;
+  final List<AiCallLogEntry> aiCallHistory;
   final String femaleVoiceName;
   final String maleVoiceName;
   final String espDeviceId;
@@ -986,6 +1113,7 @@ class SystemSettingsState {
     required this.aiCallMissedAlertEnabled,
     required this.aiCallVoiceBriefEnabled,
     required this.aiCallLastOutcome,
+    this.aiCallHistory = const [],
     this.femaleVoiceName = '',
     this.maleVoiceName = '',
     required this.espDeviceId,
@@ -1058,6 +1186,7 @@ class SystemSettingsState {
         aiCallMissedAlertEnabled: true,
         aiCallVoiceBriefEnabled: true,
         aiCallLastOutcome: '',
+        aiCallHistory: const [],
         femaleVoiceName: '',
         maleVoiceName: '',
         espDeviceId: 'ESP32-KOMBI-01',
@@ -1140,6 +1269,7 @@ class SystemSettingsState {
     bool? aiCallMissedAlertEnabled,
     bool? aiCallVoiceBriefEnabled,
     String? aiCallLastOutcome,
+    List<AiCallLogEntry>? aiCallHistory,
     String? femaleVoiceName,
     String? maleVoiceName,
     String? espDeviceId,
@@ -1197,6 +1327,7 @@ class SystemSettingsState {
       aiCallMissedAlertEnabled: aiCallMissedAlertEnabled ?? this.aiCallMissedAlertEnabled,
       aiCallVoiceBriefEnabled: aiCallVoiceBriefEnabled ?? this.aiCallVoiceBriefEnabled,
       aiCallLastOutcome: aiCallLastOutcome ?? this.aiCallLastOutcome,
+      aiCallHistory: aiCallHistory ?? this.aiCallHistory,
       femaleVoiceName: femaleVoiceName ?? this.femaleVoiceName,
       maleVoiceName: maleVoiceName ?? this.maleVoiceName,
       espDeviceId: espDeviceId ?? this.espDeviceId,
@@ -1255,6 +1386,7 @@ class SystemSettingsState {
         'aiCallMissedAlertEnabled': aiCallMissedAlertEnabled,
         'aiCallVoiceBriefEnabled': aiCallVoiceBriefEnabled,
         'aiCallLastOutcome': aiCallLastOutcome,
+        'aiCallHistory': aiCallHistory.take(10).map((e) => e.toJson()).toList(),
         'femaleVoiceName': femaleVoiceName,
         'maleVoiceName': maleVoiceName,
         'espDeviceId': espDeviceId,
@@ -1367,6 +1499,20 @@ class SystemSettingsState {
       aiCallMissedAlertEnabled: (map['aiCallMissedAlertEnabled'] as bool?) ?? defaults.aiCallMissedAlertEnabled,
       aiCallVoiceBriefEnabled: (map['aiCallVoiceBriefEnabled'] as bool?) ?? defaults.aiCallVoiceBriefEnabled,
       aiCallLastOutcome: (map['aiCallLastOutcome'] as String?) ?? defaults.aiCallLastOutcome,
+      aiCallHistory: () {
+        final raw = map['aiCallHistory'];
+        if (raw is! List) return defaults.aiCallHistory;
+        final list = <AiCallLogEntry>[];
+        for (final item in raw) {
+          if (item is Map<String, dynamic>) {
+            list.add(AiCallLogEntry.fromJson(item));
+          } else if (item is Map) {
+            list.add(AiCallLogEntry.fromJson(Map<String, dynamic>.from(item)));
+          }
+          if (list.length >= 10) break;
+        }
+        return list;
+      }(),
       femaleVoiceName: (map['femaleVoiceName'] as String?) ?? defaults.femaleVoiceName,
       maleVoiceName: (map['maleVoiceName'] as String?) ?? defaults.maleVoiceName,
       espDeviceId: (map['espDeviceId'] as String?) ?? defaults.espDeviceId,
