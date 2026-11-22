@@ -128,6 +128,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
   String? _cloudSyncStatus;
   bool _cloudSyncOk = true;
   bool _showCloudPayloadPreview = false;
+  bool _themesAudioAccordionExpanded = true;
 
   final _firebaseUrlCtrl = TextEditingController();
   final _firebaseApiKeyCtrl = TextEditingController();
@@ -284,6 +285,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     _firebaseNodeCtrl.text = _draft.firebaseNodePath;
     _espIdCtrl.text = _draft.espDeviceId;
     _customAudioCtrl.text = _draft.customAudioLabel;
+    _themesAudioAccordionExpanded = _draft.smartDisplayMode != SmartDisplayMode.aod;
     if (_draft.screensaverCustomBgSource.startsWith('http')) {
       _screensaverBgUrlCtrl.text = _draft.screensaverCustomBgSource;
     }
@@ -371,12 +373,261 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
       if (mounted) setState(() => _audioPreviewPlaying = false);
       return;
     }
+    final typed = _customAudioCtrl.text.trim();
+    var targetTrack = _draft.ambientSoundtrack;
+    if (typed.startsWith('http://') || typed.startsWith('https://')) {
+      targetTrack = AmbientSoundtrack.customMp3;
+      if (mounted) {
+        setState(() {
+          _draft = _draft.copyWith(
+            ambientSoundtrack: AmbientSoundtrack.customMp3,
+            customAudioLabel: typed,
+            customAudioSource: typed,
+          );
+        });
+      }
+    } else if (targetTrack == AmbientSoundtrack.silent) {
+      await AmbientAudioService.stop();
+      if (mounted) {
+        setState(() {
+          _audioPreviewPlaying = false;
+          _statusBanner = _lang == LangCode.tr
+              ? 'Sessiz mod seçili — dinlemek için bir ortam sesi seçin.'
+              : 'Muted selected — pick an ambient soundtrack to preview.';
+        });
+      }
+      return;
+    }
     await AmbientAudioService.start(
-      track: _draft.ambientSoundtrack,
+      track: targetTrack,
       customSource: _resolveAudioSource(),
       volume: _draft.ambientVolume,
     );
     if (mounted) setState(() => _audioPreviewPlaying = true);
+  }
+
+  Future<void> _pickMultipleSlideImages() async {
+    _hapticTap();
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: true,
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final nextList = List<SmartDisplaySlideImage>.from(_draft.slideImages);
+      var seq = 0;
+      for (final file in result.files) {
+        if (nextList.length >= 12) break;
+        final bytes = file.bytes;
+        if (bytes == null || bytes.isEmpty) continue;
+        nextList.add(
+          SmartDisplaySlideImage(
+            id: '${DateTime.now().microsecondsSinceEpoch}_${seq++}',
+            name: file.name,
+            dataBase64: base64Encode(bytes),
+            filePath: kIsWeb ? '' : (file.path ?? ''),
+          ),
+        );
+      }
+      if (!mounted) return;
+      setState(() => _draft = _draft.copyWith(slideImages: nextList));
+    } catch (_) {}
+  }
+
+  Future<void> _pickSingleDisplayImage() async {
+    _hapticTap();
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+      final file = result.files.first;
+      final bytes = file.bytes;
+      if (bytes == null || bytes.isEmpty) return;
+      final img = SmartDisplaySlideImage(
+        id: '${DateTime.now().microsecondsSinceEpoch}_single',
+        name: file.name,
+        dataBase64: base64Encode(bytes),
+        filePath: kIsWeb ? '' : (file.path ?? ''),
+      );
+      if (!mounted) return;
+      setState(() => _draft = _draft.copyWith(singleDisplayImage: img));
+    } catch (_) {}
+  }
+
+  void _showSlidePhotoPreviewDialog({
+    required List<SmartDisplaySlideImage> images,
+    int initialIndex = 0,
+    bool isSlideshow = true,
+  }) {
+    if (images.isEmpty) return;
+    final tr = _lang == LangCode.tr;
+    var currentIdx = initialIndex.clamp(0, images.length - 1);
+
+    showDialog<void>(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (dCtx, setModalState) {
+          final currentList = isSlideshow
+              ? _draft.slideImages
+              : (_draft.singleDisplayImage != null ? [_draft.singleDisplayImage!] : <SmartDisplaySlideImage>[]);
+          if (currentList.isEmpty) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF13131A),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              content: Text(
+                tr ? 'Görsel kalmadı.' : 'No images left.',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dCtx).pop(),
+                  child: Text(tr ? 'Kapat' : 'Close'),
+                ),
+              ],
+            );
+          }
+          if (currentIdx >= currentList.length) {
+            currentIdx = currentList.length - 1;
+          }
+          final item = currentList[currentIdx];
+          final bytes = item.decodeBytes();
+
+          return Dialog(
+            backgroundColor: const Color(0xFF12121A),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460, maxHeight: 540),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.photo_size_select_actual_outlined, size: 17, color: Color(0xFF60A5FA)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '${item.name} (${currentIdx + 1}/${currentList.length})',
+                            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.of(dCtx).pop(),
+                          icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 20),
+                          tooltip: tr ? 'Kapat' : 'Close',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Flexible(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          color: Colors.black,
+                          constraints: const BoxConstraints(minHeight: 200, maxHeight: 340),
+                          child: bytes != null
+                              ? Image.memory(bytes, fit: BoxFit.contain)
+                              : const Center(
+                                  child: Icon(Icons.broken_image_outlined, size: 42, color: Colors.white38),
+                                ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        if (currentList.length > 1)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              OutlinedButton(
+                                onPressed: () => setModalState(
+                                  () => currentIdx = (currentIdx - 1 + currentList.length) % currentList.length,
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size(38, 34),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                ),
+                                child: const Icon(Icons.chevron_left_rounded, size: 18, color: Colors.white),
+                              ),
+                              const SizedBox(width: 6),
+                              OutlinedButton(
+                                onPressed: () => setModalState(
+                                  () => currentIdx = (currentIdx + 1) % currentList.length,
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size(38, 34),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                ),
+                                child: const Icon(Icons.chevron_right_rounded, size: 18, color: Colors.white),
+                              ),
+                            ],
+                          )
+                        else
+                          const SizedBox.shrink(),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TextButton.icon(
+                              onPressed: () {
+                                _hapticTap();
+                                if (isSlideshow) {
+                                  final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages)
+                                    ..removeAt(currentIdx);
+                                  setState(() => _draft = _draft.copyWith(slideImages: updated));
+                                  if (updated.isEmpty) {
+                                    Navigator.of(dCtx).pop();
+                                  } else {
+                                    setModalState(() {});
+                                  }
+                                } else {
+                                  setState(() => _draft = _draft.copyWith(clearSingleDisplayImage: true));
+                                  Navigator.of(dCtx).pop();
+                                }
+                              },
+                              icon: const Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFFCA5A5)),
+                              label: Text(
+                                tr ? 'Sil' : 'Delete',
+                                style: const TextStyle(color: Color(0xFFFCA5A5), fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            FilledButton(
+                              onPressed: () => Navigator.of(dCtx).pop(),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF2563EB),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              ),
+                              child: Text(
+                                tr ? 'Kapat' : 'Close',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _sendTestNotification() async {
@@ -1281,33 +1532,28 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
         final displayModes = [
           (
             SmartDisplayMode.aod,
-            'Always-On Display (AOD)',
+            '🌙 Always-On Display (AOD)',
             tr ? 'Siyah Ekran + Büyük Saat + Donma Koruması' : 'Black OLED + Clock + Anti-Burn-In',
-            Icons.nights_stay_outlined,
           ),
           (
             SmartDisplayMode.silentVideoMp3,
-            tr ? 'Sessiz Video + MP3' : 'Silent Video + MP3',
+            '🎬 ${tr ? 'Sessiz Video + MP3' : 'Silent Video + MP3'}',
             tr ? 'Canlı arka plan + ortam müziği' : 'Live background + ambient audio',
-            Icons.music_video_outlined,
           ),
           (
             SmartDisplayMode.liveNature,
-            tr ? 'Canlı Video / Doğa' : 'Live Video / Nature',
+            '🔥 ${tr ? 'Canlı Video / Doğa' : 'Live Video / Nature'}',
             tr ? 'Şömine & canlı doğa döngüsü' : 'Fireplace & live nature loop',
-            Icons.local_fire_department_outlined,
           ),
           (
             SmartDisplayMode.slideshow,
-            tr ? 'Slayt Gösterisi' : 'Slideshow',
+            '🖼️ ${tr ? 'Slayt Gösterisi' : 'Slideshow'}',
             tr ? 'Fotoğraflar arası otomatik geçiş' : 'Automatic photo transitions',
-            Icons.collections_outlined,
           ),
           (
             SmartDisplayMode.singlePhoto,
-            tr ? 'Tekli Görsel' : 'Single Photo',
+            '📷 ${tr ? 'Tekli Görsel' : 'Single Photo'}',
             tr ? 'Sakin sabit fotoğraf' : 'Calm static backdrop',
-            Icons.photo_outlined,
           ),
         ];
         const slideDurations = [5, 10, 15, 30];
@@ -1317,29 +1563,51 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           (SlideTransitionEffect.zoom, 'Zoom'),
         ];
         final layoutModes = [
-          (VisualLayoutMode.cover, tr ? 'Tam Ekran' : 'Cover'),
-          (VisualLayoutMode.contain, tr ? 'Sığdır' : 'Contain'),
-          (VisualLayoutMode.framed, tr ? 'Kare Kart' : 'Framed'),
+          (
+            VisualLayoutMode.cover,
+            '🖼️ Oto (Cover)',
+            tr ? 'Ekranı doldur' : 'Fill screen',
+          ),
+          (
+            VisualLayoutMode.contain,
+            '📐 Fit (Sığdır)',
+            tr ? 'Orantılı tam boy' : 'Fit proportional',
+          ),
+          (
+            VisualLayoutMode.stretch,
+            '↔️ Stretch',
+            tr ? 'Ekran boyu esnet' : 'Stretch to fill',
+          ),
+        ];
+
+        final visualThemes = [
+          (SmartDisplayVisualTheme.fireplace, '🔥 ${tr ? 'Şömine' : 'Fireplace'}'),
+          (SmartDisplayVisualTheme.rainy, '🌧️ ${tr ? 'Yağmurlu' : 'Rainy'}'),
+          (SmartDisplayVisualTheme.winterSnow, '❄️ ${tr ? 'Kış & Kar' : 'Winter'}'),
+          (SmartDisplayVisualTheme.sunset, '🌲 ${tr ? 'Gün Batımı' : 'Sunset'}'),
+          (SmartDisplayVisualTheme.aurora, '🌌 ${tr ? 'Kutup Işıkları' : 'Aurora'}'),
+          (SmartDisplayVisualTheme.minimalist, '🌚 Minimalist'),
         ];
 
         final audioTracks = [
-          (AmbientSoundtrack.fireplaceCrackling, '🔥 ${tr ? 'Şömine' : 'Hearth'}'),
-          (AmbientSoundtrack.nightRain, '🌧️ ${tr ? 'Yağmur' : 'Rain'}'),
-          (AmbientSoundtrack.cozyJazzLofi, '🎷 Lo-Fi'),
-          (AmbientSoundtrack.deepSpace, '🌌 ${tr ? 'Uzay' : 'Space'}'),
-          (AmbientSoundtrack.forestBreeze, '🌲 ${tr ? 'Orman' : 'Forest'}'),
-          (AmbientSoundtrack.customMp3, '🎵 ${tr ? 'Özel MP3' : 'Custom MP3'}'),
+          (AmbientSoundtrack.silent, '🚫 ${tr ? 'Sessiz' : 'Muted'}'),
+          (AmbientSoundtrack.fireplaceCrackling, '🔥 ${tr ? 'Şömine Çıtırtısı' : 'Fireplace'}'),
+          (AmbientSoundtrack.nightRain, '🌧️ ${tr ? 'Sakin Yağmur' : 'Calm Rain'}'),
+          (AmbientSoundtrack.cozyJazzLofi, '🎧 ${tr ? 'Lofi Akustik' : 'Lo-Fi Acoustic'}'),
+          (AmbientSoundtrack.relaxPiano, '🎹 ${tr ? 'Relax Piyano' : 'Relax Piano'}'),
+          (AmbientSoundtrack.forestBreeze, '🌲 ${tr ? 'Doğa & Kuşlar' : 'Nature & Birds'}'),
         ];
+
         final eqStyles = [
           (EqualizerStyle.bars, '📊 ${tr ? 'Çubuklar' : 'Bars'}', tr ? 'Neon spektrum' : 'Neon spectrum'),
           (EqualizerStyle.wave, '🌊 ${tr ? 'Dalga' : 'Wave'}', tr ? 'Siber dalga boyu' : 'Cyber waveform'),
           (EqualizerStyle.pulse, '💓 ${tr ? 'Nabız' : 'Pulse'}', tr ? 'Radyal vuruş' : 'Radial beat'),
         ];
         final brightnessPresets = [
-          (20, '🌙 ${tr ? 'Gece' : 'Night'} %20'),
-          (50, '🌇 ${tr ? 'Loş' : 'Dim'} %50'),
-          (85, '☀️ ${tr ? 'Normal' : 'Normal'} %85'),
-          (100, '⚡ ${tr ? 'Tam' : 'Full'} %100'),
+          (20, '🌙 ${tr ? 'Gece' : 'Night'} (%20)'),
+          (50, '🌇 ${tr ? 'Loş' : 'Dim'} (%50)'),
+          (85, '☀️ ${tr ? 'Normal' : 'Normal'} (%85)'),
+          (100, '⚡ ${tr ? 'Tam' : 'Full'} (%100)'),
         ];
         final sleepOptions = [
           (0, tr ? 'Sürekli Açık' : 'Always On'),
@@ -1349,9 +1617,16 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           (30, tr ? '30 Dk' : '30 Min'),
         ];
 
+        final activeMode = _draft.smartDisplayMode;
+        final isAod = activeMode == SmartDisplayMode.aod;
+        final isSlideshow = activeMode == SmartDisplayMode.slideshow;
+        final isSinglePhoto = activeMode == SmartDisplayMode.singlePhoto;
+        final brightnessFactor = (_draft.displayBrightness / 100.0).clamp(0.10, 1.0);
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Launch Smart Display Fullscreen CTA
             Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(14),
@@ -1381,39 +1656,44 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 style: FilledButton.styleFrom(
                   backgroundColor: Colors.transparent,
                   shadowColor: Colors.transparent,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: 11),
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 11),
+
+            // 1. Compact Screen Mode Grid (Image 1 proportions)
             Text(
-              tr ? 'Ekran Modu:' : 'Display Mode:',
+              tr ? '📺 Ekran Modu:' : '📺 Display Mode:',
               style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 7),
             GridView.count(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               crossAxisCount: 2,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-              childAspectRatio: 2.35,
+              crossAxisSpacing: 7,
+              mainAxisSpacing: 7,
+              childAspectRatio: 3.15,
               children: [
                 for (final m in displayModes)
                   GestureDetector(
                     onTap: () {
                       _hapticTap();
-                      setState(() => _draft = _draft.copyWith(smartDisplayMode: m.$1));
+                      setState(() {
+                        _draft = _draft.copyWith(smartDisplayMode: m.$1);
+                        _themesAudioAccordionExpanded = m.$1 != SmartDisplayMode.aod;
+                      });
                     },
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
                       decoration: BoxDecoration(
-                        color: _draft.smartDisplayMode == m.$1
+                        color: activeMode == m.$1
                             ? const Color(0xFFF59E0B).withValues(alpha: 0.14)
                             : Colors.white.withValues(alpha: 0.03),
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: _draft.smartDisplayMode == m.$1
+                          color: activeMode == m.$1
                               ? const Color(0xFFFBBF24)
                               : Colors.white.withValues(alpha: 0.10),
                         ),
@@ -1424,23 +1704,22 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                         children: [
                           Row(
                             children: [
-                              Icon(m.$4, size: 14, color: const Color(0xFFFBBF24)),
-                              const SizedBox(width: 5),
                               Expanded(
                                 child: Text(
                                   m.$2,
-                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
+                                  maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              if (_draft.smartDisplayMode == m.$1)
+                              if (activeMode == m.$1)
                                 const Icon(Icons.check_rounded, size: 13, color: Color(0xFFFBBF24)),
                             ],
                           ),
                           const SizedBox(height: 2),
                           Text(
                             m.$3,
-                            style: TextStyle(fontSize: 9.5, color: Colors.white.withValues(alpha: 0.55)),
+                            style: TextStyle(fontSize: 9.0, color: Colors.white.withValues(alpha: 0.56)),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1451,371 +1730,855 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               ],
             ),
             const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(11),
-              decoration: BoxDecoration(
-                color: const Color(0xFF7C3AED).withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.30)),
+
+            // 2. Context-Sensitive Mode Sub-Options
+            if (isAod) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.03),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.nights_stay_outlined, size: 16, color: Color(0xFFFBBF24)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        tr
+                            ? 'AOD Modu Aktif: Saf OLED siyah ekran, büyük saat ve piksel yanma koruması çalışır.'
+                            : 'AOD Active: True black OLED screen with large clock and burn-in pixel shift.',
+                        style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.72), height: 1.35),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    tr ? 'Slayt Süresi & Geçiş Efekti' : 'Slide Duration & Transition',
-                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFC4B5FD)),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      for (final sec in slideDurations) ...[
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              _hapticTap();
-                              setState(() => _draft = _draft.copyWith(slideDurationSeconds: sec));
-                            },
-                            child: Container(
-                              margin: const EdgeInsets.only(right: 4),
-                              padding: const EdgeInsets.symmetric(vertical: 6),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: _draft.slideDurationSeconds == sec
-                                    ? const Color(0xFF9333EA)
-                                    : Colors.white.withValues(alpha: 0.06),
-                                borderRadius: BorderRadius.circular(9),
-                              ),
-                              child: Text(
-                                '${sec}s',
-                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+              const SizedBox(height: 10),
+            ],
+
+            if (isSlideshow) ...[
+              // Compact Slide Duration & Transition Effect Card (Image 1 & 3)
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF7C3AED).withValues(alpha: 0.11),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.30)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      tr ? 'Slayt Süresi & Geçiş Efekti' : 'Slide Duration & Transition',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFC4B5FD)),
+                    ),
+                    const SizedBox(height: 7),
+                    LayoutBuilder(
+                      builder: (_, c) {
+                        final durationGroup = Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              tr ? 'Slayt Değişim Süresi:' : 'Slide Interval:',
+                              style: TextStyle(fontSize: 9.5, color: Colors.white.withValues(alpha: 0.65)),
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                for (final sec in slideDurations)
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        _hapticTap();
+                                        setState(() => _draft = _draft.copyWith(slideDurationSeconds: sec));
+                                      },
+                                      child: Container(
+                                        margin: const EdgeInsets.only(right: 4),
+                                        padding: const EdgeInsets.symmetric(vertical: 5),
+                                        alignment: Alignment.center,
+                                        decoration: BoxDecoration(
+                                          color: _draft.slideDurationSeconds == sec
+                                              ? const Color(0xFF9333EA)
+                                              : Colors.white.withValues(alpha: 0.06),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Text(
+                                          '${sec}s',
+                                          style: const TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        );
+                        final effectGroup = Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              tr ? 'Geçiş Efekti (Fade / Kayma / Zoom):' : 'Transition Effect:',
+                              style: TextStyle(fontSize: 9.5, color: Colors.white.withValues(alpha: 0.65)),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                for (final eff in slideEffects)
+                                  Expanded(
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        _hapticTap();
+                                        setState(() => _draft = _draft.copyWith(slideEffect: eff.$1));
+                                      },
+                                      child: Container(
+                                        margin: const EdgeInsets.only(right: 4),
+                                        padding: const EdgeInsets.symmetric(vertical: 5),
+                                        alignment: Alignment.center,
+                                        decoration: BoxDecoration(
+                                          color: _draft.slideEffect == eff.$1
+                                              ? const Color(0xFF9333EA)
+                                              : Colors.white.withValues(alpha: 0.06),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Text(
+                                          eff.$2,
+                                          style: const TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        );
+
+                        if (c.maxWidth >= 330) {
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(flex: 10, child: durationGroup),
+                              const SizedBox(width: 8),
+                              Expanded(flex: 10, child: effectGroup),
+                            ],
+                          );
+                        }
+                        return Column(
+                          children: [
+                            durationGroup,
+                            const SizedBox(height: 7),
+                            effectGroup,
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+
+            if (!isAod) ...[
+              // Visual Layout Mode: Oto (Cover) / Fit (Sığdır) / Stretch (Image 1 & 3)
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.03),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      tr ? '📚 Görsel Yerleşim Modu:' : '📚 Visual Layout Mode:',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF93C5FD)),
+                    ),
+                    const SizedBox(height: 7),
+                    Row(
+                      children: [
+                        for (int idx = 0; idx < layoutModes.length; idx++) ...[
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () {
+                                _hapticTap();
+                                setState(() => _draft = _draft.copyWith(smartDisplayLayout: layoutModes[idx].$1));
+                              },
+                              child: Container(
+                                margin: EdgeInsets.only(right: idx == layoutModes.length - 1 ? 0 : 6),
+                                padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
+                                decoration: BoxDecoration(
+                                  color: _draft.smartDisplayLayout == layoutModes[idx].$1
+                                      ? const Color(0xFF4F46E5).withValues(alpha: 0.50)
+                                      : Colors.white.withValues(alpha: 0.04),
+                                  borderRadius: BorderRadius.circular(11),
+                                  border: Border.all(
+                                    color: _draft.smartDisplayLayout == layoutModes[idx].$1
+                                        ? const Color(0xFF818CF8)
+                                        : Colors.white.withValues(alpha: 0.10),
+                                  ),
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      layoutModes[idx].$2,
+                                      style: const TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      layoutModes[idx].$3,
+                                      style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.62)),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    if (isSlideshow) ...[
+                      const SizedBox(height: 10),
+                      Divider(color: Colors.white.withValues(alpha: 0.08), height: 1),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  tr ? 'Çoklu Görsel & Slayt Listesi' : 'Multi-Photo Slideshow List',
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  tr
+                                      ? '${_draft.slideImages.length} Görsel Yüklendi'
+                                      : '${_draft.slideImages.length} Images Loaded',
+                                  style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.60)),
+                                ),
+                              ],
+                            ),
+                          ),
+                          FilledButton.icon(
+                            onPressed: _pickMultipleSlideImages,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF0284C7),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                            ),
+                            icon: const Icon(Icons.upload_rounded, size: 15),
+                            label: Text(
+                              tr ? 'Çoklu Görsel Seç' : 'Select Images',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_draft.slideImages.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () => _showSlidePhotoPreviewDialog(
+                                images: _draft.slideImages,
+                                initialIndex: 0,
+                                isSlideshow: true,
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF7DD3FC),
+                                side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.45)),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                minimumSize: const Size(0, 30),
+                              ),
+                              icon: const Icon(Icons.visibility_outlined, size: 14),
+                              label: Text(
+                                tr ? 'Önizle' : 'Preview',
+                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            const SizedBox(width: 7),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                _hapticTap();
+                                setState(() => _draft = _draft.copyWith(slideImages: const []));
+                              },
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFFCA5A5),
+                                side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.45)),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                minimumSize: const Size(0, 30),
+                              ),
+                              icon: const Icon(Icons.delete_sweep_outlined, size: 14),
+                              label: Text(
+                                tr ? 'Tümünü Sil' : 'Delete All',
+                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        SizedBox(
+                          height: 76,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _draft.slideImages.length,
+                            separatorBuilder: (_, __) => const SizedBox(width: 8),
+                            itemBuilder: (_, idx) {
+                              final item = _draft.slideImages[idx];
+                              final bytes = item.decodeBytes();
+                              return Stack(
+                                children: [
+                                  GestureDetector(
+                                    onTap: () => _showSlidePhotoPreviewDialog(
+                                      images: _draft.slideImages,
+                                      initialIndex: idx,
+                                      isSlideshow: true,
+                                    ),
+                                    child: Container(
+                                      width: 76,
+                                      height: 76,
+                                      decoration: BoxDecoration(
+                                        color: Colors.black,
+                                        borderRadius: BorderRadius.circular(11),
+                                        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(10),
+                                        child: bytes != null
+                                            ? Image.memory(bytes, fit: BoxFit.cover)
+                                            : const Icon(Icons.image_outlined, color: Colors.white38),
+                                      ),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 3,
+                                    right: 3,
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        _hapticTap();
+                                        final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages)
+                                          ..removeAt(idx);
+                                        setState(() => _draft = _draft.copyWith(slideImages: updated));
+                                      },
+                                      child: Container(
+                                        width: 20,
+                                        height: 20,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: Colors.black.withValues(alpha: 0.78),
+                                          border: Border.all(color: const Color(0xFFFCA5A5).withValues(alpha: 0.75)),
+                                        ),
+                                        child: const Icon(Icons.close_rounded, size: 12, color: Color(0xFFFCA5A5)),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
                           ),
                         ),
                       ],
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      for (final eff in slideEffects) ...[
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              _hapticTap();
-                              setState(() => _draft = _draft.copyWith(slideEffect: eff.$1));
-                            },
-                            child: Container(
-                              margin: const EdgeInsets.only(right: 4),
-                              padding: const EdgeInsets.symmetric(vertical: 6),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: _draft.slideEffect == eff.$1
-                                    ? const Color(0xFF9333EA)
-                                    : Colors.white.withValues(alpha: 0.06),
-                                borderRadius: BorderRadius.circular(9),
-                              ),
-                              child: Text(
-                                eff.$2,
-                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
-                              ),
+                    if (isSinglePhoto) ...[
+                      const SizedBox(height: 10),
+                      Divider(color: Colors.white.withValues(alpha: 0.08), height: 1),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  tr ? 'Tekli Sabit Görsel' : 'Single Static Photo',
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  _draft.singleDisplayImage != null
+                                      ? _draft.singleDisplayImage!.name
+                                      : (tr ? 'Henüz fotoğraf seçilmedi' : 'No photo selected'),
+                                  style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.60)),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
                             ),
                           ),
+                          FilledButton.icon(
+                            onPressed: _pickSingleDisplayImage,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF0284C7),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                            ),
+                            icon: const Icon(Icons.add_photo_alternate_outlined, size: 15),
+                            label: Text(
+                              tr ? 'Görsel Seç' : 'Pick Photo',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_draft.singleDisplayImage != null) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            GestureDetector(
+                              onTap: () => _showSlidePhotoPreviewDialog(
+                                images: [_draft.singleDisplayImage!],
+                                initialIndex: 0,
+                                isSlideshow: false,
+                              ),
+                              child: Container(
+                                width: 64,
+                                height: 64,
+                                decoration: BoxDecoration(
+                                  color: Colors.black,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(9),
+                                  child: () {
+                                    final b = _draft.singleDisplayImage!.decodeBytes();
+                                    return b != null
+                                        ? Image.memory(b, fit: BoxFit.cover)
+                                        : const Icon(Icons.image_outlined, color: Colors.white38);
+                                  }(),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            OutlinedButton.icon(
+                              onPressed: () => _showSlidePhotoPreviewDialog(
+                                images: [_draft.singleDisplayImage!],
+                                initialIndex: 0,
+                                isSlideshow: false,
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF7DD3FC),
+                                side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.45)),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                minimumSize: const Size(0, 30),
+                              ),
+                              icon: const Icon(Icons.visibility_outlined, size: 14),
+                              label: Text(
+                                tr ? 'Önizle' : 'Preview',
+                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                _hapticTap();
+                                setState(() => _draft = _draft.copyWith(clearSingleDisplayImage: true));
+                              },
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFFCA5A5),
+                                side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.45)),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                minimumSize: const Size(0, 30),
+                              ),
+                              icon: const Icon(Icons.delete_outline_rounded, size: 14),
+                              label: Text(
+                                tr ? 'Sil' : 'Delete',
+                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ],
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 10),
+              const SizedBox(height: 10),
+            ],
+
+            // 3. Separate Default Visual Themes & Ambient Soundtracks Accordion (Image 2 & 4)
             Container(
-              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.03),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
               ),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    tr ? 'Görsel Yerleşim Modu' : 'Visual Layout Mode',
-                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF93C5FD)),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () {
+                      _hapticTap();
+                      setState(() => _themesAudioAccordionExpanded = !_themesAudioAccordionExpanded);
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              tr ? '🎨 Varsayılan Temalar & Ambiyans Sesleri' : '🎨 Default Themes & Ambient Audio',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFFFCD34D),
+                              ),
+                            ),
+                          ),
+                          Icon(
+                            _themesAudioAccordionExpanded
+                                ? Icons.keyboard_arrow_up_rounded
+                                : Icons.keyboard_arrow_down_rounded,
+                            size: 18,
+                            color: Colors.white70,
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      for (final lay in layoutModes) ...[
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              _hapticTap();
-                              setState(() => _draft = _draft.copyWith(smartDisplayLayout: lay.$1));
-                            },
-                            child: Container(
-                              margin: const EdgeInsets.only(right: 4),
-                              padding: const EdgeInsets.symmetric(vertical: 6),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: _draft.smartDisplayLayout == lay.$1
-                                    ? const Color(0xFF2563EB).withValues(alpha: 0.45)
-                                    : Colors.white.withValues(alpha: 0.05),
-                                borderRadius: BorderRadius.circular(9),
-                                border: Border.all(
-                                  color: _draft.smartDisplayLayout == lay.$1
-                                      ? const Color(0xFF60A5FA)
-                                      : Colors.transparent,
+                  if (_themesAudioAccordionExpanded)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(11, 0, 11, 11),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Divider(color: Colors.white.withValues(alpha: 0.08), height: 1),
+                          const SizedBox(height: 10),
+                          Text(
+                            tr ? '🖼️ Görsel / Video Teması:' : '🖼️ Visual / Video Theme:',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF38BDF8),
+                            ),
+                          ),
+                          const SizedBox(height: 7),
+                          GridView.count(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            crossAxisCount: 3,
+                            crossAxisSpacing: 6,
+                            mainAxisSpacing: 6,
+                            childAspectRatio: 2.75,
+                            children: [
+                              for (final vt in visualThemes)
+                                GestureDetector(
+                                  onTap: () {
+                                    _hapticTap();
+                                    setState(() => _draft = _draft.copyWith(smartDisplayVisualTheme: vt.$1));
+                                  },
+                                  child: Container(
+                                    alignment: Alignment.center,
+                                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                                    decoration: BoxDecoration(
+                                      color: _draft.smartDisplayVisualTheme == vt.$1
+                                          ? const Color(0xFF0284C7).withValues(alpha: 0.42)
+                                          : Colors.white.withValues(alpha: 0.04),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: _draft.smartDisplayVisualTheme == vt.$1
+                                            ? const Color(0xFF38BDF8)
+                                            : Colors.white.withValues(alpha: 0.10),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      vt.$2,
+                                      style: const TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 11),
+                          Text(
+                            tr ? '🎵 Ortam Sesi Çalma Listesi:' : '🎵 Ambient Sound Playlist:',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFFFBBF24),
+                            ),
+                          ),
+                          const SizedBox(height: 7),
+                          GridView.count(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            crossAxisCount: 3,
+                            crossAxisSpacing: 6,
+                            mainAxisSpacing: 6,
+                            childAspectRatio: 2.75,
+                            children: [
+                              for (final track in audioTracks)
+                                GestureDetector(
+                                  onTap: () {
+                                    _hapticTap();
+                                    setState(() => _draft = _draft.copyWith(ambientSoundtrack: track.$1));
+                                    if (track.$1 == AmbientSoundtrack.silent) {
+                                      AmbientAudioService.stop();
+                                      setState(() => _audioPreviewPlaying = false);
+                                    } else if (_audioPreviewPlaying) {
+                                      AmbientAudioService.start(
+                                        track: track.$1,
+                                        customSource: _resolveAudioSource(),
+                                        volume: _draft.ambientVolume,
+                                      );
+                                    }
+                                  },
+                                  child: Container(
+                                    alignment: Alignment.center,
+                                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                                    decoration: BoxDecoration(
+                                      color: _draft.ambientSoundtrack == track.$1
+                                          ? const Color(0xFFF59E0B)
+                                          : Colors.white.withValues(alpha: 0.04),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: _draft.ambientSoundtrack == track.$1
+                                            ? const Color(0xFFFCD34D)
+                                            : Colors.white.withValues(alpha: 0.10),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      track.$2,
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: _draft.ambientSoundtrack == track.$1 ? Colors.black : Colors.white,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  tr ? '🔊 Ortam Sesi Seviyesi & Dışarıdan MP3:' : '🔊 Volume & External MP3:',
+                                  style: const TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFFFCD34D),
+                                  ),
                                 ),
                               ),
-                              child: Text(
-                                lay.$2,
-                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-
-            // Ambient Audio, Volume, External MP3 & Track Marquee
-            Container(
-              padding: const EdgeInsets.all(11),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0EA5E9).withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.28)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    tr ? '🎵 Varsayılan Temalar & Ambiyans Sesleri' : '🎵 Ambient Soundtracks & External MP3',
-                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF7DD3FC)),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      for (final track in audioTracks)
-                        GestureDetector(
-                          onTap: () {
-                            _hapticTap();
-                            setState(() => _draft = _draft.copyWith(ambientSoundtrack: track.$1));
-                            if (_audioPreviewPlaying) {
-                              AmbientAudioService.start(
-                                track: track.$1,
-                                customSource: _resolveAudioSource(),
-                                volume: _draft.ambientVolume,
-                              );
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: _draft.ambientSoundtrack == track.$1
-                                  ? const Color(0xFF0284C7).withValues(alpha: 0.48)
-                                  : Colors.white.withValues(alpha: 0.05),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: _draft.ambientSoundtrack == track.$1
-                                    ? const Color(0xFF38BDF8)
-                                    : Colors.white.withValues(alpha: 0.10),
-                              ),
-                            ),
-                            child: Text(
-                              track.$2,
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  if (_draft.ambientSoundtrack == AmbientSoundtrack.customMp3) ...[
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _DarkTextField(
-                            controller: _customAudioCtrl,
-                            hint: tr ? 'MP3 URL veya dosya adı' : 'MP3 URL or filename',
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        FilledButton.tonalIcon(
-                          onPressed: _pickLocalMp3,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.30),
-                            foregroundColor: const Color(0xFF7DD3FC),
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-                          ),
-                          icon: const Icon(Icons.audio_file_outlined, size: 16),
-                          label: Text(
-                            tr ? 'MP3 Seç' : 'Pick MP3',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          tr ? 'Ortam Sesi Seviyesi' : 'Ambient Audio Volume',
-                          style: const TextStyle(fontSize: 11.5, color: Colors.white70),
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: _toggleAudioPreview,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _audioPreviewPlaying
-                                ? const Color(0xFFEF4444).withValues(alpha: 0.25)
-                                : const Color(0xFF0284C7).withValues(alpha: 0.25),
-                            borderRadius: BorderRadius.circular(9),
-                            border: Border.all(
-                              color: _audioPreviewPlaying ? const Color(0xFFFCA5A5) : const Color(0xFF38BDF8),
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _audioPreviewPlaying ? Icons.stop_rounded : Icons.volume_up_rounded,
-                                size: 13,
-                                color: Colors.white,
-                              ),
-                              const SizedBox(width: 4),
                               Text(
-                                _audioPreviewPlaying ? (tr ? 'Durdur' : 'Stop') : (tr ? 'Sesi Dinle' : 'Test Audio'),
-                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
+                                '${tr ? 'Ses' : 'Vol'}: %${(_draft.ambientVolume * 100).round()}',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFFFBBF24),
+                                ),
                               ),
                             ],
                           ),
-                        ),
+                          Slider(
+                            value: _draft.ambientVolume,
+                            min: 0.0,
+                            max: 1.0,
+                            divisions: 20,
+                            activeColor: const Color(0xFFF59E0B),
+                            onChanged: (v) {
+                              setState(() => _draft = _draft.copyWith(ambientVolume: v));
+                              if (_audioPreviewPlaying) {
+                                AmbientAudioService.setVolume(v);
+                              }
+                            },
+                          ),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _DarkTextField(
+                                  controller: _customAudioCtrl,
+                                  hint: tr ? 'MP3 URL veya dosya adı' : 'MP3 URL or filename',
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              FilledButton.tonalIcon(
+                                onPressed: _pickLocalMp3,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.30),
+                                  foregroundColor: const Color(0xFF7DD3FC),
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                                icon: const Icon(Icons.audio_file_outlined, size: 15),
+                                label: Text(
+                                  tr ? 'MP3 Seç' : 'MP3',
+                                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              GestureDetector(
+                                onTap: _toggleAudioPreview,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: _audioPreviewPlaying
+                                        ? const Color(0xFFEF4444).withValues(alpha: 0.25)
+                                        : const Color(0xFF0284C7).withValues(alpha: 0.25),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: _audioPreviewPlaying
+                                          ? const Color(0xFFFCA5A5)
+                                          : const Color(0xFF38BDF8),
+                                    ),
+                                  ),
+                                  child: Icon(
+                                    _audioPreviewPlaying ? Icons.stop_rounded : Icons.volume_up_rounded,
+                                    size: 16,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          _MiniToggleTile(
+                            label: tr ? 'Üst Kayan Yazı Şarkı İsmi' : 'Top Marquee Track Name',
+                            value: _draft.marqueeTrackEnabled,
+                            activeColor: const Color(0xFF38BDF8),
+                            onTap: () {
+                              _hapticTap();
+                              setState(() => _draft = _draft.copyWith(marqueeTrackEnabled: !_draft.marqueeTrackEnabled));
+                            },
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '%${(_draft.ambientVolume * 100).round()}',
-                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF7DD3FC)),
-                      ),
-                    ],
-                  ),
-                  Slider(
-                    value: _draft.ambientVolume,
-                    min: 0.0,
-                    max: 1.0,
-                    divisions: 20,
-                    activeColor: const Color(0xFF38BDF8),
-                    onChanged: (v) {
-                      setState(() => _draft = _draft.copyWith(ambientVolume: v));
-                      if (_audioPreviewPlaying) {
-                        AmbientAudioService.setVolume(v);
-                      }
-                    },
-                  ),
-                  _MiniToggleTile(
-                    label: tr ? 'Üst Kayan Yazı Şarkı İsmi' : 'Top Marquee Track Name',
-                    value: _draft.marqueeTrackEnabled,
-                    activeColor: const Color(0xFF38BDF8),
-                    onTap: () {
-                      _hapticTap();
-                      setState(() => _draft = _draft.copyWith(marqueeTrackEnabled: !_draft.marqueeTrackEnabled));
-                    },
-                  ),
+                    ),
                 ],
               ),
             ),
             const SizedBox(height: 10),
 
-            // Live Music Equalizer Mode + 3 Visual Types
-            Container(
-              padding: const EdgeInsets.all(11),
-              decoration: BoxDecoration(
-                color: const Color(0xFF10B981).withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.28)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _MiniToggleTile(
-                    label: tr ? '🎚️ Canlı Müzik Ekolayzır Modu' : '🎚️ Live Music Equalizer Mode',
-                    value: _draft.equalizerEnabled,
-                    activeColor: const Color(0xFF10B981),
-                    onTap: () {
-                      _hapticTap();
-                      setState(() => _draft = _draft.copyWith(equalizerEnabled: !_draft.equalizerEnabled));
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    tr ? 'Ekolayzır Görsel Tipi:' : 'Equalizer Visual Style:',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.72)),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      for (final eq in eqStyles) ...[
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              _hapticTap();
-                              setState(() => _draft = _draft.copyWith(equalizerStyle: eq.$1, equalizerEnabled: true));
-                            },
-                            child: Container(
-                              margin: const EdgeInsets.only(right: 5),
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-                              decoration: BoxDecoration(
-                                color: _draft.equalizerStyle == eq.$1 && _draft.equalizerEnabled
-                                    ? const Color(0xFF10B981).withValues(alpha: 0.22)
-                                    : Colors.white.withValues(alpha: 0.04),
-                                borderRadius: BorderRadius.circular(11),
-                                border: Border.all(
+            if (!isAod) ...[
+              // 4. Live Music Equalizer Mode + 3 Visual Types
+              Container(
+                padding: const EdgeInsets.all(11),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.28)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _MiniToggleTile(
+                      label: tr ? '🎚️ Canlı Müzik Ekolayzır Modu' : '🎚️ Live Music Equalizer Mode',
+                      value: _draft.equalizerEnabled,
+                      activeColor: const Color(0xFF10B981),
+                      onTap: () {
+                        _hapticTap();
+                        setState(() => _draft = _draft.copyWith(equalizerEnabled: !_draft.equalizerEnabled));
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      tr ? 'Ekolayzır Görsel Tipi:' : 'Equalizer Visual Style:',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white.withValues(alpha: 0.72),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        for (final eq in eqStyles)
+                          Expanded(
+                            child: GestureDetector(
+                              onTap: () {
+                                _hapticTap();
+                                setState(() => _draft = _draft.copyWith(equalizerStyle: eq.$1, equalizerEnabled: true));
+                              },
+                              child: Container(
+                                margin: const EdgeInsets.only(right: 5),
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
+                                decoration: BoxDecoration(
                                   color: _draft.equalizerStyle == eq.$1 && _draft.equalizerEnabled
-                                      ? const Color(0xFF34D399)
-                                      : Colors.white.withValues(alpha: 0.10),
+                                      ? const Color(0xFF10B981).withValues(alpha: 0.22)
+                                      : Colors.white.withValues(alpha: 0.04),
+                                  borderRadius: BorderRadius.circular(11),
+                                  border: Border.all(
+                                    color: _draft.equalizerStyle == eq.$1 && _draft.equalizerEnabled
+                                        ? const Color(0xFF34D399)
+                                        : Colors.white.withValues(alpha: 0.10),
+                                  ),
                                 ),
-                              ),
-                              child: Column(
-                                children: [
-                                  Text(
-                                    eq.$2,
-                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    eq.$3,
-                                    style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.62)),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
+                                child: Column(
+                                  children: [
+                                    Text(
+                                      eq.$2,
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      eq.$3,
+                                      style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.62)),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
                       ],
-                    ],
-                  ),
-                ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 10),
+              const SizedBox(height: 10),
+            ],
 
-            // Built-in Display Brightness Slider + Live Preview + 4 Presets
+            // 5. Built-in Display Brightness Live Mini Preview + Slider + 4 Presets (Image 5)
             Container(
               padding: const EdgeInsets.all(11),
               decoration: BoxDecoration(
@@ -1833,23 +2596,90 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                         tr ? '☀️ Dahili Ekran Aydınlık Ayarı' : '☀️ Built-In Display Brightness',
                         style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFFCD34D)),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: (1.0 - (_draft.displayBrightness / 100.0)) * 0.72),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.45)),
-                        ),
-                        child: Text(
-                          '21:45 · ${_liveTargetTemp.toStringAsFixed(1)}° (%${_draft.displayBrightness})',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white.withValues(alpha: 0.35 + (_draft.displayBrightness / 100.0) * 0.65),
-                          ),
+                      Text(
+                        '%${_draft.displayBrightness}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFFFBBF24),
+                          fontFeatures: [FontFeature.tabularFigures()],
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 9),
+                  // Dark Mini Live Screen Brightness Preview (Image 5)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF07070B),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+                    ),
+                    child: Opacity(
+                      opacity: (0.28 + brightnessFactor * 0.72).clamp(0.28, 1.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.baseline,
+                            textBaseline: TextBaseline.alphabetic,
+                            children: [
+                              Text(
+                                '22:45',
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white.withValues(alpha: 0.92),
+                                  fontFeatures: const [FontFeature.tabularFigures()],
+                                ),
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                '00',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white.withValues(alpha: 0.50),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+                                ),
+                                child: Text(
+                                  '☀️ ${widget.roomTemp.toStringAsFixed(0)}°C - ${_liveTargetTemp.toStringAsFixed(1)}°C',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFFFBBF24),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                tr
+                                    ? 'Canlı Aydınlık: %${_draft.displayBrightness}'
+                                    : 'Live Brightness: ${_draft.displayBrightness}%',
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFFF59E0B).withValues(alpha: 0.85),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                   Slider(
                     value: _draft.displayBrightness.toDouble(),
@@ -1861,7 +2691,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                   ),
                   Row(
                     children: [
-                      for (final bp in brightnessPresets) ...[
+                      for (final bp in brightnessPresets)
                         Expanded(
                           child: GestureDetector(
                             onTap: () {
@@ -1870,7 +2700,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                             },
                             child: Container(
                               margin: const EdgeInsets.only(right: 4),
-                              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 3),
+                              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
                                 color: _draft.displayBrightness == bp.$1
@@ -1885,14 +2715,13 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                               ),
                               child: Text(
                                 bp.$2,
-                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
+                                style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Colors.white),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ),
                         ),
-                      ],
                     ],
                   ),
                 ],
@@ -1900,7 +2729,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             ),
             const SizedBox(height: 10),
 
-            // Screen Sleep / Auto-Off Timeout + OLED Pixel Protection
+            // 6. Screen Sleep / Auto-Off Timeout + OLED Pixel Protection
             Container(
               padding: const EdgeInsets.all(11),
               decoration: BoxDecoration(

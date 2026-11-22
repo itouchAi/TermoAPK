@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 enum PresetId { eko, konfor, gece, boost }
@@ -711,7 +712,17 @@ enum SlideTransitionEffect {
 enum VisualLayoutMode {
   cover,
   contain,
+  stretch,
   framed,
+}
+
+enum SmartDisplayVisualTheme {
+  fireplace,
+  rainy,
+  winterSnow,
+  sunset,
+  aurora,
+  minimalist,
 }
 
 enum EqualizerStyle {
@@ -721,12 +732,53 @@ enum EqualizerStyle {
 }
 
 enum AmbientSoundtrack {
+  silent,
   fireplaceCrackling,
   nightRain,
   cozyJazzLofi,
+  relaxPiano,
   deepSpace,
   forestBreeze,
   customMp3,
+}
+
+class SmartDisplaySlideImage {
+  final String id;
+  final String name;
+  final String dataBase64;
+  final String filePath;
+
+  const SmartDisplaySlideImage({
+    required this.id,
+    required this.name,
+    this.dataBase64 = '',
+    this.filePath = '',
+  });
+
+  Uint8List? decodeBytes() {
+    if (dataBase64.isEmpty) return null;
+    try {
+      return base64Decode(dataBase64);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'dataBase64': dataBase64,
+        'filePath': filePath,
+      };
+
+  factory SmartDisplaySlideImage.fromJson(Map<String, dynamic> map) {
+    return SmartDisplaySlideImage(
+      id: (map['id'] as String?) ?? DateTime.now().microsecondsSinceEpoch.toString(),
+      name: (map['name'] as String?) ?? 'image.jpg',
+      dataBase64: (map['dataBase64'] as String?) ?? '',
+      filePath: (map['filePath'] as String?) ?? '',
+    );
+  }
 }
 
 enum MascotCharacter {
@@ -1058,6 +1110,9 @@ class SystemSettingsState {
   final int slideDurationSeconds;
   final SlideTransitionEffect slideEffect;
   final VisualLayoutMode smartDisplayLayout;
+  final SmartDisplayVisualTheme smartDisplayVisualTheme;
+  final List<SmartDisplaySlideImage> slideImages;
+  final SmartDisplaySlideImage? singleDisplayImage;
   final AmbientSoundtrack ambientSoundtrack;
   final String customAudioLabel;
   final String customAudioSource;
@@ -1128,6 +1183,9 @@ class SystemSettingsState {
     required this.slideDurationSeconds,
     required this.slideEffect,
     required this.smartDisplayLayout,
+    this.smartDisplayVisualTheme = SmartDisplayVisualTheme.fireplace,
+    this.slideImages = const [],
+    this.singleDisplayImage,
     required this.ambientSoundtrack,
     required this.customAudioLabel,
     required this.customAudioSource,
@@ -1213,6 +1271,9 @@ class SystemSettingsState {
         slideDurationSeconds: 15,
         slideEffect: SlideTransitionEffect.slide,
         smartDisplayLayout: VisualLayoutMode.cover,
+        smartDisplayVisualTheme: SmartDisplayVisualTheme.fireplace,
+        slideImages: const [],
+        singleDisplayImage: null,
         ambientSoundtrack: AmbientSoundtrack.fireplaceCrackling,
         customAudioLabel: '',
         customAudioSource: '',
@@ -1293,19 +1354,39 @@ class SystemSettingsState {
         ],
       );
 
+  static String extractCityName(String locationName) {
+    final trimmed = locationName.trim();
+    if (trimmed.isEmpty) return 'İstanbul';
+    if (trimmed.contains('·')) {
+      final parts = trimmed.split('·');
+      final last = parts.last.trim();
+      if (last.isNotEmpty) return last;
+    }
+    final openParen = trimmed.indexOf('(');
+    final closeParen = trimmed.indexOf(')');
+    if (openParen >= 0 && closeParen > openParen + 1) {
+      return trimmed.substring(openParen + 1, closeParen).trim();
+    }
+    return trimmed;
+  }
+
   String ambientTrackTitle(LangCode lang) {
     final tr = lang == LangCode.tr;
     switch (ambientSoundtrack) {
+      case AmbientSoundtrack.silent:
+        return tr ? 'Sessiz (Ortam Sesi Kapalı)' : 'Muted (Ambient Off)';
       case AmbientSoundtrack.fireplaceCrackling:
         return tr ? 'Şömine Çıtırtısı (Ambiyans 432Hz)' : 'Fireplace Crackling (432Hz Ambient)';
       case AmbientSoundtrack.nightRain:
-        return tr ? 'Gece Yağmuru & Cam Sesi' : 'Midnight Rain on Glass';
+        return tr ? 'Sakin Yağmur & Cam Sesi' : 'Calm Rain on Glass';
       case AmbientSoundtrack.cozyJazzLofi:
-        return tr ? 'Sıcak Lo-Fi Caz Döngüsü' : 'Warm Lo-Fi Jazz Loop';
+        return tr ? 'Lofi Akustik Döngüsü' : 'Lo-Fi Acoustic Loop';
+      case AmbientSoundtrack.relaxPiano:
+        return tr ? 'Relax Piyano Ambiyansı' : 'Relax Piano Ambience';
       case AmbientSoundtrack.deepSpace:
         return tr ? 'Derin Uzay & Obsidyen Drone' : 'Deep Space Obsidian Drone';
       case AmbientSoundtrack.forestBreeze:
-        return tr ? 'Gece Ormanı Esintisi' : 'Night Forest Breeze';
+        return tr ? 'Doğa & Kuşlar Esintisi' : 'Nature & Birds Breeze';
       case AmbientSoundtrack.customMp3:
         final trimmed = customAudioLabel.trim();
         if (trimmed.isNotEmpty) return trimmed;
@@ -1326,6 +1407,10 @@ class SystemSettingsState {
     int? slideDurationSeconds,
     SlideTransitionEffect? slideEffect,
     VisualLayoutMode? smartDisplayLayout,
+    SmartDisplayVisualTheme? smartDisplayVisualTheme,
+    List<SmartDisplaySlideImage>? slideImages,
+    SmartDisplaySlideImage? singleDisplayImage,
+    bool clearSingleDisplayImage = false,
     AmbientSoundtrack? ambientSoundtrack,
     String? customAudioLabel,
     String? customAudioSource,
@@ -1396,6 +1481,9 @@ class SystemSettingsState {
       slideDurationSeconds: slideDurationSeconds ?? this.slideDurationSeconds,
       slideEffect: slideEffect ?? this.slideEffect,
       smartDisplayLayout: smartDisplayLayout ?? this.smartDisplayLayout,
+      smartDisplayVisualTheme: smartDisplayVisualTheme ?? this.smartDisplayVisualTheme,
+      slideImages: slideImages ?? this.slideImages,
+      singleDisplayImage: clearSingleDisplayImage ? null : (singleDisplayImage ?? this.singleDisplayImage),
       ambientSoundtrack: ambientSoundtrack ?? this.ambientSoundtrack,
       customAudioLabel: customAudioLabel ?? this.customAudioLabel,
       customAudioSource: customAudioSource ?? this.customAudioSource,
@@ -1467,6 +1555,9 @@ class SystemSettingsState {
         'slideDurationSeconds': slideDurationSeconds,
         'slideEffect': slideEffect.name,
         'smartDisplayLayout': smartDisplayLayout.name,
+        'smartDisplayVisualTheme': smartDisplayVisualTheme.name,
+        'slideImages': slideImages.take(12).map((e) => e.toJson()).toList(),
+        if (singleDisplayImage != null) 'singleDisplayImage': singleDisplayImage!.toJson(),
         'ambientSoundtrack': ambientSoundtrack.name,
         'customAudioLabel': customAudioLabel,
         'customAudioSource': customAudioSource,
@@ -1590,6 +1681,34 @@ class SystemSettingsState {
       slideDurationSeconds: (map['slideDurationSeconds'] as int?) ?? defaults.slideDurationSeconds,
       slideEffect: _parseEnum(map['slideEffect'] as String?, SlideTransitionEffect.values, defaults.slideEffect),
       smartDisplayLayout: _parseEnum(map['smartDisplayLayout'] as String?, VisualLayoutMode.values, defaults.smartDisplayLayout),
+      smartDisplayVisualTheme: _parseEnum(
+        map['smartDisplayVisualTheme'] as String?,
+        SmartDisplayVisualTheme.values,
+        defaults.smartDisplayVisualTheme,
+      ),
+      slideImages: () {
+        final raw = map['slideImages'];
+        if (raw is! List) return defaults.slideImages;
+        final list = <SmartDisplaySlideImage>[];
+        for (final item in raw) {
+          if (item is Map<String, dynamic>) {
+            list.add(SmartDisplaySlideImage.fromJson(item));
+          } else if (item is Map) {
+            list.add(SmartDisplaySlideImage.fromJson(Map<String, dynamic>.from(item)));
+          }
+          if (list.length >= 12) break;
+        }
+        return list;
+      }(),
+      singleDisplayImage: () {
+        final raw = map['singleDisplayImage'];
+        if (raw is Map<String, dynamic>) {
+          return SmartDisplaySlideImage.fromJson(raw);
+        } else if (raw is Map) {
+          return SmartDisplaySlideImage.fromJson(Map<String, dynamic>.from(raw));
+        }
+        return null;
+      }(),
       ambientSoundtrack: _parseEnum(map['ambientSoundtrack'] as String?, AmbientSoundtrack.values, defaults.ambientSoundtrack),
       customAudioLabel: (map['customAudioLabel'] as String?) ?? defaults.customAudioLabel,
       customAudioSource: (map['customAudioSource'] as String?) ?? defaults.customAudioSource,

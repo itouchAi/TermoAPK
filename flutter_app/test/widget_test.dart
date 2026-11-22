@@ -792,4 +792,49 @@ void main() {
     expect(settings.copyWith(cloudSyncIntervalSeconds: 9999).cloudSyncIntervalSeconds, 3600);
     expect(settings.copyWith(cloudSyncIntervalSeconds: -10).cloudSyncIntervalSeconds, 0);
   });
+
+  test('SmartDisplaySlideImage, VisualLayoutMode.stretch, SmartDisplayVisualTheme, and city helper round-trip cleanly', () {
+    final sampleImg = SmartDisplaySlideImage(
+      id: 'img_1',
+      name: 'sunset_beach.png',
+      dataBase64: base64Encode([137, 80, 78, 71, 13, 10, 26, 10]),
+      filePath: '',
+    );
+    final singleImg = SmartDisplaySlideImage(
+      id: 'img_single',
+      name: 'living_room.png',
+      dataBase64: base64Encode([1, 2, 3, 4]),
+    );
+
+    final settings = SystemSettingsState.defaults().copyWith(
+      smartDisplayMode: SmartDisplayMode.slideshow,
+      smartDisplayLayout: VisualLayoutMode.stretch,
+      smartDisplayVisualTheme: SmartDisplayVisualTheme.aurora,
+      ambientSoundtrack: AmbientSoundtrack.relaxPiano,
+      slideImages: [sampleImg],
+      singleDisplayImage: singleImg,
+    );
+
+    final restored = SystemSettingsState.fromJson(settings.toJson());
+    expect(restored.smartDisplayLayout, VisualLayoutMode.stretch);
+    expect(restored.smartDisplayVisualTheme, SmartDisplayVisualTheme.aurora);
+    expect(restored.ambientSoundtrack, AmbientSoundtrack.relaxPiano);
+    expect(restored.slideImages.length, 1);
+    expect(restored.slideImages.first.name, 'sunset_beach.png');
+    expect(restored.slideImages.first.decodeBytes(), [137, 80, 78, 71, 13, 10, 26, 10]);
+    expect(restored.singleDisplayImage?.id, 'img_single');
+    expect(restored.singleDisplayImage?.decodeBytes(), [1, 2, 3, 4]);
+
+    final cleared = restored.copyWith(clearSingleDisplayImage: true);
+    expect(cleared.singleDisplayImage, isNull);
+
+    final silentSettings = restored.copyWith(ambientSoundtrack: AmbientSoundtrack.silent);
+    expect(silentSettings.ambientTrackTitle(LangCode.tr).contains('Sessiz'), isTrue);
+    expect(restored.ambientTrackTitle(LangCode.tr).contains('Piyano'), isTrue);
+
+    expect(SystemSettingsState.extractCityName('Ev · İstanbul'), 'İstanbul');
+    expect(SystemSettingsState.extractCityName('Ev (Kadıköy)'), 'Kadıköy');
+    expect(SystemSettingsState.extractCityName('Yazlık · İzmir'), 'İzmir');
+    expect(SystemSettingsState.extractCityName('Ankara'), 'Ankara');
+  });
 }

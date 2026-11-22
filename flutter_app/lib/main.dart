@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -23,6 +22,7 @@ import 'widgets/boot_ceremony_overlay.dart';
 import 'widgets/flow_tab_bar.dart';
 import 'widgets/missed_call_alert.dart';
 import 'widgets/overlays.dart';
+import 'widgets/smart_display_overlay.dart';
 import 'widgets/termo_bot.dart';
 import 'widgets/weather_effects_layer.dart';
 
@@ -146,9 +146,10 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             }
             if (_settings.smartDisplayMode == SmartDisplayMode.slideshow) {
               _slideTicks++;
+              final slideCount = _settings.slideImages.isNotEmpty ? _settings.slideImages.length : 4;
               if (_slideTicks >= _settings.slideDurationSeconds) {
                 _slideTicks = 0;
-                _slideIndex = (_slideIndex + 1) % 4;
+                _slideIndex = (_slideIndex + 1) % slideCount;
               }
             }
           }
@@ -320,7 +321,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       _ambientElapsedSeconds = 0;
       _ambientMode = true;
     });
-    if (_settings.ambientVolume > 0.01) {
+    if (_settings.ambientSoundtrack != AmbientSoundtrack.silent && _settings.ambientVolume > 0.01) {
       AmbientAudioService.start(
         track: _settings.ambientSoundtrack,
         customSource: _settings.customAudioSource.isNotEmpty
@@ -328,6 +329,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             : _settings.customAudioLabel,
         volume: _settings.ambientVolume,
       );
+    } else {
+      AmbientAudioService.stop();
     }
     HardwareService.enterSmartDisplayHardware(
       brightnessPercent: _settings.displayBrightness,
@@ -776,23 +779,6 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     }
   }
 
-  String _formatClock(DateTime dt) {
-    final h = dt.hour.toString().padLeft(2, '0');
-    final m = dt.minute.toString().padLeft(2, '0');
-    final s = dt.second.toString().padLeft(2, '0');
-    return '$h:$m:$s';
-  }
-
-  String _formatDate(DateTime dt, LangCode lang) {
-    const daysTr = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
-    const daysEn = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const monthsTr = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
-    const monthsEn = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    final d = lang == LangCode.tr ? daysTr[dt.weekday - 1] : daysEn[dt.weekday - 1];
-    final mon = lang == LangCode.tr ? monthsTr[dt.month - 1] : monthsEn[dt.month - 1];
-    return '$d, ${dt.day} $mon ${dt.year}';
-  }
-
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
@@ -1195,33 +1181,34 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                   },
                 ),
 
-             // Enhanced Smart Display / Ambient Mode Fullscreen Clock & Telemetry
+             // Enhanced Smart Display / Dynamic Ambient Mode Fullscreen View
              if (_ambientMode)
                Positioned.fill(
-                 child: GestureDetector(
-                   onTap: _exitAmbientMode,
-                   child: _SmartDisplayAmbientView(
-                     mode: _settings.smartDisplayMode,
-                     layoutMode: _settings.smartDisplayLayout,
-                     slideEffect: _settings.slideEffect,
-                     slideIndex: _slideIndex,
-                     now: _now,
-                     clockText: _formatClock(_now),
-                     dateText: _formatDate(_now, _lang),
-                     locationName: _locationName,
-                     roomTemp: _roomTemp,
-                     targetTemp: _targetTemp,
-                     boiler: boiler,
-                     accentColor: activeColor,
-                     lang: _lang,
-                     trackTitle: _settings.ambientTrackTitle(_lang),
-                     ambientVolume: _settings.ambientVolume,
-                     marqueeTrackEnabled: _settings.marqueeTrackEnabled,
-                     equalizerEnabled: _settings.equalizerEnabled,
-                     equalizerStyle: _settings.equalizerStyle,
-                     displayBrightness: _settings.displayBrightness,
-                     oledPixelShiftEnabled: _settings.oledPixelShiftEnabled,
-                   ),
+                 child: SmartDisplayOverlay(
+                   settings: _settings,
+                   slideIndex: _slideIndex,
+                   now: _now,
+                   locationName: _locationName,
+                   roomTemp: _roomTemp,
+                   targetTemp: _targetTemp,
+                   boiler: boiler,
+                   accentColor: activeColor,
+                   lang: _lang,
+                   paletteTag: _visual.theme.name,
+                   onChangeTargetTemp: (next) => _changeTarget(next),
+                   onSelectPreset: _selectPreset,
+                   onUpdateSettings: (next) {
+                     setState(() => _settings = next);
+                     _persist();
+                   },
+                   onStepSlideIndex: (delta) {
+                     final total = _settings.slideImages.isNotEmpty ? _settings.slideImages.length : 4;
+                     setState(() {
+                       _slideTicks = 0;
+                       _slideIndex = ((_slideIndex + delta) % total + total) % total;
+                     });
+                   },
+                   onClose: _exitAmbientMode,
                  ),
                ),
 
@@ -1427,372 +1414,4 @@ class _TopActionButton extends StatelessWidget {
       ),
     );
   }
-}
-
-class _SmartDisplayAmbientView extends StatefulWidget {
-  final SmartDisplayMode mode;
-  final VisualLayoutMode layoutMode;
-  final SlideTransitionEffect slideEffect;
-  final int slideIndex;
-  final DateTime now;
-  final String clockText;
-  final String dateText;
-  final String locationName;
-  final double roomTemp;
-  final double targetTemp;
-  final BoilerTelemetry boiler;
-  final Color accentColor;
-  final LangCode lang;
-  final String trackTitle;
-  final double ambientVolume;
-  final bool marqueeTrackEnabled;
-  final bool equalizerEnabled;
-  final EqualizerStyle equalizerStyle;
-  final int displayBrightness;
-  final bool oledPixelShiftEnabled;
-
-  const _SmartDisplayAmbientView({
-    required this.mode,
-    required this.layoutMode,
-    required this.slideEffect,
-    required this.slideIndex,
-    required this.now,
-    required this.clockText,
-    required this.dateText,
-    required this.locationName,
-    required this.roomTemp,
-    required this.targetTemp,
-    required this.boiler,
-    required this.accentColor,
-    required this.lang,
-    required this.trackTitle,
-    required this.ambientVolume,
-    required this.marqueeTrackEnabled,
-    required this.equalizerEnabled,
-    required this.equalizerStyle,
-    required this.displayBrightness,
-    required this.oledPixelShiftEnabled,
-  });
-
-  @override
-  State<_SmartDisplayAmbientView> createState() => _SmartDisplayAmbientViewState();
-}
-
-class _SmartDisplayAmbientViewState extends State<_SmartDisplayAmbientView> with SingleTickerProviderStateMixin {
-  late final AnimationController _animCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _animCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 4))..repeat();
-  }
-
-  @override
-  void dispose() {
-    _animCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final tr = widget.lang == LangCode.tr;
-
-    const slidePalettes = [
-      [Color(0xFF1E293B), Color(0xFF090D16)],
-      [Color(0xFF431407), Color(0xFF140704)],
-      [Color(0xFF1E1B4B), Color(0xFF09071A)],
-      [Color(0xFF064E3B), Color(0xFF041410)],
-    ];
-
-    List<Color> bgColors;
-    IconData modeIcon;
-    String modeBadge;
-    switch (widget.mode) {
-      case SmartDisplayMode.aod:
-        bgColors = const [Colors.black, Colors.black];
-        modeIcon = Icons.nights_stay_outlined;
-        modeBadge = 'Always-On Display (AOD)';
-        break;
-      case SmartDisplayMode.silentVideoMp3:
-        bgColors = const [Color(0xFF0C2A45), Color(0xFF050A14)];
-        modeIcon = Icons.music_video_outlined;
-        modeBadge = tr ? 'Sessiz Video + MP3' : 'Silent Video + MP3';
-        break;
-      case SmartDisplayMode.liveNature:
-        bgColors = const [Color(0xFF5C1D0C), Color(0xFF0E0504)];
-        modeIcon = Icons.local_fire_department_outlined;
-        modeBadge = tr ? 'Canlı Doğa / Şömine' : 'Live Nature / Hearth';
-        break;
-      case SmartDisplayMode.slideshow:
-        bgColors = slidePalettes[widget.slideIndex % slidePalettes.length];
-        modeIcon = Icons.collections_outlined;
-        modeBadge = tr ? 'Slayt Gösterisi (${widget.slideIndex + 1}/4)' : 'Slideshow (${widget.slideIndex + 1}/4)';
-        break;
-      case SmartDisplayMode.singlePhoto:
-        bgColors = const [Color(0xFF1B1932), Color(0xFF07070D)];
-        modeIcon = Icons.photo_outlined;
-        modeBadge = tr ? 'Tekli Görsel' : 'Single Backdrop';
-        break;
-    }
-
-    // Subtle OLED pixel-shift offset when OLED Pixel Protection is enabled
-    final aodShift = (widget.oledPixelShiftEnabled || widget.mode == SmartDisplayMode.aod)
-        ? Offset(((widget.now.minute % 5) - 2) * 3.0, ((widget.now.second % 3) - 1) * 2.0)
-        : Offset.zero;
-
-    final insetPadding = switch (widget.layoutMode) {
-      VisualLayoutMode.cover => EdgeInsets.zero,
-      VisualLayoutMode.contain => const EdgeInsets.all(20),
-      VisualLayoutMode.framed => const EdgeInsets.symmetric(horizontal: 28, vertical: 44),
-    };
-
-    final innerContent = AnimatedSwitcher(
-      duration: const Duration(milliseconds: 520),
-      transitionBuilder: (child, anim) {
-        switch (widget.slideEffect) {
-          case SlideTransitionEffect.fade:
-            return FadeTransition(opacity: anim, child: child);
-          case SlideTransitionEffect.slide:
-            return SlideTransition(
-              position: Tween<Offset>(begin: const Offset(0.08, 0), end: Offset.zero).animate(anim),
-              child: FadeTransition(opacity: anim, child: child),
-            );
-          case SlideTransitionEffect.zoom:
-            return ScaleTransition(
-              scale: Tween<double>(begin: 0.94, end: 1.0).animate(anim),
-              child: FadeTransition(opacity: anim, child: child),
-            );
-        }
-      },
-      child: Container(
-        key: ValueKey('${widget.mode.name}_${widget.slideIndex}'),
-        width: double.infinity,
-        height: double.infinity,
-        decoration: BoxDecoration(
-          borderRadius: widget.layoutMode == VisualLayoutMode.cover ? BorderRadius.zero : BorderRadius.circular(26),
-          gradient: widget.mode == SmartDisplayMode.aod
-              ? null
-              : RadialGradient(
-                  center: const Alignment(0, -0.15),
-                  radius: 1.15,
-                  colors: bgColors,
-                ),
-          color: widget.mode == SmartDisplayMode.aod ? Colors.black : null,
-          border: widget.layoutMode == VisualLayoutMode.cover
-              ? null
-              : Border.all(color: Colors.white.withValues(alpha: 0.16), width: 1.4),
-        ),
-        padding: const EdgeInsets.all(24),
-        child: Transform.translate(
-          offset: aodShift,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (widget.marqueeTrackEnabled)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0EA5E9).withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.35)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.music_note_rounded, size: 14, color: Color(0xFF7DD3FC)),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          '${widget.trackTitle} · %${(widget.ambientVolume * 100).round()}',
-                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFFE0F2FE)),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(modeIcon, size: 15, color: widget.accentColor),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$modeBadge · ${widget.locationName}',
-                      style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.80)),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                widget.clockText,
-                style: const TextStyle(
-                  fontSize: 48,
-                  fontWeight: FontWeight.w300,
-                  letterSpacing: 2.0,
-                  color: Colors.white,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                ),
-              ),
-              Text(
-                widget.dateText,
-                style: TextStyle(fontSize: 13.5, color: Colors.white.withValues(alpha: 0.58)),
-              ),
-              const SizedBox(height: 22),
-              Text(
-                '${widget.targetTemp.toStringAsFixed(1)}°',
-                style: TextStyle(
-                  fontSize: 74,
-                  fontWeight: FontWeight.w700,
-                  color: widget.accentColor,
-                  height: 1.0,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '${tr ? 'Oda' : 'Room'}: ${widget.roomTemp.toStringAsFixed(1)}°C  ·  ${tr ? widget.boiler.statusTextTr : widget.boiler.statusTextEn}',
-                style: TextStyle(fontSize: 14, color: Colors.white.withValues(alpha: 0.72)),
-              ),
-              if (widget.equalizerEnabled) ...[
-                const SizedBox(height: 18),
-                SizedBox(
-                  width: 220,
-                  height: 36,
-                  child: AnimatedBuilder(
-                    animation: _animCtrl,
-                    builder: (_, __) => CustomPaint(
-                      painter: _AmbientEqualizerPainter(
-                        phase: _animCtrl.value * math.pi * 2,
-                        style: widget.equalizerStyle,
-                        color: widget.accentColor,
-                        intensity: widget.ambientVolume.clamp(0.15, 1.0),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 20),
-              Text(
-                tr ? 'Çıkmak için ekrana dokunun' : 'Tap anywhere to return',
-                style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.44)),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    final dimAlpha = ((1.0 - (widget.displayBrightness / 100.0)) * 0.72).clamp(0.0, 0.72);
-
-    return Stack(
-      children: [
-        Container(
-          color: Colors.black,
-          padding: insetPadding,
-          child: widget.layoutMode == VisualLayoutMode.framed
-              ? Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 440, maxHeight: 440),
-                    child: innerContent,
-                  ),
-                )
-              : innerContent,
-        ),
-        if (dimAlpha > 0.01)
-          Positioned.fill(
-            child: IgnorePointer(
-              child: Container(color: Colors.black.withValues(alpha: dimAlpha)),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _AmbientEqualizerPainter extends CustomPainter {
-  final double phase;
-  final EqualizerStyle style;
-  final Color color;
-  final double intensity;
-
-  const _AmbientEqualizerPainter({
-    required this.phase,
-    required this.style,
-    required this.color,
-    required this.intensity,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    switch (style) {
-      case EqualizerStyle.bars:
-        const count = 16;
-        final barW = (size.width / count) * 0.56;
-        final step = size.width / count;
-        final paint = Paint()..style = PaintingStyle.fill;
-        for (int i = 0; i < count; i++) {
-          final wave = 0.25 + 0.75 * (0.5 + 0.5 * math.sin(phase * 2.0 + i * 0.65));
-          final h = (size.height * wave * intensity).clamp(4.0, size.height);
-          paint.color = Color.lerp(color, const Color(0xFF38BDF8), i / count)!.withValues(alpha: 0.85);
-          canvas.drawRRect(
-            RRect.fromRectAndRadius(
-              Rect.fromLTWH(i * step + (step - barW) / 2, size.height - h, barW, h),
-              const Radius.circular(3),
-            ),
-            paint,
-          );
-        }
-        break;
-      case EqualizerStyle.wave:
-        final path = Path();
-        final midY = size.height / 2;
-        for (double x = 0; x <= size.width; x += 4) {
-          final norm = x / size.width;
-          final y = midY +
-              math.sin(norm * math.pi * 4 + phase * 2.0) * (size.height * 0.36 * intensity) * math.sin(norm * math.pi);
-          if (x == 0) {
-            path.moveTo(x, y);
-          } else {
-            path.lineTo(x, y);
-          }
-        }
-        canvas.drawPath(
-          path,
-          Paint()
-            ..color = const Color(0xFF38BDF8).withValues(alpha: 0.90)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2.4
-            ..strokeCap = StrokeCap.round,
-        );
-        break;
-      case EqualizerStyle.pulse:
-        final center = Offset(size.width / 2, size.height / 2);
-        for (int r = 0; r < 3; r++) {
-          final t = ((phase / (math.pi * 2)) + r * 0.33) % 1.0;
-          final radius = 4.0 + t * (size.width * 0.38) * intensity;
-          canvas.drawOval(
-            Rect.fromCenter(center: center, width: radius * 2, height: (size.height * 0.85) * t + 4),
-            Paint()
-              ..color = color.withValues(alpha: (1.0 - t) * 0.75)
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 2.0,
-          );
-        }
-        break;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _AmbientEqualizerPainter oldDelegate) =>
-      oldDelegate.phase != phase || oldDelegate.style != style || oldDelegate.intensity != intensity;
 }

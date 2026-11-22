@@ -60,6 +60,9 @@ class AmbientAudioService {
       double sample = 0.0;
 
       switch (track) {
+        case AmbientSoundtrack.silent:
+          sample = 0.0;
+          break;
         case AmbientSoundtrack.fireplaceCrackling:
           lowPass = lowPass * 0.96 + white * 0.04;
           final pop = (i % 3400 < 18 && rng.nextDouble() > 0.7) ? white * 0.55 : 0.0;
@@ -77,6 +80,18 @@ class AmbientAudioService {
               math.sin(2 * math.pi * 329.63 * t) * 0.16;
           lowPass = lowPass * 0.90 + white * 0.10;
           sample = chord * (0.55 + 0.45 * loopEnv) + lowPass * 0.14;
+          break;
+        case AmbientSoundtrack.relaxPiano:
+          const notes = [261.63, 329.63, 392.00, 493.88];
+          final segLen = durationSeconds / notes.length;
+          final segIdx = (t / segLen).floor().clamp(0, notes.length - 1);
+          final localT = t - segIdx * segLen;
+          final decay = math.exp(-localT * 2.6);
+          final f = notes[segIdx];
+          final bell = math.sin(2 * math.pi * f * t) * 0.55 +
+              math.sin(4 * math.pi * f * t) * 0.18 +
+              math.sin(2 * math.pi * (f * 0.5) * t) * 0.22;
+          sample = bell * decay * 0.55;
           break;
         case AmbientSoundtrack.deepSpace:
           final drone = math.sin(2 * math.pi * 108.0 * t) * 0.45 +
@@ -112,6 +127,10 @@ class AmbientAudioService {
   }) async {
     try {
       await _player.stop();
+      if (track == AmbientSoundtrack.silent || volume <= 0.005) {
+        _playing = false;
+        return;
+      }
       await _player.setReleaseMode(ReleaseMode.loop);
       await _player.setVolume(volume.clamp(0.0, 1.0));
 
