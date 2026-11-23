@@ -250,34 +250,60 @@ class AudioTempoAnalyzer {
       frameEnergy[f] = frameEnergy[f] * 0.55 + (bandEnergyWeighted / 6.0) * 0.45;
     }
 
-    // Per-frame normalization mixed with global peak so dynamic beats & transients breathe clearly
+    // Compute per-band 93rd percentile + global 94th percentile so a single loud bass transient
+    // never flattens mid/high frequencies or quieter passages to 3px dots.
+    final bandRef = Float64List(safeBands);
+    final allBandVals = <double>[];
+    for (int b = 0; b < safeBands; b++) {
+      final col = <double>[for (int f = 0; f < frameCount; f++) rawFrames[f][b]]..sort();
+      final pIdx = ((col.length - 1) * 0.93).round().clamp(0, col.length - 1);
+      bandRef[b] = math.max(1e-5, col[pIdx]);
+      allBandVals.add(col[pIdx]);
+    }
+    allBandVals.sort();
+    final globalRef = math.max(
+      1e-5,
+      allBandVals[((allBandVals.length - 1) * 0.90).round().clamp(0, allBandVals.length - 1)],
+    );
+
+    final sortedRms = frameEnergy.toList()..sort();
+    final rmsRef = math.max(
+      1e-5,
+      sortedRms[((sortedRms.length - 1) * 0.92).round().clamp(0, sortedRms.length - 1)],
+    );
+
     final normFrames = List<List<double>>.generate(frameCount, (f) {
       final row = rawFrames[f];
+      final frameDrive = (0.45 + 0.65 * (frameEnergy[f] / rmsRef)).clamp(0.20, 1.15);
       return List<double>.generate(safeBands, (b) {
-        final ratio = (row[b] / globalPeak).clamp(0.0, 1.0);
-        // Gamma 0.58 emphasizes real note attacks while preventing noise floor from saturating
-        final perceptual = math.pow(ratio, 0.58).toDouble();
-        return (perceptual * 0.96).clamp(0.0, 1.0);
+        final blendedRef = bandRef[b] * 0.68 + globalRef * 0.32;
+        final ratio = (row[b] / blendedRef).clamp(0.0, 1.25);
+        final curved = math.pow(ratio.clamp(0.0, 1.0), 0.50).toDouble();
+        return (curved * frameDrive).clamp(0.0, 1.0);
       });
     });
 
     // Spectral flux + sub-bass RMS onset detection for beat envelope
     final flux = Float64List(frameCount);
-    double maxFlux = 1e-6;
     for (int f = 0; f < frameCount; f++) {
       final prev = f == 0 ? f : f - 1;
-      double posDiff = math.max(0.0, frameEnergy[f] - frameEnergy[prev]) * 2.5;
+      double posDiff = math.max(0.0, frameEnergy[f] - frameEnergy[prev]) * 3.0;
       for (int b = 0; b < safeBands; b++) {
         final d = normFrames[f][b] - normFrames[prev][b];
-        if (d > 0) posDiff += d * (b < 5 ? 1.5 : 0.7);
+        if (d > 0) posDiff += d * (b < 5 ? 1.6 : 0.85);
       }
-      flux[f] = posDiff + frameEnergy[f] * 0.35;
-      if (flux[f] > maxFlux) maxFlux = flux[f];
+      flux[f] = posDiff + (frameEnergy[f] / rmsRef) * 0.45;
     }
 
+    final sortedFlux = flux.toList()..sort();
+    final fluxRef = math.max(
+      1e-5,
+      sortedFlux[((sortedFlux.length - 1) * 0.94).round().clamp(0, sortedFlux.length - 1)],
+    );
+
     final beatEnvelope = List<double>.generate(frameCount, (f) {
-      final raw = (flux[f] / maxFlux).clamp(0.0, 1.0);
-      return math.pow(raw, 0.75).toDouble();
+      final raw = (flux[f] / fluxRef).clamp(0.0, 1.0);
+      return math.pow(raw, 0.68).toDouble();
     });
 
     // Estimate BPM via autocorrelation on onset flux in [55..175] BPM

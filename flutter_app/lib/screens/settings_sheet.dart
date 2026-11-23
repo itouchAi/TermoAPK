@@ -131,6 +131,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
   bool _cloudSyncOk = true;
   bool _showCloudPayloadPreview = false;
   bool _themesAudioAccordionExpanded = true;
+  bool _savedToastVisible = false;
 
   final _firebaseUrlCtrl = TextEditingController();
   final _firebaseApiKeyCtrl = TextEditingController();
@@ -997,6 +998,18 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    if (_savedToastVisible)
+                      Expanded(
+                        child: Text(
+                          _lang == LangCode.tr ? '✓ Ayarlar kaydedildi' : '✓ Settings saved',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF34D399),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     TextButton(
                       onPressed: () => Navigator.of(context).pop(),
                       style: TextButton.styleFrom(foregroundColor: Colors.white70),
@@ -1043,7 +1056,18 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                           widget.onChangeLang(_lang);
                           widget.onChangeLocation(_location);
                           widget.onSaveSettings(updated);
-                          Navigator.of(context).pop();
+                          setState(() {
+                            _draft = updated;
+                            _savedToastVisible = true;
+                            _statusBanner = _lang == LangCode.tr
+                                ? '✓ Tüm ayarlar kaydedildi.'
+                                : '✓ All settings saved.';
+                          });
+                          Future.delayed(const Duration(seconds: 3), () {
+                            if (mounted) {
+                              setState(() => _savedToastVisible = false);
+                            }
+                          });
                         },
                         style: FilledButton.styleFrom(
                           backgroundColor: Colors.transparent,
@@ -1252,21 +1276,25 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             ),
           ),
 
-          // Expandable Sub-Panel Body
-          AnimatedCrossFade(
-            duration: const Duration(milliseconds: 200),
-            crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-            firstChild: const SizedBox.shrink(),
-            secondChild: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Divider(height: 14, color: Colors.white.withValues(alpha: 0.08)),
-                  _buildExpandedPanel(id),
-                ],
-              ),
+          // Expandable Sub-Panel Body (pure vertical slide down/up, zero horizontal squish)
+          ClipRect(
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: isExpanded
+                  ? Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Divider(height: 14, color: Colors.white.withValues(alpha: 0.08)),
+                          _buildExpandedPanel(id),
+                        ],
+                      ),
+                    )
+                  : const SizedBox(width: double.infinity, height: 0),
             ),
           ),
         ],
@@ -2857,7 +2885,6 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 final firstSlideBytes = _draft.slideImages.isNotEmpty
                     ? _draft.slideImages.first.decodeBytes()
                     : null;
-                final themePoster = smartDisplayThemeAssetPath(_draft.smartDisplayVisualTheme);
 
                 Widget buildBlurSampleBackdrop() {
                   if (isSlideshow && firstSlideBytes != null) {
@@ -2868,29 +2895,75 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                       height: double.infinity,
                     );
                   }
-                  if (themePoster.isNotEmpty) {
-                    return Image.asset(
-                      themePoster,
-                      fit: BoxFit.cover,
-                      width: double.infinity,
-                      height: double.infinity,
-                      errorBuilder: (_, __, ___) => Container(
-                        decoration: const BoxDecoration(
+                  final colors = switch (_draft.smartDisplayVisualTheme) {
+                    SmartDisplayVisualTheme.fireplace => const [
+                        Color(0xFFF97316),
+                        Color(0xFF9A3412),
+                        Color(0xFF1C0F0A),
+                      ],
+                    SmartDisplayVisualTheme.rainy => const [
+                        Color(0xFF38BDF8),
+                        Color(0xFF1E3A5F),
+                        Color(0xFF0A111A),
+                      ],
+                    SmartDisplayVisualTheme.winterSnow => const [
+                        Color(0xFFE0F2FE),
+                        Color(0xFF3B82F6),
+                        Color(0xFF0B1324),
+                      ],
+                    SmartDisplayVisualTheme.sunset => const [
+                        Color(0xFFF59E0B),
+                        Color(0xFF9333EA),
+                        Color(0xFF130B1E),
+                      ],
+                    SmartDisplayVisualTheme.aurora => const [
+                        Color(0xFF10B981),
+                        Color(0xFF6366F1),
+                        Color(0xFF070B16),
+                      ],
+                    SmartDisplayVisualTheme.minimalist => const [
+                        Color(0xFF334155),
+                        Color(0xFF1E293B),
+                        Color(0xFF09090D),
+                      ],
+                  };
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      DecoratedBox(
+                        decoration: BoxDecoration(
                           gradient: LinearGradient(
-                            colors: [Color(0xFF1E3A8A), Color(0xFF9333EA), Color(0xFFEA580C)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: colors,
                           ),
                         ),
                       ),
-                    );
-                  }
-                  return Container(
-                    decoration: const BoxDecoration(
-                      gradient: RadialGradient(
-                        center: Alignment(-0.35, -0.2),
-                        radius: 1.0,
-                        colors: [Color(0xFF0284C7), Color(0xFF312E81), Color(0xFF09090D)],
+                      Positioned(
+                        left: 28,
+                        top: 16,
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white.withValues(alpha: 0.45),
+                          ),
+                        ),
                       ),
-                    ),
+                      Positioned(
+                        right: 48,
+                        bottom: 12,
+                        child: Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: colors.first.withValues(alpha: 0.72),
+                          ),
+                        ),
+                      ),
+                    ],
                   );
                 }
 

@@ -8,6 +8,7 @@ import '../models/thermostat_state.dart';
 import '../services/ambient_audio_service.dart';
 import '../services/hardware_service.dart';
 import '../services/video_source_bridge.dart';
+import 'rotary_dial.dart';
 
 class SmartDisplayOverlay extends StatefulWidget {
   final SystemSettingsState settings;
@@ -18,6 +19,7 @@ class SmartDisplayOverlay extends StatefulWidget {
   final double targetTemp;
   final BoilerTelemetry boiler;
   final Color accentColor;
+  final ThemePaletteSpec palette;
   final LangCode lang;
   final String paletteTag;
   final bool forcedAod;
@@ -38,6 +40,7 @@ class SmartDisplayOverlay extends StatefulWidget {
     required this.targetTemp,
     required this.boiler,
     required this.accentColor,
+    required this.palette,
     required this.lang,
     required this.paletteTag,
     this.forcedAod = false,
@@ -49,6 +52,22 @@ class SmartDisplayOverlay extends StatefulWidget {
     required this.onClose,
   });
 
+  /// Gentle 12-minute OLED burn-in drift (max +/- 1.5 px) without 1-second micro jitter.
+  static Offset computeGentleBurnInShift(DateTime now, {required bool enabled}) {
+    if (!enabled) return Offset.zero;
+    final window = ((now.hour * 60 + now.minute) ~/ 12) % 4;
+    switch (window) {
+      case 0:
+        return const Offset(-1.5, -1.0);
+      case 1:
+        return const Offset(1.5, -1.0);
+      case 2:
+        return const Offset(1.5, 1.5);
+      default:
+        return const Offset(-1.5, 1.5);
+    }
+  }
+
   @override
   State<SmartDisplayOverlay> createState() => _SmartDisplayOverlayState();
 }
@@ -56,15 +75,24 @@ class SmartDisplayOverlay extends StatefulWidget {
 class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTickerProviderStateMixin {
   late final AnimationController _animCtrl;
   bool _hudHidden = false;
+  bool _controlsIdleHidden = false;
   bool _paused = false;
   bool _muted = false;
+  bool _shuffleEnabled = false;
+  bool _leftExpanded = false;
+  bool _rightExpanded = false;
+  bool _volumePopupOpen = false;
+  bool _draggingBrightness = false;
   bool _leftDrawerOpen = false;
-  bool _rightDrawerOpen = false;
   bool _thermostatModalOpen = false;
   int _thermostatCountdown = 5;
   Timer? _thermostatTimer;
+  Timer? _idleControlsTimer;
+  Timer? _leftCollapseTimer;
+  Timer? _rightCollapseTimer;
   String? _hudHintBanner;
   Timer? _hintTimer;
+  final math.Random _rng = math.Random();
 
   // Lightweight memory cache for base64 slide photos to avoid re-decoding every 1s clock tick
   final Map<String, Uint8List> _decodedImageCache = {};
@@ -79,6 +107,53 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     return raw == SmartDisplayMode.singlePhoto ? SmartDisplayMode.slideshow : raw;
   }
 
+  double get _effectiveBlurSigma => _effectiveMode == SmartDisplayMode.aod ? 0.0 : widget.settings.smartDisplayBlur;
+
+  void _syncDomVideoBlur() {
+    VideoSourceBridge.applyDomVideoBlur(_effectiveBlurSigma);
+  }
+
+  void _wakeBottomControls() {
+    _idleControlsTimer?.cancel();
+    if (mounted && _controlsIdleHidden) {
+      setState(() => _controlsIdleHidden = false);
+    }
+    _idleControlsTimer = Timer(const Duration(seconds: 10), () {
+      if (!mounted) return;
+      if (_thermostatModalOpen || _volumePopupOpen || _draggingBrightness || _leftDrawerOpen) {
+        _wakeBottomControls();
+        return;
+      }
+      setState(() {
+        _controlsIdleHidden = true;
+        _leftExpanded = false;
+        _rightExpanded = false;
+      });
+    });
+  }
+
+  void _scheduleLeftCollapse() {
+    _leftCollapseTimer?.cancel();
+    if (!_leftExpanded || _volumePopupOpen) return;
+    _leftCollapseTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted) return;
+      if (_leftExpanded && !_volumePopupOpen) {
+        setState(() => _leftExpanded = false);
+      }
+    });
+  }
+
+  void _scheduleRightCollapse() {
+    _rightCollapseTimer?.cancel();
+    if (!_rightExpanded || _draggingBrightness) return;
+    _rightCollapseTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted) return;
+      if (_rightExpanded && !_draggingBrightness) {
+        setState(() => _rightExpanded = false);
+      }
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -86,6 +161,8 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
         widget.settings.ambientVolume <= 0.01;
     _animCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 12))..repeat();
     _syncVideoController();
+    _wakeBottomControls();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _syncDomVideoBlur());
   }
 
   @override
@@ -104,12 +181,21 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
         oldWidget.forcedAod != widget.forcedAod) {
       _syncVideoController();
     }
+    if (oldWidget.settings.smartDisplayBlur != widget.settings.smartDisplayBlur ||
+        oldWidget.forcedAod != widget.forcedAod ||
+        oldWidget.settings.smartDisplayMode != widget.settings.smartDisplayMode) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _syncDomVideoBlur());
+    }
   }
 
   @override
   void dispose() {
     _thermostatTimer?.cancel();
+    _idleControlsTimer?.cancel();
+    _leftCollapseTimer?.cancel();
+    _rightCollapseTimer?.cancel();
     _hintTimer?.cancel();
+    VideoSourceBridge.applyDomVideoBlur(0.0);
     _videoCtrl?.dispose();
     _animCtrl.dispose();
     super.dispose();
@@ -192,6 +278,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
       }
       if (mounted) {
         setState(() => _videoReady = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) => _syncDomVideoBlur());
       }
     } catch (_) {
       if (mounted && _activeVideoSource == wanted) {
@@ -262,32 +349,45 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     }
   }
 
-  void _cycleBrightness() {
+  void _stepSlideAndAudio(int delta) {
     _haptic();
-    const steps = [25, 50, 75, 100];
-    final cur = widget.settings.displayBrightness;
-    var next = steps.first;
-    for (final s in steps) {
-      if (s > cur + 4) {
-        next = s;
-        break;
-      }
-    }
-    widget.onUpdateSettings(widget.settings.copyWith(displayBrightness: next));
-    HardwareService.enterSmartDisplayHardware(
-      brightnessPercent: next,
-      keepAwake: widget.settings.displaySleepMinutes == 0,
+    _wakeBottomControls();
+    final s = widget.settings;
+    final slideStep = _shuffleEnabled
+        ? (s.slideImages.length > 1 ? 1 + _rng.nextInt(s.slideImages.length - 1) : 1 + _rng.nextInt(4))
+        : delta;
+    widget.onStepSlideIndex(slideStep);
+
+    final hasCustom = s.customAudioSource.trim().isNotEmpty || s.customAudioLabel.trim().isNotEmpty;
+    final nextTrack = AmbientAudioService.stepPlaylistTrack(
+      s.ambientSoundtrack,
+      delta,
+      hasCustomAudio: hasCustom,
+      shuffle: _shuffleEnabled,
     );
+    final nextSettings = s.copyWith(ambientSoundtrack: nextTrack);
+    widget.onUpdateSettings(nextSettings);
+    if (!_muted && nextTrack != AmbientSoundtrack.silent) {
+      AmbientAudioService.start(
+        track: nextTrack,
+        customSource: s.customAudioSource.isNotEmpty ? s.customAudioSource : s.customAudioLabel,
+        volume: s.ambientVolume <= 0.05 ? 0.5 : s.ambientVolume,
+      );
+    }
+    _scheduleLeftCollapse();
   }
 
   void _toggleHudHidden() {
     _haptic();
+    _wakeBottomControls();
     final next = !_hudHidden;
     _hintTimer?.cancel();
     setState(() {
       _hudHidden = next;
       _leftDrawerOpen = false;
-      _rightDrawerOpen = false;
+      _leftExpanded = false;
+      _rightExpanded = false;
+      _volumePopupOpen = false;
       _hudHintBanner = next
           ? (widget.lang == LangCode.tr
               ? 'Ekran temizlendi · Geri getirmek için sağ alttaki fırçaya dokunun'
@@ -303,11 +403,14 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
 
   void _openThermostatModal() {
     _haptic();
+    _wakeBottomControls();
     setState(() {
       _thermostatModalOpen = true;
       _thermostatCountdown = 5;
       _leftDrawerOpen = false;
-      _rightDrawerOpen = false;
+      _leftExpanded = false;
+      _rightExpanded = false;
+      _volumePopupOpen = false;
     });
     _startThermostatCountdown();
   }
@@ -408,10 +511,11 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     final s = widget.settings;
     final mode = _effectiveMode;
 
-    // Subtle OLED pixel-shift drift
-    final aodShift = (s.oledPixelShiftEnabled || mode == SmartDisplayMode.aod)
-        ? Offset(((widget.now.minute % 5) - 2) * 3.0, ((widget.now.second % 3) - 1) * 2.0)
-        : Offset.zero;
+    // Gentle 12-minute OLED burn-in drift (max +/-1.5px, no 1s jitter)
+    final aodShift = SmartDisplayOverlay.computeGentleBurnInShift(
+      widget.now,
+      enabled: s.oledPixelShiftEnabled || mode == SmartDisplayMode.aod,
+    );
 
     final hh = widget.now.hour.toString().padLeft(2, '0');
     final mm = widget.now.minute.toString().padLeft(2, '0');
@@ -421,488 +525,525 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     final dimAlpha = ((1.0 - (s.displayBrightness / 100.0)) * 0.72).clamp(0.0, 0.72);
     final isAudioActive = !_muted && !widget.forcedAod && s.ambientSoundtrack != AmbientSoundtrack.silent;
 
-    final clockFontSize = compactHeight
-        ? 54.0
-        : (isLandscape ? math.min(92.0, size.height * 0.19) : math.min(82.0, size.width * 0.19));
-    final secFontSize = (clockFontSize * 0.28).clamp(16.0, 26.0);
+    final targetHeightFont = compactHeight
+        ? size.height * 0.23
+        : (isLandscape ? (size.height * 0.22).clamp(64.0, 156.0) : (size.width * 0.23).clamp(58.0, 128.0));
+    final maxByWidth = ((size.width - 48) / 4.35).clamp(44.0, 168.0);
+    final clockFontSize = math.min(targetHeightFont, maxByWidth);
+    final secFontSize = (clockFontSize * 0.26).clamp(15.0, 38.0);
+    final bottomControlsHidden = _hudHidden || _controlsIdleHidden;
 
     return Material(
       color: Colors.black,
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: widget.forcedAod ? widget.onWakeFromAutoAod : null,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // 1. Dynamic Full-Screen Visual / Video / Slide / Theme Backdrop Layer (+ Configurable Blur)
-            Positioned.fill(
-              child: ClipRect(
-                child: (mode != SmartDisplayMode.aod && s.smartDisplayBlur > 0.1)
-                    ? ImageFiltered(
-                        imageFilter: ui.ImageFilter.blur(
-                          sigmaX: s.smartDisplayBlur,
-                          sigmaY: s.smartDisplayBlur,
-                          tileMode: TileMode.mirror,
-                        ),
-                        child: _buildBackgroundLayer(s),
-                      )
-                    : _buildBackgroundLayer(s),
-              ),
-            ),
-
-            // Readability dark gradient scrim (except pure black AOD)
-            if (mode != SmartDisplayMode.aod)
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.42),
-                          Colors.black.withValues(alpha: 0.16),
-                          Colors.black.withValues(alpha: 0.56),
-                        ],
-                      ),
-                    ),
+      child: MouseRegion(
+        onHover: (_) => _wakeBottomControls(),
+        child: Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (_) => _wakeBottomControls(),
+          onPointerMove: (_) => _wakeBottomControls(),
+          child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onTap: () {
+              _wakeBottomControls();
+              if (widget.forcedAod) {
+                widget.onWakeFromAutoAod?.call();
+              }
+            },
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // 1. Dynamic Full-Screen Visual / Video / Slide / Theme Backdrop Layer (+ Configurable Blur)
+                Positioned.fill(
+                  child: ClipRect(
+                    child: (mode != SmartDisplayMode.aod && s.smartDisplayBlur > 0.1)
+                        ? Transform.scale(
+                            scale: 1.0 + s.smartDisplayBlur / 140.0,
+                            child: ImageFiltered(
+                              imageFilter: ui.ImageFilter.blur(
+                                sigmaX: s.smartDisplayBlur,
+                                sigmaY: s.smartDisplayBlur,
+                                tileMode: ui.TileMode.clamp,
+                              ),
+                              child: _buildBackgroundLayer(s),
+                            ),
+                          )
+                        : _buildBackgroundLayer(s),
                   ),
                 ),
-              ),
 
-          // 2. Display Brightness Dimming Overlay
-          if (dimAlpha > 0.01)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: Container(color: Colors.black.withValues(alpha: dimAlpha)),
-              ),
-            ),
-
-          // 3. Main Animated HUD Content (Header, Center Clock & Target Pill, Bottom Floating Toolbars)
-          SafeArea(
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: isLandscape ? 22 : 16,
-                vertical: compactHeight ? 10 : 14,
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  // TOP BAR (Slides smoothly UP off-screen when HUD hidden)
-                  AnimatedSlide(
-                    offset: _hudHidden ? const Offset(0, -1.8) : Offset.zero,
-                    duration: const Duration(milliseconds: 420),
-                    curve: Curves.easeInOutCubic,
-                    child: AnimatedOpacity(
-                      opacity: _hudHidden ? 0.0 : 1.0,
-                      duration: const Duration(milliseconds: 300),
-                      child: IgnorePointer(
-                        ignoring: _hudHidden,
-                        child: _buildTopHeader(
-                          tr: tr,
-                          cityName: cityName,
-                          outdoorTemp: outdoorTemp,
-                          weatherIcon: weatherIcon,
-                          compact: size.width < 430,
+                // Readability dark gradient scrim (except pure black AOD)
+                if (mode != SmartDisplayMode.aod)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.black.withValues(alpha: 0.42),
+                              Colors.black.withValues(alpha: 0.16),
+                              Colors.black.withValues(alpha: 0.56),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
 
-                  // CENTER CLOCK, DATE, ROOM/TARGET PILL & EQUALIZER
-                  Expanded(
-                    child: Center(
-                      child: AnimatedSlide(
-                        offset: _hudHidden ? const Offset(0, -0.35) : Offset.zero,
-                        duration: const Duration(milliseconds: 440),
-                        curve: Curves.easeInOutCubic,
-                        child: AnimatedOpacity(
-                          opacity: _hudHidden ? 0.0 : 1.0,
-                          duration: const Duration(milliseconds: 320),
-                          child: IgnorePointer(
-                            ignoring: _hudHidden,
-                            child: Transform.translate(
-                              offset: aodShift,
-                              child: SingleChildScrollView(
-                                physics: const NeverScrollableScrollPhysics(),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (s.marqueeTrackEnabled && isAudioActive)
-                                      Container(
-                                        margin: const EdgeInsets.only(bottom: 10),
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black.withValues(alpha: 0.42),
-                                          borderRadius: BorderRadius.circular(20),
-                                          border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.35)),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const Icon(Icons.music_note_rounded, size: 13, color: Color(0xFF7DD3FC)),
-                                            const SizedBox(width: 6),
-                                            Flexible(
-                                              child: Text(
-                                                '${s.ambientTrackTitle(widget.lang)} · %${(s.ambientVolume * 100).round()}',
-                                                style: const TextStyle(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: Color(0xFFE0F2FE),
+                // 2. Display Brightness Dimming Overlay
+                if (dimAlpha > 0.01)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Container(color: Colors.black.withValues(alpha: dimAlpha)),
+                    ),
+                  ),
+
+                // 3. Main Animated HUD Content (Header, Center Clock & Target Pill, Bottom Marquee & Floating Toolbars)
+                SafeArea(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isLandscape ? 22 : 16,
+                      vertical: compactHeight ? 10 : 14,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // TOP BAR (Slides smoothly UP off-screen when HUD hidden)
+                        AnimatedSlide(
+                          offset: _hudHidden ? const Offset(0, -1.8) : Offset.zero,
+                          duration: const Duration(milliseconds: 420),
+                          curve: Curves.easeInOutCubic,
+                          child: AnimatedOpacity(
+                            opacity: _hudHidden ? 0.0 : 1.0,
+                            duration: const Duration(milliseconds: 300),
+                            child: IgnorePointer(
+                              ignoring: _hudHidden,
+                              child: _buildTopHeader(
+                                tr: tr,
+                                cityName: cityName,
+                                outdoorTemp: outdoorTemp,
+                                weatherIcon: weatherIcon,
+                                compact: size.width < 430,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // CENTER CLOCK, DATE, ROOM/TARGET PILL & EQUALIZER
+                        Expanded(
+                          child: Center(
+                            child: AnimatedSlide(
+                              offset: _hudHidden ? const Offset(0, -0.35) : Offset.zero,
+                              duration: const Duration(milliseconds: 440),
+                              curve: Curves.easeInOutCubic,
+                              child: AnimatedOpacity(
+                                opacity: _hudHidden ? 0.0 : 1.0,
+                                duration: const Duration(milliseconds: 320),
+                                child: IgnorePointer(
+                                  ignoring: _hudHidden,
+                                  child: Transform.translate(
+                                    offset: aodShift,
+                                    child: SingleChildScrollView(
+                                      physics: const NeverScrollableScrollPhysics(),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          // Huge Dynamic Crisp Clock HH : MM  ss
+                                          FittedBox(
+                                            fit: BoxFit.scaleDown,
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              crossAxisAlignment: CrossAxisAlignment.baseline,
+                                              textBaseline: TextBaseline.alphabetic,
+                                              children: [
+                                                Text(
+                                                  '$hh : $mm',
+                                                  style: TextStyle(
+                                                    fontSize: clockFontSize,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: Colors.white.withValues(alpha: 0.94),
+                                                    letterSpacing: 3.0,
+                                                    height: 0.95,
+                                                    fontFeatures: const [FontFeature.tabularFigures()],
+                                                    shadows: [
+                                                      Shadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 18),
+                                                    ],
+                                                  ),
                                                 ),
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
+                                                const SizedBox(width: 10),
+                                                Text(
+                                                  ss,
+                                                  style: TextStyle(
+                                                    fontSize: secFontSize,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: Colors.white.withValues(alpha: 0.54),
+                                                    fontFeatures: const [FontFeature.tabularFigures()],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          SizedBox(height: compactHeight ? 6 : 10),
+
+                                          // Uppercase Full Date
+                                          Text(
+                                            _formatFullUppercaseDate(widget.now, widget.lang),
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              fontSize: compactHeight ? 11.5 : 13.5,
+                                              fontWeight: FontWeight.w600,
+                                              letterSpacing: 2.8,
+                                              color: Colors.white.withValues(alpha: 0.68),
+                                            ),
+                                          ),
+                                          SizedBox(height: compactHeight ? 12 : 20),
+
+                                          // Glassmorphic Inline Pill: Oda: 21.8°C | Hedef: (-) 20°C (+)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black.withValues(alpha: 0.36),
+                                              borderRadius: BorderRadius.circular(999),
+                                              border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+                                              boxShadow: [
+                                                BoxShadow(color: Colors.black.withValues(alpha: 0.30), blurRadius: 16),
+                                              ],
+                                            ),
+                                            child: Wrap(
+                                              spacing: 10,
+                                              runSpacing: 6,
+                                              alignment: WrapAlignment.center,
+                                              crossAxisAlignment: WrapCrossAlignment.center,
+                                              children: [
+                                                Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Text(
+                                                      tr ? 'Oda: ' : 'Room: ',
+                                                      style: TextStyle(
+                                                        fontSize: 12.5,
+                                                        color: Colors.white.withValues(alpha: 0.65),
+                                                      ),
+                                                    ),
+                                                    Text(
+                                                      '${widget.roomTemp.toStringAsFixed(1)}°C',
+                                                      style: const TextStyle(
+                                                        fontSize: 14,
+                                                        fontWeight: FontWeight.w800,
+                                                        color: Color(0xFF10B981),
+                                                        fontFeatures: [FontFeature.tabularFigures()],
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                Text(
+                                                  '|',
+                                                  style: TextStyle(
+                                                    color: Colors.white.withValues(alpha: 0.24),
+                                                    fontSize: 14,
+                                                  ),
+                                                ),
+                                                Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Text(
+                                                      tr ? 'Hedef: ' : 'Target: ',
+                                                      style: TextStyle(
+                                                        fontSize: 12.5,
+                                                        color: Colors.white.withValues(alpha: 0.65),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 4),
+                                                    _CircleMiniBtn(
+                                                      icon: Icons.remove_rounded,
+                                                      enabled: widget.targetTemp > ThermostatMath.minTemp,
+                                                      onTap: () {
+                                                        _haptic();
+                                                        widget.onChangeTargetTemp(
+                                                          ThermostatMath.snapTemperature(
+                                                            widget.targetTemp - ThermostatMath.tempStep,
+                                                          ),
+                                                        );
+                                                      },
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    GestureDetector(
+                                                      onTap: _openThermostatModal,
+                                                      child: Text(
+                                                        '${widget.targetTemp % 1 == 0 ? widget.targetTemp.toStringAsFixed(0) : widget.targetTemp.toStringAsFixed(1)}°C',
+                                                        style: const TextStyle(
+                                                          fontSize: 14.5,
+                                                          fontWeight: FontWeight.w800,
+                                                          color: Color(0xFFF59E0B),
+                                                          fontFeatures: [FontFeature.tabularFigures()],
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    _CircleMiniBtn(
+                                                      icon: Icons.add_rounded,
+                                                      enabled: widget.targetTemp < ThermostatMath.maxTemp,
+                                                      onTap: () {
+                                                        _haptic();
+                                                        widget.onChangeTargetTemp(
+                                                          ThermostatMath.snapTemperature(
+                                                            widget.targetTemp + ThermostatMath.tempStep,
+                                                          ),
+                                                        );
+                                                      },
+                                                    ),
+                                                  ],
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+
+                                          if (s.equalizerEnabled && isAudioActive && !compactHeight) ...[
+                                            const SizedBox(height: 18),
+                                            SizedBox(
+                                              width: 268,
+                                              height: 54,
+                                              child: AnimatedBuilder(
+                                                animation: _animCtrl,
+                                                builder: (_, __) {
+                                                  final pausedNow = _paused || !AmbientAudioService.isPlaying;
+                                                  return CustomPaint(
+                                                    painter: _SmartEqualizerPainter(
+                                                      bands: AmbientAudioService.currentSpectrumBands(bandCount: 18),
+                                                      beatPulse: AmbientAudioService.currentBeatPulse(),
+                                                      paused: pausedNow,
+                                                      style: s.equalizerStyle,
+                                                      color: widget.accentColor,
+                                                      intensity: s.ambientVolume.clamp(0.25, 1.0),
+                                                    ),
+                                                  );
+                                                },
                                               ),
                                             ),
                                           ],
-                                        ),
-                                      ),
-
-                                    // Huge Crisp Clock HH : MM  ss
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                                      textBaseline: TextBaseline.alphabetic,
-                                      children: [
-                                        Text(
-                                          '$hh : $mm',
-                                          style: TextStyle(
-                                            fontSize: clockFontSize,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.white.withValues(alpha: 0.92),
-                                            letterSpacing: 3.0,
-                                            height: 0.95,
-                                            fontFeatures: const [FontFeature.tabularFigures()],
-                                            shadows: [
-                                              Shadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 18),
-                                            ],
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          ss,
-                                          style: TextStyle(
-                                            fontSize: secFontSize,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.white.withValues(alpha: 0.52),
-                                            fontFeatures: const [FontFeature.tabularFigures()],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    SizedBox(height: compactHeight ? 6 : 10),
-
-                                    // Uppercase Full Date
-                                    Text(
-                                      _formatFullUppercaseDate(widget.now, widget.lang),
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        fontSize: compactHeight ? 11.5 : 13.5,
-                                        fontWeight: FontWeight.w600,
-                                        letterSpacing: 2.8,
-                                        color: Colors.white.withValues(alpha: 0.68),
-                                      ),
-                                    ),
-                                    SizedBox(height: compactHeight ? 12 : 20),
-
-                                    // Glassmorphic Inline Pill: Oda: 21.8°C | Hedef: (-) 20°C (+)
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black.withValues(alpha: 0.36),
-                                        borderRadius: BorderRadius.circular(999),
-                                        border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
-                                        boxShadow: [
-                                          BoxShadow(color: Colors.black.withValues(alpha: 0.30), blurRadius: 16),
-                                        ],
-                                      ),
-                                      child: Wrap(
-                                        spacing: 10,
-                                        runSpacing: 6,
-                                        alignment: WrapAlignment.center,
-                                        crossAxisAlignment: WrapCrossAlignment.center,
-                                        children: [
-                                          Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Text(
-                                                tr ? 'Oda: ' : 'Room: ',
-                                                style: TextStyle(
-                                                  fontSize: 12.5,
-                                                  color: Colors.white.withValues(alpha: 0.65),
-                                                ),
-                                              ),
-                                              Text(
-                                                '${widget.roomTemp.toStringAsFixed(1)}°C',
-                                                style: const TextStyle(
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.w800,
-                                                  color: Color(0xFF10B981),
-                                                  fontFeatures: [FontFeature.tabularFigures()],
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          Text(
-                                            '|',
-                                            style: TextStyle(color: Colors.white.withValues(alpha: 0.24), fontSize: 14),
-                                          ),
-                                          Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Text(
-                                                tr ? 'Hedef: ' : 'Target: ',
-                                                style: TextStyle(
-                                                  fontSize: 12.5,
-                                                  color: Colors.white.withValues(alpha: 0.65),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 4),
-                                              _CircleMiniBtn(
-                                                icon: Icons.remove_rounded,
-                                                enabled: widget.targetTemp > ThermostatMath.minTemp,
-                                                onTap: () {
-                                                  _haptic();
-                                                  widget.onChangeTargetTemp(
-                                                    ThermostatMath.snapTemperature(
-                                                      widget.targetTemp - ThermostatMath.tempStep,
-                                                    ),
-                                                  );
-                                                },
-                                              ),
-                                              const SizedBox(width: 8),
-                                              GestureDetector(
-                                                onTap: _openThermostatModal,
-                                                child: Text(
-                                                  '${widget.targetTemp % 1 == 0 ? widget.targetTemp.toStringAsFixed(0) : widget.targetTemp.toStringAsFixed(1)}°C',
-                                                  style: const TextStyle(
-                                                    fontSize: 14.5,
-                                                    fontWeight: FontWeight.w800,
-                                                    color: Color(0xFFF59E0B),
-                                                    fontFeatures: [FontFeature.tabularFigures()],
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              _CircleMiniBtn(
-                                                icon: Icons.add_rounded,
-                                                enabled: widget.targetTemp < ThermostatMath.maxTemp,
-                                                onTap: () {
-                                                  _haptic();
-                                                  widget.onChangeTargetTemp(
-                                                    ThermostatMath.snapTemperature(
-                                                      widget.targetTemp + ThermostatMath.tempStep,
-                                                    ),
-                                                  );
-                                                },
-                                              ),
-                                            ],
-                                          ),
                                         ],
                                       ),
                                     ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
 
-                                    if (s.equalizerEnabled && isAudioActive && !compactHeight) ...[
-                                      const SizedBox(height: 16),
-                                      SizedBox(
-                                        width: 224,
-                                        height: 34,
-                                        child: AnimatedBuilder(
-                                          animation: _animCtrl,
-                                          builder: (_, __) {
-                                            final pausedNow = _paused || !AmbientAudioService.isPlaying;
-                                            return CustomPaint(
-                                              painter: _SmartEqualizerPainter(
-                                                bands: AmbientAudioService.currentSpectrumBands(bandCount: 18),
-                                                beatPulse: AmbientAudioService.currentBeatPulse(),
-                                                paused: pausedNow,
-                                                style: s.equalizerStyle,
-                                                color: widget.accentColor,
-                                                intensity: s.ambientVolume.clamp(0.20, 1.0),
-                                              ),
-                                            );
-                                          },
+                        // Quick Upward Drawers / Volume Slider Popup
+                        if (!bottomControlsHidden && (_leftDrawerOpen || _volumePopupOpen))
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: Align(
+                              alignment: Alignment.bottomLeft,
+                              child: _volumePopupOpen ? _buildUpwardVolumePopup(tr) : _buildLeftQuickDrawer(tr),
+                            ),
+                          ),
+
+                        // BOTTOM-CENTER MARQUEE TRACK PILL (Img 10)
+                        if (!_hudHidden && s.marqueeTrackEnabled && isAudioActive)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Center(
+                              child: Container(
+                                constraints: const BoxConstraints(maxWidth: 256),
+                                padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.46),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.36)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.music_note_rounded, size: 13, color: Color(0xFF7DD3FC)),
+                                    const SizedBox(width: 6),
+                                    Flexible(
+                                      child: _ScrollingMarqueeText(
+                                        text: '${s.ambientTrackTitle(widget.lang)} · %${(s.ambientVolume * 100).round()}',
+                                        style: const TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFFE0F2FE),
                                         ),
                                       ),
-                                    ],
+                                    ),
                                   ],
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
-                    ),
-                  ),
 
-                  // Quick Upward Drawers (left gallery/mode/audio or right brightness)
-                  if (!_hudHidden && (_leftDrawerOpen || _rightDrawerOpen))
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Align(
-                        alignment: _leftDrawerOpen ? Alignment.bottomLeft : Alignment.bottomRight,
-                        child: _leftDrawerOpen ? _buildLeftQuickDrawer(tr) : _buildRightQuickDrawer(tr),
-                      ),
-                    ),
-
-                  // BOTTOM TOOLBAR ROW (Left pill + Right pill slide DOWN; Paintbrush stays interactive!)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      // Bottom-Left Floating Pill Bar
-                      AnimatedSlide(
-                        offset: _hudHidden ? const Offset(0, 2.2) : Offset.zero,
-                        duration: const Duration(milliseconds: 420),
-                        curve: Curves.easeInOutCubic,
-                        child: AnimatedOpacity(
-                          opacity: _hudHidden ? 0.0 : 1.0,
-                          duration: const Duration(milliseconds: 280),
+                        // BOTTOM TOOLBAR ROW (Auto-hides after 10s idle; Paintbrush stays clickable when HUD cleaned)
+                        AnimatedOpacity(
+                          opacity: _controlsIdleHidden ? 0.0 : 1.0,
+                          duration: const Duration(milliseconds: 300),
                           child: IgnorePointer(
-                            ignoring: _hudHidden,
-                            child: _buildBottomLeftPill(tr),
+                            ignoring: _controlsIdleHidden,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                // Bottom-Left Collapsible Pill Bar (Img 3)
+                                Flexible(
+                                  child: AnimatedSlide(
+                                    offset: _hudHidden ? const Offset(0, 2.2) : Offset.zero,
+                                    duration: const Duration(milliseconds: 420),
+                                    curve: Curves.easeInOutCubic,
+                                    child: AnimatedOpacity(
+                                      opacity: _hudHidden ? 0.0 : 1.0,
+                                      duration: const Duration(milliseconds: 280),
+                                      child: IgnorePointer(
+                                        ignoring: _hudHidden,
+                                        child: _buildBottomLeftPill(tr),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+
+                                // Bottom-Right Collapsible Pill + Paintbrush Clean Toggle (Img 4)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    AnimatedSlide(
+                                      offset: _hudHidden ? const Offset(0, 2.2) : Offset.zero,
+                                      duration: const Duration(milliseconds: 420),
+                                      curve: Curves.easeInOutCubic,
+                                      child: AnimatedOpacity(
+                                        opacity: _hudHidden ? 0.0 : 1.0,
+                                        duration: const Duration(milliseconds: 280),
+                                        child: IgnorePointer(
+                                          ignoring: _hudHidden,
+                                          child: _buildBottomRightPill(tr),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    // Animated Paintbrush HUD Hide/Show Toggle
+                                    GestureDetector(
+                                      onTap: _toggleHudHidden,
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 260),
+                                        width: 44,
+                                        height: 44,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: _hudHidden
+                                              ? Colors.black.withValues(alpha: 0.42)
+                                              : const Color(0xFF14121B).withValues(alpha: 0.88),
+                                          border: Border.all(
+                                            color: const Color(0xFFF59E0B).withValues(alpha: _hudHidden ? 0.45 : 0.55),
+                                          ),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withValues(alpha: 0.45),
+                                              blurRadius: 12,
+                                            ),
+                                          ],
+                                        ),
+                                        child: AnimatedOpacity(
+                                          duration: const Duration(milliseconds: 250),
+                                          opacity: _hudHidden ? 0.55 : 1.0,
+                                          child: Icon(
+                                            _hudHidden ? Icons.visibility_outlined : Icons.brush_rounded,
+                                            size: 19,
+                                            color: const Color(0xFFFBBF24),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                // Brief HUD-hidden restoration toast
+                if (_hudHintBanner != null)
+                  Positioned(
+                    bottom: 72,
+                    left: 20,
+                    right: 20,
+                    child: IgnorePointer(
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.72),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+                          ),
+                          child: Text(
+                            _hudHintBanner!,
+                            style: const TextStyle(fontSize: 11.5, color: Colors.white70, fontWeight: FontWeight.w500),
+                            textAlign: TextAlign.center,
                           ),
                         ),
                       ),
-
-                      // Bottom-Right Floating Pill + Paintbrush Clean Toggle
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          AnimatedSlide(
-                            offset: _hudHidden ? const Offset(0, 2.2) : Offset.zero,
-                            duration: const Duration(milliseconds: 420),
-                            curve: Curves.easeInOutCubic,
-                            child: AnimatedOpacity(
-                              opacity: _hudHidden ? 0.0 : 1.0,
-                              duration: const Duration(milliseconds: 280),
-                              child: IgnorePointer(
-                                ignoring: _hudHidden,
-                                child: _buildBottomRightPill(tr),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          // Animated Paintbrush HUD Hide/Show Toggle
-                          GestureDetector(
-                            onTap: _toggleHudHidden,
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 260),
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _hudHidden
-                                    ? Colors.black.withValues(alpha: 0.42)
-                                    : const Color(0xFF14121B).withValues(alpha: 0.88),
-                                border: Border.all(
-                                  color: _hudHidden
-                                      ? const Color(0xFFF59E0B).withValues(alpha: 0.45)
-                                      : const Color(0xFFF59E0B).withValues(alpha: 0.55),
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.45),
-                                    blurRadius: 12,
-                                  ),
-                                ],
-                              ),
-                              child: AnimatedOpacity(
-                                duration: const Duration(milliseconds: 250),
-                                opacity: _hudHidden ? 0.55 : 1.0,
-                                child: Icon(
-                                  _hudHidden ? Icons.visibility_outlined : Icons.brush_rounded,
-                                  size: 19,
-                                  color: const Color(0xFFFBBF24),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                    ),
                   ),
-                ],
-              ),
+
+                // Brief auto-AOD sleep pill indicator
+                if (widget.forcedAod)
+                  Positioned(
+                    bottom: 72,
+                    left: 20,
+                    right: 20,
+                    child: IgnorePointer(
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+                          ),
+                          child: Text(
+                            tr
+                                ? '🌙 Otomatik Uyku AOD Modu · Uyandırmak için ekrana dokunun'
+                                : '🌙 Auto-Sleep AOD · Tap anywhere to wake',
+                            style: const TextStyle(fontSize: 11, color: Colors.white60, fontWeight: FontWeight.w500),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // 4. Embedded Termostat Kontrolü Modal (Img 9 - Theme Matched & Real RotaryDial)
+                if (_thermostatModalOpen)
+                  Positioned.fill(
+                    child: _EmbeddedThermostatModal(
+                      targetTemp: widget.targetTemp,
+                      roomTemp: widget.roomTemp,
+                      boiler: widget.boiler,
+                      accentColor: widget.accentColor,
+                      palette: widget.palette,
+                      paletteTag: widget.paletteTag,
+                      countdownSeconds: _thermostatCountdown,
+                      lang: widget.lang,
+                      onInteract: _resetThermostatCountdown,
+                      onChangeTarget: (t) {
+                        _resetThermostatCountdown();
+                        widget.onChangeTargetTemp(t);
+                      },
+                      onSelectPreset: (p) {
+                        _resetThermostatCountdown();
+                        widget.onSelectPreset(p);
+                      },
+                      onClose: _closeThermostatModal,
+                    ),
+                  ),
+              ],
             ),
           ),
-
-          // Brief HUD-hidden restoration toast
-          if (_hudHintBanner != null)
-            Positioned(
-              bottom: 72,
-              left: 20,
-              right: 20,
-              child: IgnorePointer(
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.72),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-                    ),
-                    child: Text(
-                      _hudHintBanner!,
-                      style: const TextStyle(fontSize: 11.5, color: Colors.white70, fontWeight: FontWeight.w500),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-          // Brief auto-AOD sleep pill indicator
-          if (widget.forcedAod)
-            Positioned(
-              bottom: 72,
-              left: 20,
-              right: 20,
-              child: IgnorePointer(
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.06),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-                    ),
-                    child: Text(
-                      tr
-                          ? '🌙 Otomatik Uyku AOD Modu · Uyandırmak için ekrana dokunun'
-                          : '🌙 Auto-Sleep AOD · Tap anywhere to wake',
-                      style: const TextStyle(fontSize: 11, color: Colors.white60, fontWeight: FontWeight.w500),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-          // 4. Embedded Termostat Kontrolü Modal (Image 7)
-          if (_thermostatModalOpen)
-            Positioned.fill(
-              child: _EmbeddedThermostatModal(
-                targetTemp: widget.targetTemp,
-                roomTemp: widget.roomTemp,
-                boiler: widget.boiler,
-                accentColor: widget.accentColor,
-                paletteTag: widget.paletteTag,
-                countdownSeconds: _thermostatCountdown,
-                lang: widget.lang,
-                onInteract: _resetThermostatCountdown,
-                onChangeTarget: (t) {
-                  _resetThermostatCountdown();
-                  widget.onChangeTargetTemp(t);
-                },
-                onSelectPreset: (p) {
-                  _resetThermostatCountdown();
-                  widget.onSelectPreset(p);
-                },
-                onClose: _closeThermostatModal,
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -1004,35 +1145,40 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
       }
     }
 
-    // 3. Static Theme Poster / Dark Minimalist Fallback while video buffers or in minimalist theme
+    // 3. Clean Dark Loader While Wikimedia / Custom Video Buffers (No Old Static Theme Images)
     final effectiveTheme = _activeThemeForMode(s, mode);
-    final themeAsset = smartDisplayThemeAssetPath(effectiveTheme);
+    if (effectiveTheme != SmartDisplayVisualTheme.minimalist &&
+        (mode == SmartDisplayMode.silentVideoMp3 ||
+            mode == SmartDisplayMode.liveNature ||
+            (mode == SmartDisplayMode.slideshow && s.slideImages.isEmpty))) {
+      return wrapTransition(
+        ValueKey('video_loading_${mode.name}_${effectiveTheme.name}'),
+        Container(
+          color: const Color(0xFF07080D),
+          alignment: Alignment.center,
+          child: const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.0,
+              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF38BDF8)),
+            ),
+          ),
+        ),
+      );
+    }
 
     return wrapTransition(
       ValueKey('theme_${mode.name}_${effectiveTheme.name}_${widget.slideIndex}'),
-      themeAsset.isNotEmpty
-          ? Container(
-              color: Colors.black,
-              width: double.infinity,
-              height: double.infinity,
-              child: Image.asset(
-                themeAsset,
-                fit: fit,
-                width: double.infinity,
-                height: double.infinity,
-                gaplessPlayback: true,
-                errorBuilder: (_, __, ___) => const ColoredBox(color: Color(0xFF0A0A10)),
-              ),
-            )
-          : Container(
-              decoration: const BoxDecoration(
-                gradient: RadialGradient(
-                  center: Alignment(0, -0.15),
-                  radius: 1.15,
-                  colors: [Color(0xFF1A1B24), Color(0xFF09090D)],
-                ),
-              ),
-            ),
+      Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(0, -0.15),
+            radius: 1.15,
+            colors: [Color(0xFF1A1B24), Color(0xFF09090D)],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1199,162 +1345,438 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
 
   Widget _buildBottomLeftPill(bool tr) {
     final s = widget.settings;
-    return Container(
+    final mutedNow = _muted || s.ambientSoundtrack == AmbientSoundtrack.silent;
+
+    Widget circleIcon({
+      required IconData icon,
+      required VoidCallback onTap,
+      Color? bgColor,
+      Gradient? gradient,
+      Color? borderColor,
+      Color iconColor = Colors.white,
+      double size = 34,
+      double iconSize = 17,
+      List<BoxShadow>? shadows,
+    }) {
+      return GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: gradient == null ? bgColor : null,
+            gradient: gradient,
+            border: borderColor != null ? Border.all(color: borderColor) : null,
+            boxShadow: shadows,
+          ),
+          child: Icon(icon, size: iconSize, color: iconColor),
+        ),
+      );
+    }
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
       decoration: BoxDecoration(
-        color: const Color(0xFF101018).withValues(alpha: 0.82),
+        color: const Color(0xFF0B0B10).withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 1. Visual Mode / Theme Quick Picker Button (orange badge matching Image 6)
-          GestureDetector(
-            onTap: () {
-              _haptic();
-              setState(() {
-                _leftDrawerOpen = !_leftDrawerOpen;
-                _rightDrawerOpen = false;
-              });
-            },
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(0xFFEA580C),
-                boxShadow: [
-                  BoxShadow(color: const Color(0xFFEA580C).withValues(alpha: 0.45), blurRadius: 10),
-                ],
-              ),
-              child: const Icon(Icons.photo_library_outlined, size: 17, color: Colors.white),
-            ),
-          ),
-          const SizedBox(width: 6),
-          // 2. Play / Pause Button
-          GestureDetector(
-            onTap: _togglePause,
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _paused ? const Color(0xFF6366F1).withValues(alpha: 0.36) : Colors.white.withValues(alpha: 0.10),
-              ),
-              child: Icon(
-                _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                size: 18,
-                color: Colors.white,
-              ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          // 3. Mute / Unmute Audio Button
-          GestureDetector(
-            onTap: _toggleMute,
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _muted || s.ambientSoundtrack == AmbientSoundtrack.silent
-                    ? const Color(0xFFEF4444).withValues(alpha: 0.24)
-                    : const Color(0xFF0EA5E9).withValues(alpha: 0.28),
-              ),
-              child: Icon(
-                _muted || s.ambientSoundtrack == AmbientSoundtrack.silent
-                    ? Icons.volume_off_rounded
-                    : Icons.volume_up_rounded,
-                size: 17,
-                color: _muted || s.ambientSoundtrack == AmbientSoundtrack.silent
-                    ? const Color(0xFFFCA5A5)
-                    : const Color(0xFF7DD3FC),
-              ),
-            ),
-          ),
-          const SizedBox(width: 4),
-          // 4. Expand Upward Drawer Chevron
-          GestureDetector(
-            onTap: () {
-              _haptic();
-              setState(() {
-                _leftDrawerOpen = !_leftDrawerOpen;
-                _rightDrawerOpen = false;
-              });
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-              child: Icon(
-                _leftDrawerOpen ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_up_rounded,
-                size: 18,
-                color: Colors.white70,
-              ),
-            ),
-          ),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 14),
         ],
+      ),
+      child: ClipRect(
+        child: AnimatedSize(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.centerLeft,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Music Note badge (opens Quick Mode/Theme/Ambience/Blur drawer)
+              circleIcon(
+                icon: Icons.music_note_rounded,
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFFF97316), Color(0xFFE11D48)],
+                ),
+                shadows: [
+                  BoxShadow(color: const Color(0xFFF97316).withValues(alpha: 0.45), blurRadius: 10),
+                ],
+                onTap: () {
+                  _haptic();
+                  _wakeBottomControls();
+                  setState(() {
+                    _leftDrawerOpen = !_leftDrawerOpen;
+                    _volumePopupOpen = false;
+                  });
+                  _scheduleLeftCollapse();
+                },
+              ),
+
+              if (_leftExpanded) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Container(width: 1, height: 18, color: Colors.white.withValues(alpha: 0.14)),
+                ),
+                // Previous Track + Previous Slide
+                circleIcon(
+                  icon: Icons.skip_previous_rounded,
+                  bgColor: Colors.white.withValues(alpha: 0.08),
+                  onTap: () => _stepSlideAndAudio(-1),
+                ),
+                const SizedBox(width: 5),
+                // Play / Pause Gradient Pill
+                circleIcon(
+                  icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFFF59E0B), Color(0xFFE11D48)],
+                  ),
+                  shadows: [
+                    BoxShadow(color: const Color(0xFFF59E0B).withValues(alpha: 0.42), blurRadius: 10),
+                  ],
+                  onTap: () {
+                    _wakeBottomControls();
+                    _togglePause();
+                    _scheduleLeftCollapse();
+                  },
+                ),
+                const SizedBox(width: 5),
+                // Next Track + Next Slide
+                circleIcon(
+                  icon: Icons.skip_next_rounded,
+                  bgColor: Colors.white.withValues(alpha: 0.08),
+                  onTap: () => _stepSlideAndAudio(1),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Container(width: 1, height: 18, color: Colors.white.withValues(alpha: 0.14)),
+                ),
+                // Shuffle Toggle
+                circleIcon(
+                  icon: Icons.shuffle_rounded,
+                  bgColor: _shuffleEnabled
+                      ? const Color(0xFFF59E0B).withValues(alpha: 0.24)
+                      : Colors.white.withValues(alpha: 0.08),
+                  borderColor: _shuffleEnabled ? const Color(0xFFF59E0B).withValues(alpha: 0.65) : null,
+                  iconColor: _shuffleEnabled ? const Color(0xFFFBBF24) : Colors.white70,
+                  onTap: () {
+                    _haptic();
+                    _wakeBottomControls();
+                    setState(() => _shuffleEnabled = !_shuffleEnabled);
+                    _scheduleLeftCollapse();
+                  },
+                ),
+                const SizedBox(width: 5),
+                // Upward Vertical Volume Slider & Mute Popup Trigger
+                circleIcon(
+                  icon: mutedNow ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                  bgColor: mutedNow
+                      ? const Color(0xFFEF4444).withValues(alpha: 0.18)
+                      : (_volumePopupOpen
+                          ? const Color(0xFF38BDF8).withValues(alpha: 0.28)
+                          : Colors.white.withValues(alpha: 0.08)),
+                  borderColor: _volumePopupOpen ? const Color(0xFF38BDF8).withValues(alpha: 0.65) : null,
+                  iconColor: mutedNow ? const Color(0xFFFCA5A5) : const Color(0xFF7DD3FC),
+                  onTap: () {
+                    _haptic();
+                    _wakeBottomControls();
+                    setState(() {
+                      _volumePopupOpen = !_volumePopupOpen;
+                      _leftDrawerOpen = false;
+                    });
+                    if (!_volumePopupOpen) {
+                      _scheduleLeftCollapse();
+                    } else {
+                      _leftCollapseTimer?.cancel();
+                    }
+                  },
+                ),
+              ],
+
+              const SizedBox(width: 4),
+              // Expand Right '>' or Collapse Left '<' Arrow (Img 3)
+              GestureDetector(
+                onTap: () {
+                  _haptic();
+                  _wakeBottomControls();
+                  setState(() {
+                    _leftExpanded = !_leftExpanded;
+                    if (!_leftExpanded) _volumePopupOpen = false;
+                  });
+                  if (_leftExpanded) {
+                    _scheduleLeftCollapse();
+                  } else {
+                    _leftCollapseTimer?.cancel();
+                  }
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                  child: Icon(
+                    _leftExpanded ? Icons.chevron_left_rounded : Icons.chevron_right_rounded,
+                    size: 19,
+                    color: Colors.white70,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildBottomRightPill(bool tr) {
-    return Container(
+    final s = widget.settings;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
       decoration: BoxDecoration(
-        color: const Color(0xFF101018).withValues(alpha: 0.82),
+        color: const Color(0xFF0B0B10).withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 14),
+        ],
       ),
-      child: Row(
+      child: ClipRect(
+        child: AnimatedSize(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.centerRight,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!_rightExpanded) ...[
+                // Expand Left '<' Arrow (Img 4)
+                GestureDetector(
+                  onTap: () {
+                    _haptic();
+                    _wakeBottomControls();
+                    setState(() => _rightExpanded = true);
+                    _scheduleRightCollapse();
+                  },
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                    child: Icon(Icons.chevron_left_rounded, size: 19, color: Colors.white70),
+                  ),
+                ),
+                // Brightness Badge
+                GestureDetector(
+                  onTap: () {
+                    _haptic();
+                    _wakeBottomControls();
+                    setState(() => _rightExpanded = true);
+                    _scheduleRightCollapse();
+                  },
+                  child: Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFFF59E0B).withValues(alpha: 0.22),
+                      border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.42)),
+                    ),
+                    child: const Icon(Icons.wb_sunny_outlined, size: 17, color: Color(0xFFFCD34D)),
+                  ),
+                ),
+              ] else ...[
+                // Inline Brightness Slider Pill (Img 4: [ ☀️ ━━━━●━ %85 ])
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.wb_sunny_outlined, size: 16, color: Color(0xFFF59E0B)),
+                      SizedBox(
+                        width: 96,
+                        height: 28,
+                        child: SliderTheme(
+                          data: SliderThemeData(
+                            trackHeight: 4,
+                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                            overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                            activeTrackColor: const Color(0xFFF59E0B),
+                            inactiveTrackColor: Colors.white.withValues(alpha: 0.18),
+                            thumbColor: const Color(0xFFFBBF24),
+                          ),
+                          child: Slider(
+                            value: s.displayBrightness.clamp(10, 100).toDouble(),
+                            min: 10,
+                            max: 100,
+                            onChangeStart: (_) {
+                              _draggingBrightness = true;
+                              _rightCollapseTimer?.cancel();
+                              _wakeBottomControls();
+                            },
+                            onChanged: (val) {
+                              final nextB = val.round().clamp(10, 100);
+                              widget.onUpdateSettings(s.copyWith(displayBrightness: nextB));
+                              HardwareService.enterSmartDisplayHardware(
+                                brightnessPercent: nextB,
+                                keepAwake: s.displaySleepMinutes == 0,
+                              );
+                            },
+                            onChangeEnd: (_) {
+                              _draggingBrightness = false;
+                              _scheduleRightCollapse();
+                            },
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '%${s.displayBrightness}',
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFFFBBF24),
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              const SizedBox(width: 6),
+              // Red X Button (Completely exits Smart Display)
+              GestureDetector(
+                onTap: () {
+                  _haptic();
+                  widget.onClose();
+                },
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Color(0xFFE11D48),
+                  ),
+                  child: const Icon(Icons.close_rounded, size: 18, color: Colors.white),
+                ),
+              ),
+
+              if (_rightExpanded) ...[
+                const SizedBox(width: 4),
+                GestureDetector(
+                  onTap: () {
+                    _haptic();
+                    _wakeBottomControls();
+                    _rightCollapseTimer?.cancel();
+                    setState(() => _rightExpanded = false);
+                  },
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                    child: Icon(Icons.chevron_right_rounded, size: 19, color: Colors.white70),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUpwardVolumePopup(bool tr) {
+    final s = widget.settings;
+    final mutedNow = _muted || s.ambientSoundtrack == AmbientSoundtrack.silent;
+    final vol = mutedNow ? 0.0 : s.ambientVolume.clamp(0.0, 1.0);
+
+    return Container(
+      width: 68,
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF101018).withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 18),
+        ],
+      ),
+      child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 1. Brightness Cycle Button
+          Text(
+            '%${(vol * 100).round()}',
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF7DD3FC),
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 120,
+            child: RotatedBox(
+              quarterTurns: -1,
+              child: SliderTheme(
+                data: SliderThemeData(
+                  trackHeight: 4.5,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                  activeTrackColor: const Color(0xFF38BDF8),
+                  inactiveTrackColor: Colors.white.withValues(alpha: 0.16),
+                  thumbColor: Colors.white,
+                ),
+                child: Slider(
+                  value: vol,
+                  min: 0.0,
+                  max: 1.0,
+                  onChanged: (v) {
+                    _wakeBottomControls();
+                    final nextTrack = (v > 0.02 && s.ambientSoundtrack == AmbientSoundtrack.silent)
+                        ? AmbientSoundtrack.fireplaceCrackling
+                        : s.ambientSoundtrack;
+                    setState(() => _muted = v <= 0.01);
+                    widget.onUpdateSettings(s.copyWith(ambientVolume: v, ambientSoundtrack: nextTrack));
+                    if (v <= 0.01) {
+                      AmbientAudioService.stop();
+                    } else if (!AmbientAudioService.isPlaying) {
+                      AmbientAudioService.start(
+                        track: nextTrack,
+                        customSource: s.customAudioSource.isNotEmpty ? s.customAudioSource : s.customAudioLabel,
+                        volume: v,
+                      );
+                    } else {
+                      AmbientAudioService.setVolume(v);
+                    }
+                  },
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
           GestureDetector(
-            onTap: _cycleBrightness,
+            onTap: () {
+              _wakeBottomControls();
+              _toggleMute();
+            },
             child: Container(
               width: 34,
               height: 34,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: const Color(0xFFF59E0B).withValues(alpha: 0.22),
-                border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.35)),
+                color: mutedNow
+                    ? const Color(0xFFEF4444).withValues(alpha: 0.24)
+                    : const Color(0xFF0EA5E9).withValues(alpha: 0.24),
               ),
-              child: const Icon(Icons.wb_sunny_outlined, size: 17, color: Color(0xFFFCD34D)),
-            ),
-          ),
-          const SizedBox(width: 6),
-          // 2. Red Close / Exit Smart Display Button
-          GestureDetector(
-            onTap: () {
-              _haptic();
-              widget.onClose();
-            },
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                color: Color(0xFFE11D48),
-              ),
-              child: const Icon(Icons.close_rounded, size: 18, color: Colors.white),
-            ),
-          ),
-          const SizedBox(width: 4),
-          // 3. Expand Right Drawer Chevron
-          GestureDetector(
-            onTap: () {
-              _haptic();
-              setState(() {
-                _rightDrawerOpen = !_rightDrawerOpen;
-                _leftDrawerOpen = false;
-              });
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
               child: Icon(
-                _rightDrawerOpen ? Icons.keyboard_arrow_down_rounded : Icons.keyboard_arrow_up_rounded,
-                size: 18,
-                color: Colors.white70,
+                mutedNow ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                size: 16,
+                color: mutedNow ? const Color(0xFFFCA5A5) : const Color(0xFF7DD3FC),
               ),
             ),
           ),
@@ -1405,24 +1827,13 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  tr ? 'Hızlı Mod & Ambiyans Kontrolü' : 'Quick Mode & Ambience',
+                  tr ? 'Hızlı Mod, Blur & Ambiyans' : 'Quick Mode, Blur & Ambience',
                   style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
                 ),
-                if (s.smartDisplayMode == SmartDisplayMode.slideshow)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _MiniChipAction(
-                        label: '‹',
-                        onTap: () => widget.onStepSlideIndex(-1),
-                      ),
-                      const SizedBox(width: 4),
-                      _MiniChipAction(
-                        label: '›',
-                        onTap: () => widget.onStepSlideIndex(1),
-                      ),
-                    ],
-                  ),
+                GestureDetector(
+                  onTap: () => setState(() => _leftDrawerOpen = false),
+                  child: const Icon(Icons.close_rounded, size: 16, color: Colors.white54),
+                ),
               ],
             ),
             const SizedBox(height: 7),
@@ -1479,74 +1890,22 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                   ),
               ],
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRightQuickDrawer(bool tr) {
-    final s = widget.settings;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 280),
-      child: Container(
-        padding: const EdgeInsets.all(11),
-        decoration: BoxDecoration(
-          color: const Color(0xFF101018).withValues(alpha: 0.92),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              tr ? 'Ekran Parlaklığı: %${s.displayBrightness}' : 'Brightness: ${s.displayBrightness}%',
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFFCD34D)),
-            ),
             const SizedBox(height: 8),
             Row(
               children: [
-                for (final b in [20, 50, 85, 100])
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 4),
-                      child: _QuickPill(
-                        label: '%$b',
-                        active: s.displayBrightness == b,
-                        activeColor: const Color(0xFFF59E0B),
-                        onTap: () {
-                          widget.onUpdateSettings(s.copyWith(displayBrightness: b));
-                          HardwareService.enterSmartDisplayHardware(
-                            brightnessPercent: b,
-                            keepAwake: s.displaySleepMinutes == 0,
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              tr
-                  ? 'Bulanıklık (Blur): ${s.smartDisplayBlur.round()} px'
-                  : 'Backdrop Blur: ${s.smartDisplayBlur.round()} px',
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF93C5FD)),
-            ),
-            const SizedBox(height: 7),
-            Row(
-              children: [
+                Text(
+                  tr ? 'Blur:' : 'Blur:',
+                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFF93C5FD)),
+                ),
+                const SizedBox(width: 6),
                 for (final bl in [0.0, 4.0, 10.0, 18.0])
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 4),
-                      child: _QuickPill(
-                        label: bl == 0 ? (tr ? 'Net' : 'Clear') : '${bl.toInt()}px',
-                        active: (s.smartDisplayBlur - bl).abs() < 1.5,
-                        activeColor: const Color(0xFF38BDF8),
-                        onTap: () => widget.onUpdateSettings(s.copyWith(smartDisplayBlur: bl)),
-                      ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: _QuickPill(
+                      label: bl == 0 ? (tr ? 'Net' : 'Clear') : '${bl.toInt()}px',
+                      active: (s.smartDisplayBlur - bl).abs() < 1.5,
+                      activeColor: const Color(0xFF38BDF8),
+                      onTap: () => widget.onUpdateSettings(s.copyWith(smartDisplayBlur: bl)),
                     ),
                   ),
               ],
@@ -1626,34 +1985,92 @@ class _QuickPill extends StatelessWidget {
   }
 }
 
-class _MiniChipAction extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
+/// Smooth Horizontal Marquee when text overflows capsule width
+class _ScrollingMarqueeText extends StatefulWidget {
+  final String text;
+  final TextStyle style;
 
-  const _MiniChipAction({required this.label, required this.onTap});
+  const _ScrollingMarqueeText({
+    required this.text,
+    required this.style,
+  });
+
+  @override
+  State<_ScrollingMarqueeText> createState() => _ScrollingMarqueeTextState();
+}
+
+class _ScrollingMarqueeTextState extends State<_ScrollingMarqueeText> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(seconds: 6))..repeat();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 2),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxW = constraints.maxWidth.isFinite ? constraints.maxWidth : 210.0;
+        final painter = TextPainter(
+          text: TextSpan(text: widget.text, style: widget.style),
+          maxLines: 1,
+          textDirection: TextDirection.ltr,
+        )..layout();
+        final textW = painter.width;
+        if (textW <= maxW) {
+          return Text(widget.text, style: widget.style, maxLines: 1);
+        }
+        const gap = 36.0;
+        final spanW = textW + gap;
+        return ClipRect(
+          child: SizedBox(
+            width: maxW,
+            height: painter.height,
+            child: AnimatedBuilder(
+              animation: _ctrl,
+              builder: (_, __) {
+                final dx = -(_ctrl.value * spanW);
+                return Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Positioned(
+                      left: dx,
+                      top: 0,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(widget.text, style: widget.style, maxLines: 1),
+                          const SizedBox(width: gap),
+                          Text(widget.text, style: widget.style, maxLines: 1),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 }
 
-/// Embedded Thermostat Popup inside Smart Display (Image 7)
+/// Embedded Thermostat Popup inside Smart Display (Img 9: theme-matched & genuine RotaryDial)
 class _EmbeddedThermostatModal extends StatelessWidget {
   final double targetTemp;
   final double roomTemp;
   final BoilerTelemetry boiler;
   final Color accentColor;
+  final ThemePaletteSpec palette;
   final String paletteTag;
   final int countdownSeconds;
   final LangCode lang;
@@ -1667,6 +2084,7 @@ class _EmbeddedThermostatModal extends StatelessWidget {
     required this.roomTemp,
     required this.boiler,
     required this.accentColor,
+    required this.palette,
     required this.paletteTag,
     required this.countdownSeconds,
     required this.lang,
@@ -1676,24 +2094,19 @@ class _EmbeddedThermostatModal extends StatelessWidget {
     required this.onClose,
   });
 
-  void _updateFromOffset(Offset localPos, double dialSize) {
-    final center = Offset(dialSize / 2, dialSize / 2);
-    final dx = localPos.dx - center.dx;
-    final dy = localPos.dy - center.dy;
-    final next = ThermostatMath.pointerOffsetToTemp(dx, dy);
-    onInteract();
-    if ((next - targetTemp).abs() >= 0.05) {
-      onChangeTarget(next);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final tr = lang == LangCode.tr;
     final size = MediaQuery.of(context).size;
-    final dialSize = math.min(230.0, math.max(168.0, size.height * 0.30));
+    final dialSize = math.min(220.0, math.max(166.0, size.height * 0.28));
     final diff = targetTemp - roomTemp;
     final diffText = '${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}°C';
+    final isLight = palette.isLight;
+    final themeAccent = palette.themeOverrideAccent?.toColor() ?? accentColor;
+    final matchedPreset = ThermostatMath.findMatchingPreset(targetTemp);
+    final modeName = matchedPreset != null
+        ? (tr ? matchedPreset.modeNameTr : matchedPreset.modeNameEn)
+        : (tr ? 'ÖZEL SICAKLIK' : 'CUSTOM TEMP');
 
     const presetOrder = [PresetId.gece, PresetId.eko, PresetId.konfor, PresetId.boost];
     final presets = [
@@ -1729,7 +2142,7 @@ class _EmbeddedThermostatModal extends StatelessWidget {
     return Listener(
       onPointerDown: (_) => onInteract(),
       child: Container(
-        color: Colors.black.withValues(alpha: 0.72),
+        color: Colors.black.withValues(alpha: isLight ? 0.56 : 0.72),
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         child: ConstrainedBox(
@@ -1737,11 +2150,14 @@ class _EmbeddedThermostatModal extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: const Color(0xFF13101C),
+              color: palette.sheetBg,
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+              border: Border.all(
+                width: palette.isTactileDeck ? 1.5 : 1.0,
+                color: palette.cardBorder,
+              ),
               boxShadow: [
-                BoxShadow(color: Colors.black.withValues(alpha: 0.65), blurRadius: 32, offset: const Offset(0, 14)),
+                BoxShadow(color: Colors.black.withValues(alpha: isLight ? 0.25 : 0.65), blurRadius: 32, offset: const Offset(0, 14)),
               ],
             ),
             child: SingleChildScrollView(
@@ -1756,10 +2172,10 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                         height: 38,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: const Color(0xFFF59E0B).withValues(alpha: 0.14),
-                          border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.45)),
+                          color: themeAccent.withValues(alpha: 0.14),
+                          border: Border.all(color: themeAccent.withValues(alpha: 0.45)),
                         ),
-                        child: const Icon(Icons.local_fire_department_outlined, size: 19, color: Color(0xFFFBBF24)),
+                        child: Icon(Icons.local_fire_department_outlined, size: 19, color: themeAccent),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -1772,25 +2188,25 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                               children: [
                                 Text(
                                   tr ? 'Termostat Kontrolü' : 'Thermostat Control',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 16.5,
                                     fontWeight: FontWeight.w800,
-                                    color: Colors.white,
+                                    color: palette.textPrimary,
                                   ),
                                 ),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFF59E0B).withValues(alpha: 0.14),
+                                    color: themeAccent.withValues(alpha: 0.14),
                                     borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.42)),
+                                    border: Border.all(color: themeAccent.withValues(alpha: 0.42)),
                                   ),
                                   child: Text(
                                     paletteTag.toUpperCase(),
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 9.5,
                                       fontWeight: FontWeight.w800,
-                                      color: Color(0xFFFBBF24),
+                                      color: themeAccent,
                                     ),
                                   ),
                                 ),
@@ -1799,7 +2215,7 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                             const SizedBox(height: 2),
                             Text(
                               tr ? 'Hassas dokunmatik sıcaklık ayarı' : 'Precision touch temperature control',
-                              style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.56)),
+                              style: TextStyle(fontSize: 11, color: palette.textSecondary),
                             ),
                           ],
                         ),
@@ -1810,11 +2226,11 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                           width: 34,
                           height: 34,
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.06),
+                            color: palette.cardBg,
                             borderRadius: BorderRadius.circular(11),
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                            border: Border.all(color: palette.cardBorder),
                           ),
-                          child: const Icon(Icons.close_rounded, size: 18, color: Colors.white70),
+                          child: Icon(Icons.close_rounded, size: 18, color: palette.textSecondary),
                         ),
                       ),
                     ],
@@ -1825,238 +2241,91 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.04),
+                      color: palette.cardBg,
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+                      border: Border.all(color: palette.cardBorder),
                     ),
                     child: Row(
                       children: [
                         Expanded(
                           child: Text(
                             tr ? 'Dokunulmazsa otomatik ambiyansa döner' : 'Auto-returns to ambient mode if idle',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w600,
-                              color: Color(0xFFFBBF24),
+                              color: themeAccent,
                             ),
                           ),
                         ),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF59E0B).withValues(alpha: 0.14),
+                            color: themeAccent.withValues(alpha: 0.14),
                             borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.45)),
+                            border: Border.all(color: themeAccent.withValues(alpha: 0.45)),
                           ),
                           child: Text(
                             tr ? '$countdownSeconds sn' : '${countdownSeconds}s',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w800,
-                              color: Color(0xFFFBBF24),
-                              fontFeatures: [FontFeature.tabularFigures()],
+                              color: themeAccent,
+                              fontFeatures: const [FontFeature.tabularFigures()],
                             ),
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
 
-                  // Interactive Circular Arc Dial
-                  GestureDetector(
-                    onPanDown: (d) => _updateFromOffset(d.localPosition, dialSize),
-                    onPanUpdate: (d) => _updateFromOffset(d.localPosition, dialSize),
-                    child: SizedBox(
-                      width: dialSize,
-                      height: dialSize,
-                      child: Stack(
-                        alignment: Alignment.center,
+                  // Real Main-Screen RotaryDial (45 segmented ticks + 3D bevel + circular - / + steppers)
+                  RotaryDial(
+                    targetTemp: targetTemp,
+                    onChangeTarget: (t) {
+                      onInteract();
+                      onChangeTarget(t);
+                    },
+                    modeName: modeName,
+                    accentColor: themeAccent,
+                    boiler: boiler,
+                    lang: lang,
+                    palette: palette,
+                    sizePx: dialSize,
+                    compact: true,
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Room Temp & Delta Badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: palette.cardBg,
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: palette.cardBorder),
+                    ),
+                    child: RichText(
+                      text: TextSpan(
+                        style: const TextStyle(fontSize: 11.5, fontFeatures: [FontFeature.tabularFigures()]),
                         children: [
-                          CustomPaint(
-                            size: Size(dialSize, dialSize),
-                            painter: _ModalArcDialPainter(
-                              angleDeg: ThermostatMath.tempToAngleDeg(targetTemp),
-                            ),
+                          TextSpan(
+                            text: tr ? 'Oda: ' : 'Room: ',
+                            style: TextStyle(color: palette.textSecondary),
                           ),
-                          Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                tr ? 'Hedef Sıcaklık' : 'Target Temp',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFFFBBF24),
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    targetTemp.toStringAsFixed(1),
-                                    style: const TextStyle(
-                                      fontSize: 40,
-                                      fontWeight: FontWeight.w800,
-                                      color: Colors.white,
-                                      height: 1.0,
-                                      fontFeatures: [FontFeature.tabularFigures()],
-                                    ),
-                                  ),
-                                  const Padding(
-                                    padding: EdgeInsets.only(top: 4),
-                                    child: Text(
-                                      '°C',
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w800,
-                                        color: Color(0xFFF59E0B),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: boiler.isHeating
-                                      ? const Color(0xFFF59E0B).withValues(alpha: 0.22)
-                                      : Colors.white.withValues(alpha: 0.08),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: boiler.isHeating
-                                        ? const Color(0xFFF59E0B)
-                                        : Colors.white.withValues(alpha: 0.14),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.local_fire_department_outlined,
-                                      size: 13,
-                                      color: boiler.isHeating ? const Color(0xFFFBBF24) : Colors.white70,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      boiler.isHeating
-                                          ? (tr ? 'Isıtıyor %${boiler.flamePercent}' : 'Heating ${boiler.flamePercent}%')
-                                          : (tr ? 'Beklemede' : 'Standby'),
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 7),
-                              RichText(
-                                text: TextSpan(
-                                  style: const TextStyle(fontSize: 11.5, fontFeatures: [FontFeature.tabularFigures()]),
-                                  children: [
-                                    TextSpan(
-                                      text: tr ? 'Oda: ' : 'Room: ',
-                                      style: TextStyle(color: Colors.white.withValues(alpha: 0.65)),
-                                    ),
-                                    TextSpan(
-                                      text: '${roomTemp.toStringAsFixed(1)}°C ',
-                                      style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.w700),
-                                    ),
-                                    TextSpan(
-                                      text: '($diffText)',
-                                      style: TextStyle(color: Colors.white.withValues(alpha: 0.56)),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
+                          TextSpan(
+                            text: '${roomTemp.toStringAsFixed(1)}°C ',
+                            style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.w700),
+                          ),
+                          TextSpan(
+                            text: '($diffText)',
+                            style: TextStyle(color: palette.textSecondary),
                           ),
                         ],
                       ),
                     ),
                   ),
-                  const SizedBox(height: 10),
-
-                  // Stepper Row (- | HASSAS ADIM 0.5°C | +)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      GestureDetector(
-                        onTap: targetTemp > ThermostatMath.minTemp
-                            ? () => onChangeTarget(
-                                  ThermostatMath.snapTemperature(targetTemp - ThermostatMath.tempStep),
-                                )
-                            : null,
-                        child: Container(
-                          width: 46,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.06),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-                          ),
-                          child: const Icon(Icons.remove_rounded, color: Color(0xFFFBBF24), size: 22),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-                        ),
-                        child: Column(
-                          children: [
-                            Text(
-                              tr ? 'HASSAS ADIM' : 'PRECISION STEP',
-                              style: TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.8,
-                                color: Colors.white.withValues(alpha: 0.56),
-                              ),
-                            ),
-                            const Text(
-                              '0.5°C',
-                              style: TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFFFBBF24),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      GestureDetector(
-                        onTap: targetTemp < ThermostatMath.maxTemp
-                            ? () => onChangeTarget(
-                                  ThermostatMath.snapTemperature(targetTemp + ThermostatMath.tempStep),
-                                )
-                            : null,
-                        child: Container(
-                          width: 46,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(colors: [Color(0xFFF59E0B), Color(0xFFD97706)]),
-                            borderRadius: BorderRadius.circular(14),
-                            boxShadow: [
-                              BoxShadow(color: const Color(0xFFF59E0B).withValues(alpha: 0.45), blurRadius: 14),
-                            ],
-                          ),
-                          child: const Icon(Icons.add_rounded, color: Colors.white, size: 22),
-                        ),
-                      ),
-                    ],
-                  ),
                   const SizedBox(height: 14),
-                  Divider(color: Colors.white.withValues(alpha: 0.10), height: 1),
+                  Divider(color: palette.cardBorder, height: 1),
                   const SizedBox(height: 12),
 
                   // 4 Preset Cards (Gece 18.5°C, Eko 20°C, Konfor 22.5°C, Boost 25°C)
@@ -2073,12 +2342,12 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                                 decoration: BoxDecoration(
                                   color: (targetTemp - p.temp).abs() < 0.05
                                       ? colorFor(p.id).withValues(alpha: 0.18)
-                                      : Colors.white.withValues(alpha: 0.04),
+                                      : palette.cardBg,
                                   borderRadius: BorderRadius.circular(14),
                                   border: Border.all(
                                     color: (targetTemp - p.temp).abs() < 0.05
                                         ? colorFor(p.id)
-                                        : Colors.white.withValues(alpha: 0.10),
+                                        : palette.cardBorder,
                                   ),
                                 ),
                                 child: Column(
@@ -2090,7 +2359,9 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                                       style: TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w700,
-                                        color: (targetTemp - p.temp).abs() < 0.05 ? colorFor(p.id) : Colors.white,
+                                        color: (targetTemp - p.temp).abs() < 0.05
+                                            ? colorFor(p.id)
+                                            : palette.textPrimary,
                                       ),
                                     ),
                                     const SizedBox(height: 2),
@@ -2101,7 +2372,7 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                                         fontWeight: FontWeight.w600,
                                         color: (targetTemp - p.temp).abs() < 0.05
                                             ? colorFor(p.id)
-                                            : Colors.white.withValues(alpha: 0.56),
+                                            : palette.textSecondary,
                                       ),
                                     ),
                                   ],
@@ -2121,9 +2392,9 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                     child: OutlinedButton.icon(
                       onPressed: onClose,
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFFFBBF24),
-                        side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
-                        backgroundColor: Colors.white.withValues(alpha: 0.04),
+                        foregroundColor: themeAccent,
+                        side: BorderSide(color: palette.cardBorder),
+                        backgroundColor: palette.cardBg,
                         padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       ),
@@ -2142,76 +2413,6 @@ class _EmbeddedThermostatModal extends StatelessWidget {
       ),
     );
   }
-}
-
-class _ModalArcDialPainter extends CustomPainter {
-  final double angleDeg; // -135 to +135 (0 deg = top 12 o'clock)
-
-  const _ModalArcDialPainter({required this.angleDeg});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width * 0.43;
-    final rect = Rect.fromCircle(center: center, radius: radius);
-
-    // Track: from 135 deg (bottom-left) clockwise 270 deg
-    const startRad = 135.0 * math.pi / 180.0;
-    const fullSweep = 270.0 * math.pi / 180.0;
-
-    final trackPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.10)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 10
-      ..strokeCap = StrokeCap.round;
-    canvas.drawArc(rect, startRad, fullSweep, false, trackPaint);
-
-    // Normalized progress [0..1]
-    final progress = ((angleDeg + 135.0) / 270.0).clamp(0.0, 1.0);
-    final activeSweep = fullSweep * progress;
-    if (activeSweep > 0.02) {
-      final activePaint = Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 10
-        ..strokeCap = StrokeCap.round
-        ..shader = const SweepGradient(
-          startAngle: startRad,
-          endAngle: startRad + fullSweep,
-          colors: [
-            Color(0xFF10B981),
-            Color(0xFFF59E0B),
-            Color(0xFFEA580C),
-            Color(0xFFEF4444),
-          ],
-        ).createShader(rect);
-      canvas.drawArc(rect, startRad, activeSweep, false, activePaint);
-    }
-
-    // Thumb knob at active position
-    final thumbRad = (angleDeg - 90.0) * math.pi / 180.0;
-    final thumbPos = Offset(
-      center.dx + math.cos(thumbRad) * radius,
-      center.dy + math.sin(thumbRad) * radius,
-    );
-    canvas.drawCircle(
-      thumbPos,
-      12,
-      Paint()..color = const Color(0xFFF59E0B).withValues(alpha: 0.35),
-    );
-    canvas.drawCircle(
-      thumbPos,
-      8.5,
-      Paint()..color = const Color(0xFFF59E0B),
-    );
-    canvas.drawCircle(
-      thumbPos,
-      6.0,
-      Paint()..color = Colors.white.withValues(alpha: 0.92),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _ModalArcDialPainter oldDelegate) => oldDelegate.angleDeg != angleDeg;
 }
 
 class _SmartEqualizerPainter extends CustomPainter {
@@ -2242,31 +2443,49 @@ class _SmartEqualizerPainter extends CustomPainter {
     final count = bands.isEmpty ? 18 : bands.length;
     switch (style) {
       case EqualizerStyle.bars:
-        final barW = (size.width / count) * 0.56;
         final step = size.width / count;
-        final paint = Paint()..style = PaintingStyle.fill;
+        final barW = step * 0.58;
         for (int i = 0; i < count; i++) {
           final energy = _bandAt(i);
           final h = paused
               ? 3.0
-              : (3.0 + size.height * 0.88 * energy * (0.85 + beatPulse * 0.20)).clamp(3.0, size.height);
-          paint.color = Color.lerp(color, const Color(0xFF38BDF8), i / count)!.withValues(alpha: paused ? 0.35 : 0.88);
+              : (4.0 + size.height * 0.88 * energy * (0.85 + beatPulse * 0.22)).clamp(4.0, size.height - 4);
+          final left = i * step + (step - barW) / 2;
+          final barRect = Rect.fromLTWH(left, size.height - h, barW, h);
+          final tipColor = Color.lerp(const Color(0xFF38BDF8), const Color(0xFFFBBF24), i / math.max(1, count - 1))!;
+          final baseColor = color.withValues(alpha: paused ? 0.25 : 0.72);
+          final paint = Paint()
+            ..shader = LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: [baseColor, tipColor.withValues(alpha: paused ? 0.35 : 0.96)],
+            ).createShader(barRect);
           canvas.drawRRect(
-            RRect.fromRectAndRadius(
-              Rect.fromLTWH(i * step + (step - barW) / 2, size.height - h, barW, h),
-              const Radius.circular(3),
-            ),
+            RRect.fromRectAndRadius(barRect, const Radius.circular(3.5)),
             paint,
           );
+          if (!paused) {
+            final capY = math.max(0.0, size.height - h - 4.0);
+            canvas.drawRRect(
+              RRect.fromRectAndRadius(Rect.fromLTWH(left, capY, barW, 2.4), const Radius.circular(1.5)),
+              Paint()..color = tipColor.withValues(alpha: 0.95),
+            );
+          }
         }
         break;
       case EqualizerStyle.wave:
-        final path = Path();
         final midY = size.height / 2;
         if (paused) {
-          path.moveTo(0, midY);
-          path.lineTo(size.width, midY);
+          canvas.drawLine(
+            Offset(0, midY),
+            Offset(size.width, midY),
+            Paint()
+              ..color = const Color(0xFF38BDF8).withValues(alpha: 0.35)
+              ..strokeWidth = 2.0,
+          );
         } else {
+          final topPoints = <Offset>[];
+          final botPoints = <Offset>[];
           final steps = count * 3;
           for (int s = 0; s <= steps; s++) {
             final norm = s / steps;
@@ -2277,68 +2496,115 @@ class _SmartEqualizerPainter extends CustomPainter {
             final frac = bandFloat - b0;
             final energy = _bandAt(b0) * (1.0 - frac) + _bandAt(b1) * frac;
             final taper = math.sin(norm * math.pi);
-            final dir = (s.isEven ? 1.0 : -1.0) * math.sin(norm * math.pi * count);
-            final amp = size.height * 0.44 * (energy * 0.85 + beatPulse * 0.15) * taper * intensity;
-            final y = midY + dir * amp;
-            if (s == 0) {
-              path.moveTo(x, y);
-            } else {
-              path.lineTo(x, y);
-            }
+            final ripple = 0.72 + 0.28 * math.sin(norm * math.pi * count);
+            final amp = (2.5 + size.height * 0.44 * (energy * 0.85 + beatPulse * 0.18) * intensity) * taper * ripple;
+            topPoints.add(Offset(x, midY - amp));
+            botPoints.add(Offset(x, midY + amp));
           }
-        }
-        canvas.drawPath(
-          path,
-          Paint()
-            ..color = const Color(0xFF38BDF8).withValues(alpha: paused ? 0.35 : 0.92)
+          final fillPath = Path()..moveTo(topPoints.first.dx, topPoints.first.dy);
+          for (final p in topPoints.skip(1)) {
+            fillPath.lineTo(p.dx, p.dy);
+          }
+          for (final p in botPoints.reversed) {
+            fillPath.lineTo(p.dx, p.dy);
+          }
+          fillPath.close();
+
+          canvas.drawPath(
+            fillPath,
+            Paint()
+              ..shader = LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  color.withValues(alpha: 0.36),
+                  const Color(0xFF38BDF8).withValues(alpha: 0.44),
+                  const Color(0xFFF59E0B).withValues(alpha: 0.36),
+                ],
+              ).createShader(Offset.zero & size),
+          );
+
+          final strokeTop = Path()..moveTo(topPoints.first.dx, topPoints.first.dy);
+          for (final p in topPoints.skip(1)) {
+            strokeTop.lineTo(p.dx, p.dy);
+          }
+          final strokeBot = Path()..moveTo(botPoints.first.dx, botPoints.first.dy);
+          for (final p in botPoints.skip(1)) {
+            strokeBot.lineTo(p.dx, p.dy);
+          }
+          final contour = Paint()
+            ..color = const Color(0xFF7DD3FC).withValues(alpha: 0.94)
             ..style = PaintingStyle.stroke
-            ..strokeWidth = 2.4
-            ..strokeCap = StrokeCap.round,
-        );
+            ..strokeWidth = 2.1
+            ..strokeCap = StrokeCap.round;
+          canvas.drawPath(strokeTop, contour);
+          canvas.drawPath(strokeBot, contour);
+        }
         break;
       case EqualizerStyle.pulse:
         final center = Offset(size.width / 2, size.height / 2);
         if (paused) {
-          canvas.drawOval(
-            Rect.fromCenter(center: center, width: 14, height: 10),
-            Paint()
-              ..color = color.withValues(alpha: 0.35)
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 1.8,
+          canvas.drawCircle(
+            center,
+            8,
+            Paint()..color = color.withValues(alpha: 0.32),
           );
         } else {
-          double lowAvg = 0.0;
-          double midAvg = 0.0;
-          double highAvg = 0.0;
-          for (int i = 0; i < count; i++) {
-            if (i < 6) {
-              lowAvg += _bandAt(i);
-            } else if (i < 12) {
-              midAvg += _bandAt(i);
-            } else {
-              highAvg += _bandAt(i);
-            }
-          }
-          lowAvg /= 6.0;
-          midAvg /= 6.0;
-          highAvg /= math.max(1, count - 12);
+          // Stereo center-outward harmonic beat bars + pulsing central reactor orb + shockwave arcs
+          final halfPairs = 8;
+          final orbRadius = 9.0 + beatPulse * 11.0;
 
-          final ringDrives = [
-            (lowAvg * 0.65 + beatPulse * 0.35).clamp(0.08, 1.0),
-            (midAvg * 0.70 + beatPulse * 0.30).clamp(0.08, 1.0),
-            (highAvg * 0.75 + beatPulse * 0.25).clamp(0.08, 1.0),
-          ];
-          for (int r = 0; r < ringDrives.length; r++) {
-            final drive = ringDrives[r];
-            final rx = 12.0 + drive * (size.width * 0.42) * (1.0 - r * 0.16);
-            final ry = 4.0 + drive * (size.height * 0.46) * (1.0 - r * 0.14);
-            canvas.drawOval(
-              Rect.fromCenter(center: center, width: rx * 2, height: ry * 2),
-              Paint()
-                ..color = Color.lerp(color, const Color(0xFF38BDF8), r / 2)!
-                    .withValues(alpha: (0.28 + drive * 0.65).clamp(0.2, 0.95))
-                ..style = PaintingStyle.stroke
-                ..strokeWidth = 1.6 + beatPulse * 1.1,
+          // Center orb aura
+          canvas.drawCircle(
+            center,
+            orbRadius * 1.65,
+            Paint()
+              ..shader = RadialGradient(
+                colors: [
+                  const Color(0xFFFBBF24).withValues(alpha: 0.38 + beatPulse * 0.35),
+                  color.withValues(alpha: 0.16),
+                  Colors.transparent,
+                ],
+              ).createShader(Rect.fromCircle(center: center, radius: orbRadius * 1.65)),
+          );
+          canvas.drawCircle(
+            center,
+            orbRadius,
+            Paint()..color = Color.lerp(color, const Color(0xFFFBBF24), beatPulse)!.withValues(alpha: 0.95),
+          );
+
+          // Left & Right symmetric shockwave arcs
+          for (int arcIdx = 0; arcIdx < 2; arcIdx++) {
+            final spread = 24.0 + arcIdx * 16.0 + beatPulse * 14.0;
+            final arcRect = Rect.fromCenter(center: center, width: spread * 2, height: size.height * 0.72);
+            final arcPaint = Paint()
+              ..color = const Color(0xFF38BDF8).withValues(alpha: (0.65 - arcIdx * 0.25).clamp(0.15, 0.8))
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2.0;
+            canvas.drawArc(arcRect, -0.58, 1.16, false, arcPaint);
+            canvas.drawArc(arcRect, math.pi - 0.58, 1.16, false, arcPaint);
+          }
+
+          // Center-outward stereo beat columns
+          for (int i = 0; i < halfPairs; i++) {
+            final e = (_bandAt(i * 2) * 0.75 + beatPulse * 0.32).clamp(0.08, 1.0);
+            final xOff = 36.0 + i * 11.5;
+            final h = (8.0 + e * (size.height - 10)).clamp(8.0, size.height);
+            final barColor = Color.lerp(const Color(0xFF38BDF8), const Color(0xFFF59E0B), i / (halfPairs - 1))!;
+            final p = Paint()..color = barColor.withValues(alpha: 0.88);
+            canvas.drawRRect(
+              RRect.fromRectAndRadius(
+                Rect.fromCenter(center: Offset(center.dx - xOff, center.dy), width: 6.5, height: h),
+                const Radius.circular(3.5),
+              ),
+              p,
+            );
+            canvas.drawRRect(
+              RRect.fromRectAndRadius(
+                Rect.fromCenter(center: Offset(center.dx + xOff, center.dy), width: 6.5, height: h),
+                const Radius.circular(3.5),
+              ),
+              p,
             );
           }
         }

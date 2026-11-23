@@ -46,4 +46,43 @@ class VideoSourceBridge {
     }
     return null;
   }
+
+  static void applyDomVideoBlur(double sigmaPx) {
+    try {
+      final doc = globalContext.getProperty<JSObject?>('document'.toJS);
+      if (doc == null) return;
+      final filterVal = sigmaPx > 0.1 ? 'blur(${sigmaPx.toStringAsFixed(1)}px)' : '';
+      final transformVal = sigmaPx > 0.1 ? 'scale(1.06)' : '';
+
+      void styleVideoList(JSObject? nodeList) {
+        if (nodeList == null) return;
+        final lenAny = nodeList.getProperty<JSAny?>('length'.toJS);
+        final len = (lenAny != null && lenAny.isA<JSNumber>()) ? (lenAny as JSNumber).toDartInt : 0;
+        for (int i = 0; i < len; i++) {
+          final elAny = nodeList.callMethod<JSAny?>('item'.toJS, i.toJS);
+          if (elAny != null && elAny.isA<JSObject>()) {
+            final el = elAny as JSObject;
+            final style = el.getProperty<JSObject?>('style'.toJS);
+            if (style != null) {
+              style.setProperty('filter'.toJS, filterVal.toJS);
+              style.setProperty('webkitFilter'.toJS, filterVal.toJS);
+              style.setProperty('transform'.toJS, transformVal.toJS);
+              style.setProperty('transition'.toJS, 'filter 180ms ease, transform 180ms ease'.toJS);
+            }
+          }
+        }
+      }
+
+      styleVideoList(doc.callMethod<JSObject?>('querySelectorAll'.toJS, 'video'.toJS));
+
+      // Also inspect Flutter glass-pane shadowRoot if present
+      final glassPane = doc.callMethod<JSObject?>('querySelector'.toJS, 'flt-glass-pane'.toJS);
+      if (glassPane != null) {
+        final shadow = glassPane.getProperty<JSObject?>('shadowRoot'.toJS);
+        if (shadow != null) {
+          styleVideoList(shadow.callMethod<JSObject?>('querySelectorAll'.toJS, 'video'.toJS));
+        }
+      }
+    } catch (_) {}
+  }
 }

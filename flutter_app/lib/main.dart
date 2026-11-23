@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -952,6 +953,34 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                               Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
+                                  // Flag Language Quick Toggle (TR / EN)
+                                  _TopActionButton(
+                                    palette: palette,
+                                    onTap: () {
+                                      _triggerHaptic();
+                                      setState(() {
+                                        _lang = _lang == LangCode.tr ? LangCode.en : LangCode.tr;
+                                      });
+                                      _persist();
+                                    },
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _MiniFlagBadge(lang: _lang),
+                                        const SizedBox(width: 5),
+                                        Text(
+                                          _lang == LangCode.tr ? 'TR' : 'EN',
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w800,
+                                            color: palette.textPrimary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
+
                                   // Performance Quick Toggle (60 FPS / ECO)
                                   _TopActionButton(
                                     palette: palette,
@@ -1224,6 +1253,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                    targetTemp: _targetTemp,
                    boiler: boiler,
                    accentColor: activeColor,
+                   palette: palette,
                    lang: _lang,
                    paletteTag: _visual.theme.name,
                    forcedAod: _ambientForcedAod,
@@ -1466,4 +1496,95 @@ class _TopActionButton extends StatelessWidget {
       ),
     );
   }
+}
+
+class _MiniFlagBadge extends StatelessWidget {
+  final LangCode lang;
+
+  const _MiniFlagBadge({required this.lang});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: SizedBox(
+        width: 17,
+        height: 12,
+        child: CustomPaint(painter: _MiniFlagPainter(isTr: lang == LangCode.tr)),
+      ),
+    );
+  }
+}
+
+class _MiniFlagPainter extends CustomPainter {
+  final bool isTr;
+
+  const _MiniFlagPainter({required this.isTr});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (isTr) {
+      // Crisp Turkish Flag (#E30A17 + White Crescent & 5-Point Star)
+      canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFFE30A17));
+      final outerCenter = Offset(size.width * 0.38, size.height * 0.50);
+      final outerR = size.height * 0.29;
+      canvas.drawCircle(outerCenter, outerR, Paint()..color = Colors.white);
+      canvas.drawCircle(
+        Offset(size.width * 0.44, size.height * 0.50),
+        outerR * 0.80,
+        Paint()..color = const Color(0xFFE30A17),
+      );
+      final starCx = size.width * 0.65;
+      final starCy = size.height * 0.50;
+      final starR = size.height * 0.14;
+      final starInner = starR * 0.42;
+      final starPath = Path();
+      for (int i = 0; i < 10; i++) {
+        final r = i.isEven ? starR : starInner;
+        final a = -math.pi / 2 + (i * math.pi / 5);
+        final px = starCx + math.cos(a) * r;
+        final py = starCy + math.sin(a) * r;
+        if (i == 0) {
+          starPath.moveTo(px, py);
+        } else {
+          starPath.lineTo(px, py);
+        }
+      }
+      starPath.close();
+      canvas.drawPath(starPath, Paint()..color = Colors.white);
+    } else {
+      // Crisp UK Union Flag for English
+      canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xFF012169));
+      final whiteDiag = Paint()
+        ..color = Colors.white
+        ..strokeWidth = 2.4;
+      final redDiag = Paint()
+        ..color = const Color(0xFFC8102E)
+        ..strokeWidth = 1.1;
+      canvas.drawLine(Offset.zero, Offset(size.width, size.height), whiteDiag);
+      canvas.drawLine(Offset(size.width, 0), Offset(0, size.height), whiteDiag);
+      canvas.drawLine(Offset.zero, Offset(size.width, size.height), redDiag);
+      canvas.drawLine(Offset(size.width, 0), Offset(0, size.height), redDiag);
+
+      canvas.drawRect(
+        Rect.fromCenter(center: Offset(size.width / 2, size.height / 2), width: size.width, height: 3.8),
+        Paint()..color = Colors.white,
+      );
+      canvas.drawRect(
+        Rect.fromCenter(center: Offset(size.width / 2, size.height / 2), width: 3.8, height: size.height),
+        Paint()..color = Colors.white,
+      );
+      canvas.drawRect(
+        Rect.fromCenter(center: Offset(size.width / 2, size.height / 2), width: size.width, height: 2.1),
+        Paint()..color = const Color(0xFFC8102E),
+      );
+      canvas.drawRect(
+        Rect.fromCenter(center: Offset(size.width / 2, size.height / 2), width: 2.1, height: size.height),
+        Paint()..color = const Color(0xFFC8102E),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _MiniFlagPainter oldDelegate) => oldDelegate.isTr != isTr;
 }

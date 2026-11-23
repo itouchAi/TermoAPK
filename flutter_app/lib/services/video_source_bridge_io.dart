@@ -23,4 +23,6 @@ class VideoSourceBridge {
     }
     return VideoPlayerController.file(File(trimmed));
   }
+
+  static void applyDomVideoBlur(double sigmaPx) {}
 }

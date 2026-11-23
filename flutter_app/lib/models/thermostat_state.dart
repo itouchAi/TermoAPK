@@ -726,20 +726,7 @@ enum SmartDisplayVisualTheme {
 }
 
 String smartDisplayThemeAssetPath(SmartDisplayVisualTheme theme) {
-  switch (theme) {
-    case SmartDisplayVisualTheme.fireplace:
-      return 'assets/themes/fireplace.jpg';
-    case SmartDisplayVisualTheme.rainy:
-      return 'assets/themes/rainy.jpg';
-    case SmartDisplayVisualTheme.winterSnow:
-      return 'assets/themes/winter_snow.jpg';
-    case SmartDisplayVisualTheme.sunset:
-      return 'assets/themes/sunset.jpg';
-    case SmartDisplayVisualTheme.aurora:
-      return 'assets/themes/aurora.jpg';
-    case SmartDisplayVisualTheme.minimalist:
-      return '';
-  }
+  return '';
 }
 
 String? smartDisplayThemeVideoUrl(SmartDisplayVisualTheme theme) {

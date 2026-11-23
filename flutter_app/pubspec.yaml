@@ -31,6 +31,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/mascots/
-    - assets/themes/
   shaders:
     - shaders/flow_tab_bar.frag

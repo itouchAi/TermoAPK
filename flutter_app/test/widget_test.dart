@@ -11,6 +11,7 @@ import 'package:termostat_flow/services/notification_service.dart';
 import 'package:termostat_flow/services/vault_crypto_service.dart';
 import 'package:termostat_flow/services/voice_gender_classifier.dart';
 import 'package:termostat_flow/services/voice_speech_service.dart';
+import 'package:termostat_flow/widgets/smart_display_overlay.dart';
 import 'package:termostat_flow/widgets/termo_bot.dart';
 
 void main() {
@@ -852,12 +853,12 @@ void main() {
     expect(SystemSettingsState.extractCityName('Ankara'), 'Ankara');
   });
 
-  test('Smart Display theme assets, singlePhoto migration, and Smart Display vs Maskot mutual exclusion', () {
-    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.fireplace), 'assets/themes/fireplace.jpg');
-    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.rainy), 'assets/themes/rainy.jpg');
-    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.winterSnow), 'assets/themes/winter_snow.jpg');
-    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.sunset), 'assets/themes/sunset.jpg');
-    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.aurora), 'assets/themes/aurora.jpg');
+  test('Smart Display static theme asset path is empty, singlePhoto migrates, and Smart Display vs Maskot mutual exclusion holds', () {
+    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.fireplace), isEmpty);
+    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.rainy), isEmpty);
+    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.winterSnow), isEmpty);
+    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.sunset), isEmpty);
+    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.aurora), isEmpty);
     expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.minimalist), isEmpty);
 
     // Legacy singlePhoto + singleDisplayImage cleanly migrate to slideshow + slideImages,
@@ -934,6 +935,15 @@ void main() {
     final decaySum = decayBands.fold<double>(0.0, (a, b) => a + b);
     expect(attackSum, greaterThan(decaySum));
 
+    // Per-band percentile normalization preserves frequency contrast across bands
+    double maxAttack = 0.0;
+    double minAttack = 1.0;
+    for (final v in attackBands) {
+      if (v > maxAttack) maxAttack = v;
+      if (v < minAttack) minAttack = v;
+    }
+    expect(maxAttack - minAttack, greaterThan(0.25));
+
     // When paused/muted, all equalizer bands & beat pulse drop cleanly to zero
     final pausedBands = AudioTempoAnalyzer.sampleBandsAtPosition(
       profile,
@@ -949,5 +959,58 @@ void main() {
       ),
       0.0,
     );
+  });
+
+  test('SmartDisplayOverlay.computeGentleBurnInShift shifts <= 2px cleanly on 12-min boundaries', () {
+    expect(
+      SmartDisplayOverlay.computeGentleBurnInShift(DateTime(2026, 11, 23, 18, 10), enabled: false),
+      Offset.zero,
+    );
+    final w0a = SmartDisplayOverlay.computeGentleBurnInShift(DateTime(2026, 11, 23, 0, 0), enabled: true);
+    final w0b = SmartDisplayOverlay.computeGentleBurnInShift(DateTime(2026, 11, 23, 0, 11, 59), enabled: true);
+    final w1 = SmartDisplayOverlay.computeGentleBurnInShift(DateTime(2026, 11, 23, 0, 12, 0), enabled: true);
+    final w2 = SmartDisplayOverlay.computeGentleBurnInShift(DateTime(2026, 11, 23, 0, 24, 0), enabled: true);
+
+    expect(w0a, w0b); // No 1-second micro jitter inside the same 12-minute window
+    expect(w0a, isNot(w1));
+    expect(w1, isNot(w2));
+    for (final o in [w0a, w1, w2]) {
+      expect(o.dx.abs(), lessThanOrEqualTo(2.0));
+      expect(o.dy.abs(), lessThanOrEqualTo(2.0));
+    }
+  });
+
+  test('AmbientAudioService.stepPlaylistTrack wraps sequentially and avoids current track in shuffle', () {
+    expect(
+      AmbientAudioService.stepPlaylistTrack(
+        AmbientSoundtrack.fireplaceCrackling,
+        1,
+      ),
+      AmbientSoundtrack.nightRain,
+    );
+    expect(
+      AmbientAudioService.stepPlaylistTrack(
+        AmbientSoundtrack.fireplaceCrackling,
+        -1,
+        hasCustomAudio: false,
+      ),
+      AmbientSoundtrack.forestBreeze,
+    );
+    expect(
+      AmbientAudioService.stepPlaylistTrack(
+        AmbientSoundtrack.fireplaceCrackling,
+        -1,
+        hasCustomAudio: true,
+      ),
+      AmbientSoundtrack.customMp3,
+    );
+    final shuffled = AmbientAudioService.stepPlaylistTrack(
+      AmbientSoundtrack.relaxPiano,
+      1,
+      hasCustomAudio: true,
+      shuffle: true,
+    );
+    expect(shuffled, isNot(AmbientSoundtrack.silent));
+    expect(shuffled, isNot(AmbientSoundtrack.relaxPiano));
   });
 }

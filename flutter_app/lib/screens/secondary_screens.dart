@@ -382,42 +382,45 @@ class _WeatherScreenState extends State<WeatherScreen> {
                 ),
 
               // Hourly Forecast Drawer / Panel on Day Tap
-              AnimatedCrossFade(
-                duration: const Duration(milliseconds: 220),
-                crossFadeState: _hourlyExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-                firstChild: const SizedBox.shrink(),
-                secondChild: Container(
-                  margin: const EdgeInsets.only(top: 12),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: p.cardBg,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: amberAccent.withValues(alpha: 0.40)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            '${tr ? activeDay.dayTr : activeDay.dayEn} (${activeDay.dateLabel}) · ${tr ? 'Saat Bazlı Tahmin' : 'Hourly Forecast'}',
-                            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: p.textPrimary),
+              ClipRect(
+                child: AnimatedSize(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  alignment: Alignment.topCenter,
+                  child: _hourlyExpanded
+                      ? Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(top: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: p.cardBg,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: amberAccent.withValues(alpha: 0.40)),
                           ),
-                          GestureDetector(
-                            onTap: () => setState(() => _hourlyExpanded = false),
-                            child: Icon(Icons.keyboard_arrow_up_rounded, color: p.textSecondary, size: 20),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        height: 98,
-                        child: ListView.separated(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: activeDay.hourly.length,
-                          separatorBuilder: (_, __) => const SizedBox(width: 8),
-                          itemBuilder: (_, hi) {
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    '${tr ? activeDay.dayTr : activeDay.dayEn} (${activeDay.dateLabel}) · ${tr ? 'Saat Bazlı Tahmin' : 'Hourly Forecast'}',
+                                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: p.textPrimary),
+                                  ),
+                                  GestureDetector(
+                                    onTap: () => setState(() => _hourlyExpanded = false),
+                                    child: Icon(Icons.keyboard_arrow_up_rounded, color: p.textSecondary, size: 20),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              SizedBox(
+                                height: 98,
+                                child: ListView.separated(
+                                  scrollDirection: Axis.horizontal,
+                                  itemCount: activeDay.hourly.length,
+                                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                                  itemBuilder: (_, hi) {
                             final h = activeDay.hourly[hi];
                             return Container(
                               width: 88,
@@ -454,6 +457,8 @@ class _WeatherScreenState extends State<WeatherScreen> {
                       ),
                     ],
                   ),
+                )
+                    : const SizedBox(width: double.infinity, height: 0),
                 ),
               ),
 

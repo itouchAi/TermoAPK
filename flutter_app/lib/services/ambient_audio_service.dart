@@ -58,6 +58,9 @@ class AmbientAudioService {
     });
   }
 
+  static List<double> _smoothedBands = const [];
+  static double _smoothedPulse = 0.0;
+
   static Duration get currentPlaybackPosition {
     if (!_playing) return _lastKnownPosition;
     if (_paused || !_posStopwatch.isRunning) return _lastKnownPosition;
@@ -66,27 +69,45 @@ class AmbientAudioService {
 
   static List<double> currentSpectrumBands({int bandCount = 18}) {
     if (!_playing || _paused || _activeVolume <= 0.005) {
-      return List<double>.filled(bandCount, 0.0);
+      _smoothedBands = List<double>.filled(bandCount, 0.0);
+      return _smoothedBands;
     }
-    return AudioTempoAnalyzer.sampleBandsAtPosition(
+    final target = AudioTempoAnalyzer.sampleBandsAtPosition(
       _activeProfile,
       currentPlaybackPosition,
       playing: true,
       bandCount: bandCount,
-      masterGain: (0.48 + _activeVolume * 0.58).clamp(0.35, 1.05),
+      masterGain: (0.62 + _activeVolume * 0.50).clamp(0.45, 1.12),
     );
+    if (_smoothedBands.length != target.length) {
+      _smoothedBands = List<double>.from(target);
+      return _smoothedBands;
+    }
+    final next = List<double>.filled(target.length, 0.0);
+    for (int i = 0; i < target.length; i++) {
+      final prev = _smoothedBands[i];
+      final cur = target[i];
+      final alpha = cur >= prev ? 0.68 : 0.24; // Fast attack on kick/note, smooth decay
+      next[i] = (prev + (cur - prev) * alpha).clamp(0.0, 1.0);
+    }
+    _smoothedBands = next;
+    return _smoothedBands;
   }
 
   static double currentBeatPulse() {
     if (!_playing || _paused || _activeVolume <= 0.005) {
+      _smoothedPulse = 0.0;
       return 0.0;
     }
-    return AudioTempoAnalyzer.beatPulseAtPosition(
+    final target = AudioTempoAnalyzer.beatPulseAtPosition(
       _activeProfile,
       currentPlaybackPosition,
       playing: true,
-      masterGain: (0.55 + _activeVolume * 0.50).clamp(0.35, 1.05),
+      masterGain: (0.65 + _activeVolume * 0.45).clamp(0.45, 1.10),
     );
+    final alpha = target >= _smoothedPulse ? 0.72 : 0.22;
+    _smoothedPulse = (_smoothedPulse + (target - _smoothedPulse) * alpha).clamp(0.0, 1.0);
+    return _smoothedPulse;
   }
 
   static double currentDetectedBpm() {
@@ -97,6 +118,32 @@ class AmbientAudioService {
   static void setCustomAudioBytes(Uint8List? bytes) {
     _customAudioBytes = bytes;
     _profileCache.removeWhere((k, _) => k.startsWith('custom_'));
+  }
+
+  static AmbientSoundtrack stepPlaylistTrack(
+    AmbientSoundtrack current,
+    int delta, {
+    bool hasCustomAudio = false,
+    bool shuffle = false,
+  }) {
+    final pool = <AmbientSoundtrack>[
+      AmbientSoundtrack.fireplaceCrackling,
+      AmbientSoundtrack.nightRain,
+      AmbientSoundtrack.cozyJazzLofi,
+      AmbientSoundtrack.relaxPiano,
+      AmbientSoundtrack.deepSpace,
+      AmbientSoundtrack.forestBreeze,
+      if (hasCustomAudio) AmbientSoundtrack.customMp3,
+    ];
+    final idx = pool.indexOf(current);
+    if (shuffle && pool.length > 1) {
+      final seed = DateTime.now().microsecondsSinceEpoch % (pool.length - 1);
+      final base = idx < 0 ? 0 : idx;
+      return pool[(base + 1 + seed) % pool.length];
+    }
+    if (idx < 0) return pool.first;
+    final nextIdx = ((idx + delta) % pool.length + pool.length) % pool.length;
+    return pool[nextIdx];
   }
 
   /// Synthesizes a seamless 3-second 16-bit mono 22050Hz PCM WAV loop
