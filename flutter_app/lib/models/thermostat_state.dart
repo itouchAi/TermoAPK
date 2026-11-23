@@ -742,6 +742,23 @@ String smartDisplayThemeAssetPath(SmartDisplayVisualTheme theme) {
   }
 }
 
+String? smartDisplayThemeVideoUrl(SmartDisplayVisualTheme theme) {
+  switch (theme) {
+    case SmartDisplayVisualTheme.fireplace:
+      return 'https://upload.wikimedia.org/wikipedia/commons/transcoded/0/04/Fireplace_1_2021-02-14.webm/Fireplace_1_2021-02-14.webm.480p.vp9.webm';
+    case SmartDisplayVisualTheme.rainy:
+      return 'https://upload.wikimedia.org/wikipedia/commons/transcoded/2/2e/Radevormwald_-_Raindrops_on_a_window_10_%281%29_ies.webm/Radevormwald_-_Raindrops_on_a_window_10_%281%29_ies.webm.480p.vp9.webm';
+    case SmartDisplayVisualTheme.winterSnow:
+      return 'https://upload.wikimedia.org/wikipedia/commons/transcoded/f/f3/Snow_falling_in_Tuntorp.webm/Snow_falling_in_Tuntorp.webm.480p.vp9.webm';
+    case SmartDisplayVisualTheme.sunset:
+      return 'https://upload.wikimedia.org/wikipedia/commons/transcoded/e/e5/Sunset_timelapse_in_Funchal_-_2014.webm/Sunset_timelapse_in_Funchal_-_2014.webm.480p.vp9.webm';
+    case SmartDisplayVisualTheme.aurora:
+      return 'https://upload.wikimedia.org/wikipedia/commons/transcoded/d/df/Aurora_borealis_timelapse.webm/Aurora_borealis_timelapse.webm.480p.vp9.webm';
+    case SmartDisplayVisualTheme.minimalist:
+      return null;
+  }
+}
+
 enum EqualizerStyle {
   bars,
   wave,
@@ -1139,6 +1156,7 @@ class SystemSettingsState {
   final bool marqueeTrackEnabled;
   final bool equalizerEnabled;
   final EqualizerStyle equalizerStyle;
+  final double smartDisplayBlur;
   final int displayBrightness;
   final int smartDisplayAutoMinutes;
   final int displaySleepMinutes;
@@ -1215,6 +1233,7 @@ class SystemSettingsState {
     required this.marqueeTrackEnabled,
     required this.equalizerEnabled,
     required this.equalizerStyle,
+    this.smartDisplayBlur = 0.0,
     required this.displayBrightness,
     this.smartDisplayAutoMinutes = 5,
     required this.displaySleepMinutes,
@@ -1306,6 +1325,7 @@ class SystemSettingsState {
         marqueeTrackEnabled: true,
         equalizerEnabled: true,
         equalizerStyle: EqualizerStyle.bars,
+        smartDisplayBlur: 0.0,
         displayBrightness: 85,
         smartDisplayAutoMinutes: 5,
         displaySleepMinutes: 15,
@@ -1446,6 +1466,7 @@ class SystemSettingsState {
     bool? marqueeTrackEnabled,
     bool? equalizerEnabled,
     EqualizerStyle? equalizerStyle,
+    double? smartDisplayBlur,
     int? displayBrightness,
     int? smartDisplayAutoMinutes,
     int? displaySleepMinutes,
@@ -1522,6 +1543,7 @@ class SystemSettingsState {
       marqueeTrackEnabled: marqueeTrackEnabled ?? this.marqueeTrackEnabled,
       equalizerEnabled: equalizerEnabled ?? this.equalizerEnabled,
       equalizerStyle: equalizerStyle ?? this.equalizerStyle,
+      smartDisplayBlur: (smartDisplayBlur ?? this.smartDisplayBlur).clamp(0.0, 24.0),
       displayBrightness: (displayBrightness ?? this.displayBrightness).clamp(10, 100),
       smartDisplayAutoMinutes: (smartDisplayAutoMinutes ?? this.smartDisplayAutoMinutes).clamp(0, 60),
       displaySleepMinutes: (displaySleepMinutes ?? this.displaySleepMinutes).clamp(0, 120),
@@ -1599,6 +1621,7 @@ class SystemSettingsState {
         'marqueeTrackEnabled': marqueeTrackEnabled,
         'equalizerEnabled': equalizerEnabled,
         'equalizerStyle': equalizerStyle.name,
+        'smartDisplayBlur': smartDisplayBlur,
         'displayBrightness': displayBrightness,
         'smartDisplayAutoMinutes': smartDisplayAutoMinutes,
         'displaySleepMinutes': displaySleepMinutes,
@@ -1770,6 +1793,7 @@ class SystemSettingsState {
       marqueeTrackEnabled: (map['marqueeTrackEnabled'] as bool?) ?? defaults.marqueeTrackEnabled,
       equalizerEnabled: (map['equalizerEnabled'] as bool?) ?? defaults.equalizerEnabled,
       equalizerStyle: _parseEnum(map['equalizerStyle'] as String?, EqualizerStyle.values, defaults.equalizerStyle),
+      smartDisplayBlur: (map['smartDisplayBlur'] as num?)?.toDouble() ?? defaults.smartDisplayBlur,
       displayBrightness: (map['displayBrightness'] as int?) ?? defaults.displayBrightness,
       smartDisplayAutoMinutes: (map['smartDisplayAutoMinutes'] as int?) ?? defaults.smartDisplayAutoMinutes,
       displaySleepMinutes: (map['displaySleepMinutes'] as int?) ?? defaults.displaySleepMinutes,

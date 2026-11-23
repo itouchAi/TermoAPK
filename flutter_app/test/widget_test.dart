@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:termostat_flow/models/thermostat_state.dart';
 import 'package:termostat_flow/services/ai_call_service.dart';
 import 'package:termostat_flow/services/ambient_audio_service.dart';
+import 'package:termostat_flow/services/audio_tempo_analyzer.dart';
 import 'package:termostat_flow/services/esp_log_service.dart';
 import 'package:termostat_flow/services/firebase_sync_service.dart';
 import 'package:termostat_flow/services/hardware_service.dart';
@@ -857,7 +858,7 @@ void main() {
     expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.winterSnow), 'assets/themes/winter_snow.jpg');
     expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.sunset), 'assets/themes/sunset.jpg');
     expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.aurora), 'assets/themes/aurora.jpg');
-    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.minimalist), isNull);
+    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.minimalist), isEmpty);
 
     // Legacy singlePhoto + singleDisplayImage cleanly migrate to slideshow + slideImages,
     // and simultaneous smartDisplayEnabled + termoBotEnabled resolves in favor of Maskot
@@ -878,5 +879,75 @@ void main() {
     expect(migrated.slideImages.first.id, 'legacy_1');
     expect(migrated.termoBotEnabled, isTrue);
     expect(migrated.smartDisplayEnabled, isFalse);
+  });
+
+  test('Wikimedia .webm theme videos, adjustable smartDisplayBlur, and tempo-locked AudioTempoAnalyzer work cleanly', () {
+    expect(
+      smartDisplayThemeVideoUrl(SmartDisplayVisualTheme.fireplace),
+      'https://upload.wikimedia.org/wikipedia/commons/transcoded/0/04/Fireplace_1_2021-02-14.webm/Fireplace_1_2021-02-14.webm.480p.vp9.webm',
+    );
+    expect(
+      smartDisplayThemeVideoUrl(SmartDisplayVisualTheme.rainy),
+      'https://upload.wikimedia.org/wikipedia/commons/transcoded/2/2e/Radevormwald_-_Raindrops_on_a_window_10_%281%29_ies.webm/Radevormwald_-_Raindrops_on_a_window_10_%281%29_ies.webm.480p.vp9.webm',
+    );
+    expect(
+      smartDisplayThemeVideoUrl(SmartDisplayVisualTheme.winterSnow),
+      'https://upload.wikimedia.org/wikipedia/commons/transcoded/f/f3/Snow_falling_in_Tuntorp.webm/Snow_falling_in_Tuntorp.webm.480p.vp9.webm',
+    );
+    expect(
+      smartDisplayThemeVideoUrl(SmartDisplayVisualTheme.sunset),
+      'https://upload.wikimedia.org/wikipedia/commons/transcoded/e/e5/Sunset_timelapse_in_Funchal_-_2014.webm/Sunset_timelapse_in_Funchal_-_2014.webm.480p.vp9.webm',
+    );
+    expect(
+      smartDisplayThemeVideoUrl(SmartDisplayVisualTheme.aurora),
+      'https://upload.wikimedia.org/wikipedia/commons/transcoded/d/df/Aurora_borealis_timelapse.webm/Aurora_borealis_timelapse.webm.480p.vp9.webm',
+    );
+    expect(smartDisplayThemeVideoUrl(SmartDisplayVisualTheme.minimalist), isNull);
+
+    final withBlur = SystemSettingsState.defaults().copyWith(smartDisplayBlur: 12.0);
+    final restoredBlur = SystemSettingsState.fromJson(withBlur.toJson());
+    expect(restoredBlur.smartDisplayBlur, 12.0);
+    expect(withBlur.copyWith(smartDisplayBlur: -5.0).smartDisplayBlur, 0.0);
+    expect(withBlur.copyWith(smartDisplayBlur: 99.0).smartDisplayBlur, 24.0);
+
+    // Real WAV DSP extraction: piano & lofi loops produce valid 18-band tempo frames
+    final pianoWav = AmbientAudioService.generateAmbientWavBytes(AmbientSoundtrack.relaxPiano);
+    final profile = AudioTempoAnalyzer.analyzeWavBytes(pianoWav);
+    expect(profile, isNotNull);
+    expect(profile!.fromRealAudioPcm, isTrue);
+    expect(profile.bandCount, 18);
+    expect(profile.bpm, inInclusiveRange(55.0, 175.0));
+    expect(profile.frames.length, greaterThanOrEqualTo(60));
+
+    // At note transient (~60ms into beat) energy exceeds late decay (~450ms)
+    final attackBands = AudioTempoAnalyzer.sampleBandsAtPosition(
+      profile,
+      const Duration(milliseconds: 60),
+      playing: true,
+    );
+    final decayBands = AudioTempoAnalyzer.sampleBandsAtPosition(
+      profile,
+      const Duration(milliseconds: 450),
+      playing: true,
+    );
+    final attackSum = attackBands.fold<double>(0.0, (a, b) => a + b);
+    final decaySum = decayBands.fold<double>(0.0, (a, b) => a + b);
+    expect(attackSum, greaterThan(decaySum));
+
+    // When paused/muted, all equalizer bands & beat pulse drop cleanly to zero
+    final pausedBands = AudioTempoAnalyzer.sampleBandsAtPosition(
+      profile,
+      const Duration(milliseconds: 60),
+      playing: false,
+    );
+    expect(pausedBands.every((v) => v == 0.0), isTrue);
+    expect(
+      AudioTempoAnalyzer.beatPulseAtPosition(
+        profile,
+        const Duration(milliseconds: 60),
+        playing: false,
+      ),
+      0.0,
+    );
   });
 }

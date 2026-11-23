@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -1650,9 +1651,9 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
 
         final visualThemes = [
           (SmartDisplayVisualTheme.fireplace, '🔥 ${tr ? 'Şömine' : 'Fireplace'}'),
-          (SmartDisplayVisualTheme.rainy, '🌧️ ${tr ? 'Yağmurlu' : 'Rainy'}'),
-          (SmartDisplayVisualTheme.winterSnow, '❄️ ${tr ? 'Kış & Kar' : 'Winter'}'),
-          (SmartDisplayVisualTheme.sunset, '🌲 ${tr ? 'Gün Batımı' : 'Sunset'}'),
+          (SmartDisplayVisualTheme.rainy, '🌧️ ${tr ? 'Yağmurlu Pencere' : 'Rainy Window'}'),
+          (SmartDisplayVisualTheme.winterSnow, '❄️ ${tr ? 'Kış & Kar' : 'Winter & Snow'}'),
+          (SmartDisplayVisualTheme.sunset, '🌅 ${tr ? 'Gün Batımı' : 'Sunset'}'),
           (SmartDisplayVisualTheme.aurora, '🌌 ${tr ? 'Kutup Işıkları' : 'Aurora'}'),
           (SmartDisplayVisualTheme.minimalist, '🌚 Minimalist'),
         ];
@@ -2843,6 +2844,225 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               ),
               const SizedBox(height: 10),
             ],
+
+            // Fixed Video & Image Background Blur Card + Live Interactive Preview
+            Builder(
+              builder: (_) {
+                final blurPresets = [
+                  (0.0, tr ? 'Net (0px)' : 'Clear (0px)'),
+                  (4.0, tr ? 'Hafif (4px)' : 'Light (4px)'),
+                  (10.0, tr ? 'Orta (10px)' : 'Med (10px)'),
+                  (18.0, tr ? 'Yoğun (18px)' : 'Heavy (18px)'),
+                ];
+                final firstSlideBytes = _draft.slideImages.isNotEmpty
+                    ? _draft.slideImages.first.decodeBytes()
+                    : null;
+                final themePoster = smartDisplayThemeAssetPath(_draft.smartDisplayVisualTheme);
+
+                Widget buildBlurSampleBackdrop() {
+                  if (isSlideshow && firstSlideBytes != null) {
+                    return Image.memory(
+                      firstSlideBytes,
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: double.infinity,
+                    );
+                  }
+                  if (themePoster.isNotEmpty) {
+                    return Image.asset(
+                      themePoster,
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: double.infinity,
+                      errorBuilder: (_, __, ___) => Container(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Color(0xFF1E3A8A), Color(0xFF9333EA), Color(0xFFEA580C)],
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  return Container(
+                    decoration: const BoxDecoration(
+                      gradient: RadialGradient(
+                        center: Alignment(-0.35, -0.2),
+                        radius: 1.0,
+                        colors: [Color(0xFF0284C7), Color(0xFF312E81), Color(0xFF09090D)],
+                      ),
+                    ),
+                  );
+                }
+
+                return Container(
+                  padding: const EdgeInsets.all(11),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.035),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.24)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            tr ? '🌫️ Video & Görsel Bulanıklık (Blur)' : '🌫️ Video & Image Blur',
+                            style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF7DD3FC)),
+                          ),
+                          Text(
+                            '${_draft.smartDisplayBlur.round()} px',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF38BDF8),
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: SizedBox(
+                          height: 86,
+                          width: double.infinity,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              ClipRect(
+                                child: _draft.smartDisplayBlur > 0.1
+                                    ? ImageFiltered(
+                                        imageFilter: ui.ImageFilter.blur(
+                                          sigmaX: _draft.smartDisplayBlur,
+                                          sigmaY: _draft.smartDisplayBlur,
+                                          tileMode: ui.TileMode.mirror,
+                                        ),
+                                        child: buildBlurSampleBackdrop(),
+                                      )
+                                    : buildBlurSampleBackdrop(),
+                              ),
+                              DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [
+                                      Colors.black.withValues(alpha: 0.28),
+                                      Colors.black.withValues(alpha: 0.45),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          '22 : 45',
+                                          style: TextStyle(
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white,
+                                            height: 1.0,
+                                            fontFeatures: [FontFeature.tabularFigures()],
+                                            shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
+                                          ),
+                                        ),
+                                        const SizedBox(height: 3),
+                                        Text(
+                                          tr
+                                              ? 'Oda ${widget.roomTemp.toStringAsFixed(1)}°C · Hedef ${_liveTargetTemp.toStringAsFixed(1)}°C'
+                                              : 'Room ${widget.roomTemp.toStringAsFixed(1)}°C · Target ${_liveTargetTemp.toStringAsFixed(1)}°C',
+                                          style: const TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withValues(alpha: 0.56),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.45)),
+                                      ),
+                                      child: Text(
+                                        _draft.smartDisplayBlur <= 0.1
+                                            ? (tr ? 'Önizleme: Net' : 'Preview: Clear')
+                                            : 'Blur: ${_draft.smartDisplayBlur.round()} px',
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFFE0F2FE),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      Slider(
+                        value: _draft.smartDisplayBlur,
+                        min: 0.0,
+                        max: 24.0,
+                        divisions: 24,
+                        activeColor: const Color(0xFF38BDF8),
+                        onChanged: (v) => setState(() => _draft = _draft.copyWith(smartDisplayBlur: v)),
+                      ),
+                      Row(
+                        children: [
+                          for (int idx = 0; idx < blurPresets.length; idx++)
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () {
+                                  _hapticTap();
+                                  setState(() => _draft = _draft.copyWith(smartDisplayBlur: blurPresets[idx].$1));
+                                },
+                                child: Container(
+                                  margin: EdgeInsets.only(right: idx < blurPresets.length - 1 ? 4 : 0),
+                                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: (_draft.smartDisplayBlur - blurPresets[idx].$1).abs() < 0.8
+                                        ? const Color(0xFF0284C7).withValues(alpha: 0.35)
+                                        : Colors.white.withValues(alpha: 0.05),
+                                    borderRadius: BorderRadius.circular(9),
+                                    border: Border.all(
+                                      color: (_draft.smartDisplayBlur - blurPresets[idx].$1).abs() < 0.8
+                                          ? const Color(0xFF38BDF8)
+                                          : Colors.transparent,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    blurPresets[idx].$2,
+                                    style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Colors.white),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 10),
 
             // 5. Built-in Display Brightness Live Mini Preview + Slider + 4 Presets
             Container(

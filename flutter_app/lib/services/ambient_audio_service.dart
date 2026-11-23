@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import '../models/thermostat_state.dart';
+import 'audio_tempo_analyzer.dart';
+import 'web_audio_decode_bridge.dart';
 
 class AmbientAudioService {
   AmbientAudioService._();
@@ -9,19 +12,95 @@ class AmbientAudioService {
   static final AudioPlayer _player = AudioPlayer();
   static final AudioPlayer _chimePlayer = AudioPlayer();
   static final AudioPlayer _ringPlayer = AudioPlayer();
-  static bool _playing = false;
-  static bool _ringing = false;
-  static Uint8List? _customAudioBytes;
 
-  static bool get isPlaying => _playing;
+  static bool _playing = false;
+  static bool _paused = false;
+  static bool _ringing = false;
+  static double _activeVolume = 0.5;
+  static Uint8List? _customAudioBytes;
+  static bool _listenersAttached = false;
+
+  static Duration _lastKnownPosition = Duration.zero;
+  static final Stopwatch _posStopwatch = Stopwatch();
+  static AudioSpectrumProfile? _activeProfile;
+  static int _sessionToken = 0;
+  static final Map<String, AudioSpectrumProfile> _profileCache = {};
+
+  static bool get isPlaying => _playing && !_paused;
+  static bool get isPaused => _paused;
   static bool get isRinging => _ringing;
+  static AudioSpectrumProfile? get activeProfile => _activeProfile;
+
+  static void _ensureListeners() {
+    if (_listenersAttached) return;
+    _listenersAttached = true;
+    _player.onPositionChanged.listen((pos) {
+      _lastKnownPosition = pos;
+      if (_playing && !_paused) {
+        _posStopwatch
+          ..reset()
+          ..start();
+      }
+    });
+    _player.onPlayerStateChanged.listen((state) {
+      if (state == PlayerState.stopped || state == PlayerState.completed) {
+        if (!_paused) {
+          _posStopwatch.stop();
+        }
+      } else if (state == PlayerState.paused) {
+        _paused = true;
+        _posStopwatch.stop();
+      } else if (state == PlayerState.playing) {
+        _paused = false;
+        _playing = true;
+        _posStopwatch.start();
+      }
+    });
+  }
+
+  static Duration get currentPlaybackPosition {
+    if (!_playing) return _lastKnownPosition;
+    if (_paused || !_posStopwatch.isRunning) return _lastKnownPosition;
+    return _lastKnownPosition + _posStopwatch.elapsed;
+  }
+
+  static List<double> currentSpectrumBands({int bandCount = 18}) {
+    if (!_playing || _paused || _activeVolume <= 0.005) {
+      return List<double>.filled(bandCount, 0.0);
+    }
+    return AudioTempoAnalyzer.sampleBandsAtPosition(
+      _activeProfile,
+      currentPlaybackPosition,
+      playing: true,
+      bandCount: bandCount,
+      masterGain: (0.48 + _activeVolume * 0.58).clamp(0.35, 1.05),
+    );
+  }
+
+  static double currentBeatPulse() {
+    if (!_playing || _paused || _activeVolume <= 0.005) {
+      return 0.0;
+    }
+    return AudioTempoAnalyzer.beatPulseAtPosition(
+      _activeProfile,
+      currentPlaybackPosition,
+      playing: true,
+      masterGain: (0.55 + _activeVolume * 0.50).clamp(0.35, 1.05),
+    );
+  }
+
+  static double currentDetectedBpm() {
+    if (!_playing || _paused) return 0.0;
+    return _activeProfile?.bpm ?? 0.0;
+  }
 
   static void setCustomAudioBytes(Uint8List? bytes) {
     _customAudioBytes = bytes;
+    _profileCache.removeWhere((k, _) => k.startsWith('custom_'));
   }
 
   /// Synthesizes a seamless 3-second 16-bit mono 22050Hz PCM WAV loop
-  /// for each built-in ambient soundtrack so sound works 100% offline.
+  /// for each built-in ambient soundtrack so sound & tempo-locked spectrum analysis work 100% offline.
   static Uint8List generateAmbientWavBytes(AmbientSoundtrack track) {
     const sampleRate = 22050;
     const durationSeconds = 3;
@@ -64,60 +143,129 @@ class AmbientAudioService {
           sample = 0.0;
           break;
         case AmbientSoundtrack.fireplaceCrackling:
-          lowPass = lowPass * 0.96 + white * 0.04;
-          final pop = (i % 3400 < 18 && rng.nextDouble() > 0.7) ? white * 0.55 : 0.0;
-          final warmth = math.sin(2 * math.pi * 110 * t) * 0.08;
-          sample = (lowPass * 2.6 + pop + warmth);
+          lowPass = lowPass * 0.955 + white * 0.045;
+          // Rhythmic ember swells + crisp crackling transients
+          final crackWindow = (t * 2.666) % 1.0;
+          final crackleBurst = crackWindow < 0.045 ? math.exp(-crackWindow * 85.0) * white * 0.72 : 0.0;
+          final subtlePop = (i % 4100 < 22 && rng.nextDouble() > 0.62) ? white * 0.48 : 0.0;
+          final warmth = math.sin(2 * math.pi * 110 * t) * (0.06 + 0.05 * math.sin(2 * math.pi * 1.333 * t));
+          sample = lowPass * 2.5 + crackleBurst + subtlePop + warmth;
           break;
         case AmbientSoundtrack.nightRain:
           lowPass = lowPass * 0.84 + white * 0.16;
-          sample = lowPass * 1.45 * (0.85 + 0.15 * math.sin(2 * math.pi * 0.33 * t));
+          final rainPulse = 0.72 + 0.28 * math.sin(2 * math.pi * (t / 1.5));
+          final dropStep = (t * 2.0) % 1.0;
+          final dropPlink = math.exp(-dropStep * 14.0) * math.sin(2 * math.pi * 1480.0 * t) * 0.10;
+          sample = lowPass * 1.48 * rainPulse + dropPlink;
           break;
         case AmbientSoundtrack.cozyJazzLofi:
-          final chord = math.sin(2 * math.pi * 174.61 * t) * 0.32 +
-              math.sin(2 * math.pi * 220.00 * t) * 0.25 +
-              math.sin(2 * math.pi * 261.63 * t) * 0.22 +
-              math.sin(2 * math.pi * 329.63 * t) * 0.16;
+          // 80 BPM exact 4-beat bar in 3.0s (beatPeriod = 0.75s)
+          const beatLen = 0.75;
+          final beatPhase = t % beatLen;
+          final barIdx = (t / beatLen).floor().clamp(0, 3);
+          // Warm sub kick on beats 0 & 2
+          final kickActive = (barIdx == 0 || barIdx == 2);
+          final kickPitch = 52.0 + 68.0 * math.exp(-beatPhase * 28.0);
+          final kick = kickActive ? math.sin(2 * math.pi * kickPitch * beatPhase) * math.exp(-beatPhase * 9.5) * 0.48 : 0.0;
+          // Soft brush transient on beats 1 & 3
+          final snareActive = (barIdx == 1 || barIdx == 3);
+          final snare = snareActive ? white * math.exp(-beatPhase * 24.0) * 0.22 : 0.0;
+          // Rhodes chord progression cycling warmly per beat
+          const roots = [174.61, 220.00, 196.00, 164.81];
+          final root = roots[barIdx];
+          final chord = math.sin(2 * math.pi * root * t) * 0.26 +
+              math.sin(2 * math.pi * (root * 1.25) * t) * 0.20 +
+              math.sin(2 * math.pi * (root * 1.5) * t) * 0.17;
+          final chordEnv = 0.45 + 0.55 * math.exp(-beatPhase * 2.2);
           lowPass = lowPass * 0.90 + white * 0.10;
-          sample = chord * (0.55 + 0.45 * loopEnv) + lowPass * 0.14;
+          sample = kick + snare + chord * chordEnv + lowPass * 0.09;
           break;
         case AmbientSoundtrack.relaxPiano:
-          const notes = [261.63, 329.63, 392.00, 493.88];
-          final segLen = durationSeconds / notes.length;
+          // 80 BPM crisp piano arpeggio: C4 -> E4 -> G4 -> B4 -> C5 -> G4
+          const notes = [261.63, 329.63, 392.00, 493.88, 523.25, 392.00];
+          final segLen = durationSeconds / notes.length; // 0.50s each (120 BPM eighth feel)
           final segIdx = (t / segLen).floor().clamp(0, notes.length - 1);
           final localT = t - segIdx * segLen;
-          final decay = math.exp(-localT * 2.6);
+          final attack = (localT / 0.015).clamp(0.0, 1.0);
+          final decay = math.exp(-localT * 4.2);
           final f = notes[segIdx];
           final bell = math.sin(2 * math.pi * f * t) * 0.55 +
-              math.sin(4 * math.pi * f * t) * 0.18 +
-              math.sin(2 * math.pi * (f * 0.5) * t) * 0.22;
-          sample = bell * decay * 0.55;
+              math.sin(4 * math.pi * f * t) * 0.20 +
+              math.sin(2 * math.pi * (f * 0.5) * t) * 0.24;
+          sample = bell * attack * decay * 0.62;
           break;
         case AmbientSoundtrack.deepSpace:
-          final drone = math.sin(2 * math.pi * 108.0 * t) * 0.45 +
-              math.sin(2 * math.pi * 216.0 * t) * 0.25 +
+          final pulse = 0.45 + 0.55 * math.pow(0.5 - 0.5 * math.cos(2 * math.pi * t), 1.5);
+          final drone = math.sin(2 * math.pi * 108.0 * t) * 0.46 +
+              math.sin(2 * math.pi * 216.0 * t) * 0.26 +
               math.sin(2 * math.pi * 432.0 * t) * 0.14;
-          sample = drone * (0.65 + 0.35 * math.sin(2 * math.pi * (t / durationSeconds)));
+          sample = drone * pulse;
           break;
         case AmbientSoundtrack.forestBreeze:
           lowPass = lowPass * 0.93 + white * 0.07;
-          final swell = 0.5 + 0.5 * math.sin(2 * math.pi * (t / durationSeconds));
-          final birdShimmer = math.sin(2 * math.pi * 528.0 * t) * 0.05 * swell;
-          sample = lowPass * (1.2 + 0.9 * swell) + birdShimmer;
+          final swell = 0.35 + 0.65 * loopEnv;
+          final chirpSlot = (t / 0.75) % 1.0;
+          final birdGate = chirpSlot < 0.18 ? math.sin((chirpSlot / 0.18) * math.pi) : 0.0;
+          final birdFreq = 1850.0 + chirpSlot * 2400.0;
+          final birdShimmer = math.sin(2 * math.pi * birdFreq * t) * 0.20 * birdGate;
+          sample = lowPass * (1.05 + 0.95 * swell) + birdShimmer;
           break;
         case AmbientSoundtrack.customMp3:
-          sample = (math.sin(2 * math.pi * 220.0 * t) + math.sin(2 * math.pi * 330.0 * t) * 0.5) * 0.28;
+          final pulse = 0.5 + 0.5 * math.exp(-((t * 1.5) % 1.0) * 5.0);
+          sample = (math.sin(2 * math.pi * 220.0 * t) + math.sin(2 * math.pi * 330.0 * t) * 0.5) * 0.32 * pulse;
           break;
       }
 
       final edgeFade = i < 400
           ? i / 400.0
           : (i > numSamples - 400 ? (numSamples - i) / 400.0 : 1.0);
-      final pcm = (sample * edgeFade * 16000).round().clamp(-32767, 32767);
+      final pcm = (sample * edgeFade * 16500).round().clamp(-32767, 32767);
       buffer.setInt16(44 + i * 2, pcm, Endian.little);
     }
 
     return buffer.buffer.asUint8List();
+  }
+
+  static AudioSpectrumProfile _analyzeBuiltInTrack(AmbientSoundtrack track) {
+    final key = 'builtIn_${track.name}';
+    final cached = _profileCache[key];
+    if (cached != null) return cached;
+    final wav = generateAmbientWavBytes(track);
+    final analyzed = AudioTempoAnalyzer.analyzeWavBytes(wav) ??
+        AudioTempoAnalyzer.buildFallbackBeatProfile(track: track);
+    _profileCache[key] = analyzed;
+    return analyzed;
+  }
+
+  static Future<void> _loadCustomAudioSpectrum({
+    required int token,
+    required AmbientSoundtrack track,
+    required String source,
+    required Uint8List? customBytes,
+  }) async {
+    final cacheKey = 'custom_${source}_${customBytes?.length ?? 0}';
+    final cached = _profileCache[cacheKey];
+    if (cached != null) {
+      if (_sessionToken == token) _activeProfile = cached;
+      return;
+    }
+
+    // Immediate beat-locked placeholder until offline Web Audio / WAV decode completes
+    _activeProfile = AudioTempoAnalyzer.buildFallbackBeatProfile(
+      track: track,
+      customLabel: source,
+    );
+
+    final decoded = await WebAudioDecodeBridge.decodeAndAnalyze(
+      bytes: customBytes,
+      source: source,
+    );
+    if (decoded != null && !decoded.isEmpty) {
+      _profileCache[cacheKey] = decoded;
+      if (_sessionToken == token) {
+        _activeProfile = decoded;
+      }
+    }
   }
 
   static Future<void> start({
@@ -125,47 +273,117 @@ class AmbientAudioService {
     required String customSource,
     required double volume,
   }) async {
+    _ensureListeners();
+    final token = ++_sessionToken;
+    _activeVolume = volume.clamp(0.0, 1.0);
+    _lastKnownPosition = Duration.zero;
+    _posStopwatch
+      ..reset()
+      ..stop();
+
     try {
       await _player.stop();
       if (track == AmbientSoundtrack.silent || volume <= 0.005) {
         _playing = false;
+        _paused = false;
+        _activeProfile = null;
         return;
       }
       await _player.setReleaseMode(ReleaseMode.loop);
-      await _player.setVolume(volume.clamp(0.0, 1.0));
+      await _player.setVolume(_activeVolume);
 
       final trimmed = customSource.trim();
       if (track == AmbientSoundtrack.customMp3) {
         if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+          unawaited(_loadCustomAudioSpectrum(
+            token: token,
+            track: track,
+            source: trimmed,
+            customBytes: null,
+          ));
           await _player.play(UrlSource(trimmed));
         } else if (kIsWeb && _customAudioBytes != null) {
-          await _player.play(BytesSource(_customAudioBytes!));
+          final bytes = _customAudioBytes!;
+          unawaited(_loadCustomAudioSpectrum(
+            token: token,
+            track: track,
+            source: trimmed,
+            customBytes: bytes,
+          ));
+          await _player.play(BytesSource(bytes));
         } else if (!kIsWeb && trimmed.isNotEmpty) {
+          unawaited(_loadCustomAudioSpectrum(
+            token: token,
+            track: track,
+            source: trimmed,
+            customBytes: null,
+          ));
           await _player.play(DeviceFileSource(trimmed));
         } else {
+          _activeProfile = _analyzeBuiltInTrack(track);
           await _player.play(BytesSource(generateAmbientWavBytes(track)));
         }
       } else {
         final wavBytes = generateAmbientWavBytes(track);
+        _activeProfile = _profileCache['builtIn_${track.name}'] ??
+            (AudioTempoAnalyzer.analyzeWavBytes(wavBytes) ??
+                AudioTempoAnalyzer.buildFallbackBeatProfile(track: track));
+        _profileCache['builtIn_${track.name}'] = _activeProfile!;
         await _player.play(BytesSource(wavBytes));
       }
-      _playing = true;
+      if (_sessionToken == token) {
+        _playing = true;
+        _paused = false;
+        _posStopwatch
+          ..reset()
+          ..start();
+      }
     } catch (_) {
       _playing = false;
+      _paused = false;
+      _posStopwatch.stop();
     }
   }
 
-  static Future<void> setVolume(double volume) async {
+  static Future<void> pause() async {
+    if (!_playing || _paused) return;
+    _lastKnownPosition = currentPlaybackPosition;
+    _posStopwatch.stop();
+    _paused = true;
     try {
-      await _player.setVolume(volume.clamp(0.0, 1.0));
+      await _player.pause();
+    } catch (_) {}
+  }
+
+  static Future<void> resume() async {
+    if (!_playing || !_paused) return;
+    _paused = false;
+    _posStopwatch
+      ..reset()
+      ..start();
+    try {
+      await _player.resume();
+    } catch (_) {}
+  }
+
+  static Future<void> setVolume(double volume) async {
+    _activeVolume = volume.clamp(0.0, 1.0);
+    try {
+      await _player.setVolume(_activeVolume);
     } catch (_) {}
   }
 
   static Future<void> stop() async {
+    _sessionToken++;
+    _playing = false;
+    _paused = false;
+    _lastKnownPosition = Duration.zero;
+    _posStopwatch
+      ..reset()
+      ..stop();
     try {
       await _player.stop();
     } catch (_) {}
-    _playing = false;
   }
 
   /// Generates a clean two-note PCM WAV notification chime (22050Hz 16-bit mono).
@@ -353,7 +571,6 @@ class AmbientAudioService {
       double harmonyFreq = 987.77;
 
       if (urgent) {
-        // Brisk triple alert ring: 0-0.22s, 0.30-0.52s, 0.60-0.86s
         if (t < 0.22) {
           env = math.sin((t / 0.22) * math.pi);
           baseFreq = 783.99;
@@ -368,7 +585,6 @@ class AmbientAudioService {
           harmonyFreq = 1567.98;
         }
       } else {
-        // Warm smartphone dual-pulse marimba ring: 0-0.28s, 0.36-0.74s
         if (t < 0.28) {
           env = math.sin((t / 0.28) * math.pi);
           baseFreq = 587.33;

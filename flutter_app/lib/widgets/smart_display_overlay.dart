@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import '../models/thermostat_state.dart';
@@ -95,6 +96,11 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     }
     if (oldWidget.settings.customVideoSource != widget.settings.customVideoSource ||
         oldWidget.settings.smartDisplayMode != widget.settings.smartDisplayMode ||
+        oldWidget.settings.smartDisplayVisualTheme != widget.settings.smartDisplayVisualTheme ||
+        oldWidget.settings.slideImages.isEmpty != widget.settings.slideImages.isEmpty ||
+        (widget.settings.slideImages.isEmpty &&
+            _effectiveMode == SmartDisplayMode.slideshow &&
+            oldWidget.slideIndex != widget.slideIndex) ||
         oldWidget.forcedAod != widget.forcedAod) {
       _syncVideoController();
     }
@@ -109,12 +115,39 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     super.dispose();
   }
 
+  SmartDisplayVisualTheme _activeThemeForMode(SystemSettingsState s, SmartDisplayMode mode) {
+    if (mode == SmartDisplayMode.slideshow) {
+      const cycle = [
+        SmartDisplayVisualTheme.sunset,
+        SmartDisplayVisualTheme.fireplace,
+        SmartDisplayVisualTheme.aurora,
+        SmartDisplayVisualTheme.winterSnow,
+        SmartDisplayVisualTheme.rainy,
+      ];
+      return cycle[widget.slideIndex % cycle.length];
+    }
+    return s.smartDisplayVisualTheme;
+  }
+
+  String _resolveWantedVideoSource(SystemSettingsState s, SmartDisplayMode mode) {
+    if (mode == SmartDisplayMode.aod) return '';
+    if (mode == SmartDisplayMode.silentVideoMp3) {
+      final custom = s.customVideoSource.trim();
+      if (custom.isNotEmpty) return custom;
+      return smartDisplayThemeVideoUrl(s.smartDisplayVisualTheme) ?? '';
+    }
+    if (mode == SmartDisplayMode.liveNature) {
+      return smartDisplayThemeVideoUrl(s.smartDisplayVisualTheme) ?? '';
+    }
+    if (mode == SmartDisplayMode.slideshow && s.slideImages.isEmpty) {
+      return smartDisplayThemeVideoUrl(_activeThemeForMode(s, mode)) ?? '';
+    }
+    return '';
+  }
+
   Future<void> _syncVideoController() async {
     final mode = _effectiveMode;
-    final wanted = (mode == SmartDisplayMode.silentVideoMp3 &&
-            widget.settings.customVideoSource.trim().isNotEmpty)
-        ? widget.settings.customVideoSource.trim()
-        : '';
+    final wanted = _resolveWantedVideoSource(widget.settings, mode);
 
     if (wanted == _activeVideoSource) {
       final ctrl = _videoCtrl;
@@ -153,7 +186,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
         return;
       }
       await ctrl.setLooping(true);
-      await ctrl.setVolume(0.0); // Video track stays muted; user MP3/ambient provides audio
+      await ctrl.setVolume(0.0); // Video stays muted; user MP3 / ambient playlist supplies audio
       if (!_paused) {
         await ctrl.play();
       }
@@ -194,12 +227,14 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
       if (_paused) {
         _animCtrl.stop();
         _videoCtrl?.pause();
+        AmbientAudioService.pause();
       } else {
         _animCtrl.repeat();
         if (_videoReady) {
           _videoCtrl?.setVolume(0.0);
           _videoCtrl?.play();
         }
+        AmbientAudioService.resume();
       }
     });
   }
@@ -399,9 +434,20 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // 1. Dynamic Full-Screen Visual / Video / Slide / Theme Backdrop Layer
+            // 1. Dynamic Full-Screen Visual / Video / Slide / Theme Backdrop Layer (+ Configurable Blur)
             Positioned.fill(
-              child: _buildBackgroundLayer(s),
+              child: ClipRect(
+                child: (mode != SmartDisplayMode.aod && s.smartDisplayBlur > 0.1)
+                    ? ImageFiltered(
+                        imageFilter: ui.ImageFilter.blur(
+                          sigmaX: s.smartDisplayBlur,
+                          sigmaY: s.smartDisplayBlur,
+                          tileMode: TileMode.mirror,
+                        ),
+                        child: _buildBackgroundLayer(s),
+                      )
+                    : _buildBackgroundLayer(s),
+              ),
             ),
 
             // Readability dark gradient scrim (except pure black AOD)
@@ -659,18 +705,23 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                                     if (s.equalizerEnabled && isAudioActive && !compactHeight) ...[
                                       const SizedBox(height: 16),
                                       SizedBox(
-                                        width: 210,
-                                        height: 30,
+                                        width: 224,
+                                        height: 34,
                                         child: AnimatedBuilder(
                                           animation: _animCtrl,
-                                          builder: (_, __) => CustomPaint(
-                                            painter: _SmartEqualizerPainter(
-                                              phase: _animCtrl.value * math.pi * 6,
-                                              style: s.equalizerStyle,
-                                              color: widget.accentColor,
-                                              intensity: s.ambientVolume.clamp(0.20, 1.0),
-                                            ),
-                                          ),
+                                          builder: (_, __) {
+                                            final pausedNow = _paused || !AmbientAudioService.isPlaying;
+                                            return CustomPaint(
+                                              painter: _SmartEqualizerPainter(
+                                                bands: AmbientAudioService.currentSpectrumBands(bandCount: 18),
+                                                beatPulse: AmbientAudioService.currentBeatPulse(),
+                                                paused: pausedNow,
+                                                style: s.equalizerStyle,
+                                                color: widget.accentColor,
+                                                intensity: s.ambientVolume.clamp(0.20, 1.0),
+                                              ),
+                                            );
+                                          },
                                         ),
                                       ),
                                     ],
@@ -900,8 +951,10 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
       );
     }
 
-    // 1. Muted Custom Video Loop in Sessiz Video + MP3 Mode
-    if (mode == SmartDisplayMode.silentVideoMp3 &&
+    // 1. Real Muted Video Backdrop (User Video in silentVideoMp3, or Wikimedia .webm Theme Video)
+    if ((mode == SmartDisplayMode.silentVideoMp3 ||
+            mode == SmartDisplayMode.liveNature ||
+            (mode == SmartDisplayMode.slideshow && s.slideImages.isEmpty)) &&
         _videoCtrl != null &&
         _videoReady &&
         _videoCtrl!.value.isInitialized) {
@@ -909,7 +962,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
       final vw = vSize.width > 0 ? vSize.width : 1280.0;
       final vh = vSize.height > 0 ? vSize.height : 720.0;
       return wrapTransition(
-        ValueKey('silent_video_${_activeVideoSource.hashCode}'),
+        ValueKey('video_bg_${_activeVideoSource.hashCode}'),
         Container(
           color: Colors.black,
           width: double.infinity,
@@ -927,7 +980,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
       );
     }
 
-    // 2. Uploaded Slideshow Photos (1 or more photos)
+    // 2. Uploaded Slideshow Photos (clean static presentation with slide transitions; no zoom drift)
     if (mode == SmartDisplayMode.slideshow && s.slideImages.isNotEmpty) {
       final safeIdx = widget.slideIndex % s.slideImages.length;
       final img = s.slideImages[safeIdx];
@@ -939,92 +992,47 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
             color: Colors.black,
             width: double.infinity,
             height: double.infinity,
-            child: AnimatedBuilder(
-              animation: _animCtrl,
-              builder: (_, child) {
-                final kenBurns = s.smartDisplayLayout == VisualLayoutMode.cover
-                    ? (1.0 + 0.04 * (0.5 - 0.5 * math.cos(_animCtrl.value * math.pi * 2)))
-                    : 1.0;
-                return Transform.scale(scale: kenBurns, child: child);
-              },
-              child: Image.memory(
-                bytes,
-                fit: fit,
-                width: double.infinity,
-                height: double.infinity,
-                gaplessPlayback: true,
-              ),
+            child: Image.memory(
+              bytes,
+              fit: fit,
+              width: double.infinity,
+              height: double.infinity,
+              gaplessPlayback: true,
             ),
           ),
         );
       }
     }
 
-    // 3. Built-in Live Photorealistic Themes + Real-time Animated Atmospheric Particles
-    final effectiveTheme = mode == SmartDisplayMode.slideshow
-        ? [
-            SmartDisplayVisualTheme.sunset,
-            SmartDisplayVisualTheme.fireplace,
-            SmartDisplayVisualTheme.aurora,
-            SmartDisplayVisualTheme.winterSnow,
-            SmartDisplayVisualTheme.rainy,
-          ][widget.slideIndex % 5]
-        : s.smartDisplayVisualTheme;
+    // 3. Static Theme Poster / Dark Minimalist Fallback while video buffers or in minimalist theme
+    final effectiveTheme = _activeThemeForMode(s, mode);
     final themeAsset = smartDisplayThemeAssetPath(effectiveTheme);
 
     return wrapTransition(
       ValueKey('theme_${mode.name}_${effectiveTheme.name}_${widget.slideIndex}'),
-      Stack(
-        fit: StackFit.expand,
-        children: [
-          if (themeAsset.isNotEmpty)
-            AnimatedBuilder(
-              animation: _animCtrl,
-              builder: (_, child) {
-                final t = _animCtrl.value * math.pi * 2;
-                final scale = 1.03 + 0.035 * (0.5 - 0.5 * math.cos(t));
-                final dx = math.sin(t) * 10.0;
-                final dy = math.cos(t * 0.5) * 6.0;
-                return Transform.translate(
-                  offset: Offset(dx, dy),
-                  child: Transform.scale(scale: scale, child: child),
-                );
-              },
+      themeAsset.isNotEmpty
+          ? Container(
+              color: Colors.black,
+              width: double.infinity,
+              height: double.infinity,
               child: Image.asset(
                 themeAsset,
                 fit: fit,
                 width: double.infinity,
                 height: double.infinity,
                 gaplessPlayback: true,
-                errorBuilder: (_, __, ___) => CustomPaint(
-                  painter: _SmartDisplayScenePainter(
-                    theme: effectiveTheme,
-                    phase: _animCtrl.value,
-                    drawBackdrop: true,
-                  ),
-                  size: Size.infinite,
-                ),
+                errorBuilder: (_, __, ___) => const ColoredBox(color: Color(0xFF0A0A10)),
               ),
             )
-          else
-            Container(color: const Color(0xFF0A0A10)),
-
-          // Real-time 60fps weather/ember/aurora/droplet motion layer on top of backdrop
-          IgnorePointer(
-            child: AnimatedBuilder(
-              animation: _animCtrl,
-              builder: (_, __) => CustomPaint(
-                painter: _SmartDisplayScenePainter(
-                  theme: effectiveTheme,
-                  phase: _animCtrl.value,
-                  drawBackdrop: themeAsset.isEmpty,
+          : Container(
+              decoration: const BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(0, -0.15),
+                  radius: 1.15,
+                  colors: [Color(0xFF1A1B24), Color(0xFF09090D)],
                 ),
-                size: Size.infinite,
               ),
             ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -1480,7 +1488,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
   Widget _buildRightQuickDrawer(bool tr) {
     final s = widget.settings;
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 270),
+      constraints: const BoxConstraints(maxWidth: 280),
       child: Container(
         padding: const EdgeInsets.all(11),
         decoration: BoxDecoration(
@@ -1514,6 +1522,30 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                             keepAwake: s.displaySleepMinutes == 0,
                           );
                         },
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              tr
+                  ? 'Bulanıklık (Blur): ${s.smartDisplayBlur.round()} px'
+                  : 'Backdrop Blur: ${s.smartDisplayBlur.round()} px',
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF93C5FD)),
+            ),
+            const SizedBox(height: 7),
+            Row(
+              children: [
+                for (final bl in [0.0, 4.0, 10.0, 18.0])
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: _QuickPill(
+                        label: bl == 0 ? (tr ? 'Net' : 'Clear') : '${bl.toInt()}px',
+                        active: (s.smartDisplayBlur - bl).abs() < 1.5,
+                        activeColor: const Color(0xFF38BDF8),
+                        onTap: () => widget.onUpdateSettings(s.copyWith(smartDisplayBlur: bl)),
                       ),
                     ),
                   ),
@@ -2183,30 +2215,42 @@ class _ModalArcDialPainter extends CustomPainter {
 }
 
 class _SmartEqualizerPainter extends CustomPainter {
-  final double phase;
+  final List<double> bands;
+  final double beatPulse;
+  final bool paused;
   final EqualizerStyle style;
   final Color color;
   final double intensity;
 
   const _SmartEqualizerPainter({
-    required this.phase,
+    required this.bands,
+    required this.beatPulse,
+    required this.paused,
     required this.style,
     required this.color,
     required this.intensity,
   });
 
+  double _bandAt(int i) {
+    if (paused || bands.isEmpty) return 0.0;
+    final idx = i.clamp(0, bands.length - 1);
+    return bands[idx].clamp(0.0, 1.0);
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
+    final count = bands.isEmpty ? 18 : bands.length;
     switch (style) {
       case EqualizerStyle.bars:
-        const count = 18;
         final barW = (size.width / count) * 0.56;
         final step = size.width / count;
         final paint = Paint()..style = PaintingStyle.fill;
         for (int i = 0; i < count; i++) {
-          final wave = 0.25 + 0.75 * (0.5 + 0.5 * math.sin(phase * 1.4 + i * 0.65));
-          final h = (size.height * wave * intensity).clamp(4.0, size.height);
-          paint.color = Color.lerp(color, const Color(0xFF38BDF8), i / count)!.withValues(alpha: 0.85);
+          final energy = _bandAt(i);
+          final h = paused
+              ? 3.0
+              : (3.0 + size.height * 0.88 * energy * (0.85 + beatPulse * 0.20)).clamp(3.0, size.height);
+          paint.color = Color.lerp(color, const Color(0xFF38BDF8), i / count)!.withValues(alpha: paused ? 0.35 : 0.88);
           canvas.drawRRect(
             RRect.fromRectAndRadius(
               Rect.fromLTWH(i * step + (step - barW) / 2, size.height - h, barW, h),
@@ -2219,22 +2263,34 @@ class _SmartEqualizerPainter extends CustomPainter {
       case EqualizerStyle.wave:
         final path = Path();
         final midY = size.height / 2;
-        for (double x = 0; x <= size.width; x += 4) {
-          final norm = x / size.width;
-          final y = midY +
-              math.sin(norm * math.pi * 4 + phase * 1.6) *
-                  (size.height * 0.36 * intensity) *
-                  math.sin(norm * math.pi);
-          if (x == 0) {
-            path.moveTo(x, y);
-          } else {
-            path.lineTo(x, y);
+        if (paused) {
+          path.moveTo(0, midY);
+          path.lineTo(size.width, midY);
+        } else {
+          final steps = count * 3;
+          for (int s = 0; s <= steps; s++) {
+            final norm = s / steps;
+            final x = norm * size.width;
+            final bandFloat = norm * (count - 1);
+            final b0 = bandFloat.floor().clamp(0, count - 1);
+            final b1 = (b0 + 1).clamp(0, count - 1);
+            final frac = bandFloat - b0;
+            final energy = _bandAt(b0) * (1.0 - frac) + _bandAt(b1) * frac;
+            final taper = math.sin(norm * math.pi);
+            final dir = (s.isEven ? 1.0 : -1.0) * math.sin(norm * math.pi * count);
+            final amp = size.height * 0.44 * (energy * 0.85 + beatPulse * 0.15) * taper * intensity;
+            final y = midY + dir * amp;
+            if (s == 0) {
+              path.moveTo(x, y);
+            } else {
+              path.lineTo(x, y);
+            }
           }
         }
         canvas.drawPath(
           path,
           Paint()
-            ..color = const Color(0xFF38BDF8).withValues(alpha: 0.90)
+            ..color = const Color(0xFF38BDF8).withValues(alpha: paused ? 0.35 : 0.92)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 2.4
             ..strokeCap = StrokeCap.round,
@@ -2242,269 +2298,67 @@ class _SmartEqualizerPainter extends CustomPainter {
         break;
       case EqualizerStyle.pulse:
         final center = Offset(size.width / 2, size.height / 2);
-        for (int r = 0; r < 3; r++) {
-          final t = ((phase / (math.pi * 2)) + r * 0.33) % 1.0;
-          final radius = 4.0 + t * (size.width * 0.38) * intensity;
+        if (paused) {
           canvas.drawOval(
-            Rect.fromCenter(center: center, width: radius * 2, height: (size.height * 0.85) * t + 4),
+            Rect.fromCenter(center: center, width: 14, height: 10),
             Paint()
-              ..color = color.withValues(alpha: (1.0 - t) * 0.75)
+              ..color = color.withValues(alpha: 0.35)
               ..style = PaintingStyle.stroke
-              ..strokeWidth = 2.0,
+              ..strokeWidth = 1.8,
           );
-        }
-        break;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _SmartEqualizerPainter oldDelegate) =>
-      oldDelegate.phase != phase || oldDelegate.style != style || oldDelegate.intensity != intensity;
-}
-
-class _SmartDisplayScenePainter extends CustomPainter {
-  final SmartDisplayVisualTheme theme;
-  final double phase;
-  final bool drawBackdrop;
-
-  const _SmartDisplayScenePainter({
-    required this.theme,
-    required this.phase,
-    this.drawBackdrop = true,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    switch (theme) {
-      case SmartDisplayVisualTheme.fireplace:
-        if (drawBackdrop) {
-          canvas.drawRect(
-            rect,
-            Paint()
-              ..shader = const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF1A0905), Color(0xFF451306), Color(0xFF0E0402)],
-              ).createShader(rect),
-          );
-        }
-        // Flickering warm fire glow pulse & floating embers
-        final emberCenter = Offset(size.width * 0.5, size.height * 0.72);
-        final flicker = 0.5 + 0.5 * math.sin(phase * math.pi * 10);
-        final glowR = size.shortestSide * (0.46 + 0.06 * flicker);
-        canvas.drawCircle(
-          emberCenter,
-          glowR,
-          Paint()
-            ..shader = RadialGradient(
-              colors: [
-                const Color(0xFFEA580C).withValues(alpha: drawBackdrop ? 0.65 : (0.14 + 0.12 * flicker)),
-                const Color(0xFF9A3412).withValues(alpha: drawBackdrop ? 0.25 : 0.06),
-                Colors.transparent,
-              ],
-            ).createShader(Rect.fromCircle(center: emberCenter, radius: glowR)),
-        );
-        for (int i = 0; i < 28; i++) {
-          final seed = i * 1.37;
-          final progress = (phase * 1.6 + seed) % 1.0;
-          final x = size.width * (0.22 + 0.56 * ((math.sin(seed * 7.1) + 1) / 2)) +
-              math.sin(progress * math.pi * 3 + seed) * 16;
-          final y = size.height * (0.90 - progress * 0.70);
-          canvas.drawCircle(
-            Offset(x, y),
-            1.6 + (i % 3) * 0.7,
-            Paint()..color = const Color(0xFFFBBF24).withValues(alpha: (1.0 - progress) * 0.72),
-          );
-        }
-        break;
-
-      case SmartDisplayVisualTheme.rainy:
-        if (drawBackdrop) {
-          canvas.drawRect(
-            rect,
-            Paint()
-              ..shader = const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF0B1628), Color(0xFF162B47), Color(0xFF09111E)],
-              ).createShader(rect),
-          );
-        }
-        final rainPaint = Paint()
-          ..color = const Color(0xFFBFDBFE).withValues(alpha: drawBackdrop ? 0.34 : 0.22)
-          ..strokeWidth = 1.3
-          ..strokeCap = StrokeCap.round;
-        for (int i = 0; i < 42; i++) {
-          final col = ((i * 29) % 100) / 100.0;
-          final fall = (phase * 3.0 + i * 0.13) % 1.0;
-          final x = col * size.width - fall * 24;
-          final y = fall * (size.height + 60) - 30;
-          canvas.drawLine(Offset(x, y), Offset(x - 5, y + 20), rainPaint);
-        }
-        // Slow sliding water droplets on window glass
-        for (int d = 0; d < 12; d++) {
-          final col = ((d * 41 + 13) % 100) / 100.0;
-          final drip = (phase * 0.65 + d * 0.19) % 1.0;
-          final x = col * size.width + math.sin(drip * math.pi * 4 + d) * 3;
-          final y = drip * size.height;
-          canvas.drawCircle(
-            Offset(x, y),
-            2.2 + (d % 2),
-            Paint()..color = Colors.white.withValues(alpha: 0.28),
-          );
-        }
-        break;
-
-      case SmartDisplayVisualTheme.winterSnow:
-        if (drawBackdrop) {
-          canvas.drawRect(
-            rect,
-            Paint()
-              ..shader = const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF0C1A32), Color(0xFF1E3A5F), Color(0xFF0B1424)],
-              ).createShader(rect),
-          );
-        }
-        for (int i = 0; i < 52; i++) {
-          final seed = i * 0.73;
-          final fall = (phase * 1.3 + seed) % 1.0;
-          final x = (((i * 37) % 100) / 100.0) * size.width + math.sin(fall * math.pi * 2 + seed) * 22;
-          final y = fall * size.height;
-          canvas.drawCircle(
-            Offset(x, y),
-            1.4 + (i % 4) * 0.75,
-            Paint()..color = Colors.white.withValues(alpha: (0.62 - fall * 0.28).clamp(0.1, 0.7)),
-          );
-        }
-        break;
-
-      case SmartDisplayVisualTheme.sunset:
-        if (drawBackdrop) {
-          canvas.drawRect(
-            rect,
-            Paint()
-              ..shader = const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: [0.0, 0.42, 0.56, 0.78, 1.0],
-                colors: [
-                  Color(0xFF2E384E),
-                  Color(0xFFB4785A),
-                  Color(0xFFE09F67),
-                  Color(0xFF174A54),
-                  Color(0xFF1B242B),
-                ],
-              ).createShader(rect),
-          );
-        }
-        final sunCenter = Offset(size.width * 0.62, size.height * 0.44);
-        final pulse = 0.5 + 0.5 * math.sin(phase * math.pi * 2);
-        final sunRadius = size.shortestSide * (0.28 + 0.04 * pulse);
-        canvas.drawCircle(
-          sunCenter,
-          sunRadius,
-          Paint()
-            ..shader = RadialGradient(
-              colors: [
-                const Color(0xFFFDE68A).withValues(alpha: drawBackdrop ? 0.65 : (0.14 + 0.08 * pulse)),
-                const Color(0xFFF59E0B).withValues(alpha: drawBackdrop ? 0.20 : 0.06),
-                Colors.transparent,
-              ],
-            ).createShader(Rect.fromCircle(center: sunCenter, radius: sunRadius)),
-        );
-        final wavePaint = Paint()
-          ..color = const Color(0xFFFDE68A).withValues(alpha: drawBackdrop ? 0.16 : 0.10)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.4;
-        for (int w = 0; w < 4; w++) {
-          final baseY = size.height * (0.68 + w * 0.07);
-          final path = Path();
-          for (double x = 0; x <= size.width; x += 14) {
-            final y = baseY + math.sin((x / size.width) * math.pi * 4 + phase * math.pi * 2 + w) * 4;
-            if (x == 0) {
-              path.moveTo(x, y);
+        } else {
+          double lowAvg = 0.0;
+          double midAvg = 0.0;
+          double highAvg = 0.0;
+          for (int i = 0; i < count; i++) {
+            if (i < 6) {
+              lowAvg += _bandAt(i);
+            } else if (i < 12) {
+              midAvg += _bandAt(i);
             } else {
-              path.lineTo(x, y);
+              highAvg += _bandAt(i);
             }
           }
-          canvas.drawPath(path, wavePaint);
-        }
-        break;
+          lowAvg /= 6.0;
+          midAvg /= 6.0;
+          highAvg /= math.max(1, count - 12);
 
-      case SmartDisplayVisualTheme.aurora:
-        if (drawBackdrop) {
-          canvas.drawRect(
-            rect,
-            Paint()
-              ..shader = const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF040814), Color(0xFF0A1D2A), Color(0xFF070B16)],
-              ).createShader(rect),
-          );
-        }
-        for (int b = 0; b < 3; b++) {
-          final bandY = size.height * (0.24 + b * 0.11);
-          final ribbon = Path()..moveTo(0, bandY);
-          for (double x = 0; x <= size.width; x += 16) {
-            final y = bandY + math.sin((x / size.width) * math.pi * 2.5 + phase * math.pi * 2 + b * 1.4) * 28;
-            ribbon.lineTo(x, y);
+          final ringDrives = [
+            (lowAvg * 0.65 + beatPulse * 0.35).clamp(0.08, 1.0),
+            (midAvg * 0.70 + beatPulse * 0.30).clamp(0.08, 1.0),
+            (highAvg * 0.75 + beatPulse * 0.25).clamp(0.08, 1.0),
+          ];
+          for (int r = 0; r < ringDrives.length; r++) {
+            final drive = ringDrives[r];
+            final rx = 12.0 + drive * (size.width * 0.42) * (1.0 - r * 0.16);
+            final ry = 4.0 + drive * (size.height * 0.46) * (1.0 - r * 0.14);
+            canvas.drawOval(
+              Rect.fromCenter(center: center, width: rx * 2, height: ry * 2),
+              Paint()
+                ..color = Color.lerp(color, const Color(0xFF38BDF8), r / 2)!
+                    .withValues(alpha: (0.28 + drive * 0.65).clamp(0.2, 0.95))
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = 1.6 + beatPulse * 1.1,
+            );
           }
-          ribbon.lineTo(size.width, bandY + 85);
-          ribbon.lineTo(0, bandY + 85);
-          ribbon.close();
-          canvas.drawPath(
-            ribbon,
-            Paint()
-              ..shader = LinearGradient(
-                colors: [
-                  (b == 1 ? const Color(0xFF8B5CF6) : const Color(0xFF10B981))
-                      .withValues(alpha: drawBackdrop ? 0.34 : 0.16),
-                  Colors.transparent,
-                ],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ).createShader(Rect.fromLTWH(0, bandY - 40, size.width, 130)),
-          );
         }
-        // Subtle twinkling night stars
-        for (int st = 0; st < 20; st++) {
-          final sx = (((st * 53) % 97) / 97.0) * size.width;
-          final sy = (((st * 31) % 45) / 100.0) * size.height;
-          final tw = 0.25 + 0.55 * (0.5 + 0.5 * math.sin(phase * math.pi * 4 + st));
-          canvas.drawCircle(Offset(sx, sy), 1.1, Paint()..color = Colors.white.withValues(alpha: tw));
-        }
-        break;
-
-      case SmartDisplayVisualTheme.minimalist:
-        if (drawBackdrop) {
-          canvas.drawRect(
-            rect,
-            Paint()
-              ..shader = const RadialGradient(
-                center: Alignment(0, -0.1),
-                radius: 1.1,
-                colors: [Color(0xFF1B1C24), Color(0xFF09090D)],
-              ).createShader(rect),
-          );
-        }
-        final breathe = 0.25 + 0.04 * math.sin(phase * math.pi * 2);
-        canvas.drawCircle(
-          Offset(size.width / 2, size.height / 2),
-          size.shortestSide * breathe,
-          Paint()
-            ..color = Colors.white.withValues(alpha: 0.05)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1.5,
-        );
         break;
     }
   }
 
   @override
-  bool shouldRepaint(covariant _SmartDisplayScenePainter oldDelegate) =>
-      oldDelegate.theme != theme || oldDelegate.phase != phase || oldDelegate.drawBackdrop != drawBackdrop;
+  bool shouldRepaint(covariant _SmartEqualizerPainter oldDelegate) {
+    if (oldDelegate.paused != paused ||
+        oldDelegate.style != style ||
+        oldDelegate.color != color ||
+        oldDelegate.intensity != intensity ||
+        oldDelegate.beatPulse != beatPulse ||
+        oldDelegate.bands.length != bands.length) {
+      return true;
+    }
+    for (int i = 0; i < bands.length; i++) {
+      if ((oldDelegate.bands[i] - bands[i]).abs() > 0.004) return true;
+    }
+    return false;
+  }
 }
