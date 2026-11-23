@@ -904,7 +904,10 @@ void main() {
       smartDisplayThemeVideoUrl(SmartDisplayVisualTheme.aurora),
       'https://upload.wikimedia.org/wikipedia/commons/transcoded/d/df/Aurora_borealis_timelapse.webm/Aurora_borealis_timelapse.webm.480p.vp9.webm',
     );
-    expect(smartDisplayThemeVideoUrl(SmartDisplayVisualTheme.minimalist), isNull);
+    expect(
+      smartDisplayThemeVideoUrl(SmartDisplayVisualTheme.minimalist),
+      'https://upload.wikimedia.org/wikipedia/commons/transcoded/7/72/Waves_off_of_Hurricane_Point_Vista_Point%2C_Big_Sur.webm/Waves_off_of_Hurricane_Point_Vista_Point%2C_Big_Sur.webm.480p.vp9.webm',
+    );
 
     final withBlur = SystemSettingsState.defaults().copyWith(smartDisplayBlur: 12.0);
     final restoredBlur = SystemSettingsState.fromJson(withBlur.toJson());

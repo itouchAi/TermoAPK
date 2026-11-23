@@ -418,6 +418,18 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
       }
       return;
     }
+    if (!AmbientAudioService.canPlayCustomAudio(source)) {
+      await AmbientAudioService.stop();
+      if (mounted) {
+        setState(() {
+          _audioPreviewPlaying = false;
+          _statusBanner = _lang == LangCode.tr
+              ? 'Tarayıcı yenilendiği için yerel MP3 dosyasını tekrar seçin veya URL girin.'
+              : 'Re-select your local MP3 file or enter an MP3 URL after browser reload.';
+        });
+      }
+      return;
+    }
     if (_draft.ambientSoundtrack != AmbientSoundtrack.customMp3 && mounted) {
       setState(() {
         _draft = _draft.copyWith(ambientSoundtrack: AmbientSoundtrack.customMp3);
@@ -428,7 +440,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
       customSource: source,
       volume: _draft.ambientVolume,
     );
-    if (mounted) setState(() => _audioPreviewPlaying = true);
+    if (mounted) setState(() => _audioPreviewPlaying = AmbientAudioService.isPlaying);
   }
 
   Future<void> _pickMultipleSlideImages() async {
@@ -1706,7 +1718,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           (SmartDisplayVisualTheme.winterSnow, '❄️ ${tr ? 'Kış & Kar' : 'Winter & Snow'}'),
           (SmartDisplayVisualTheme.sunset, '🌅 ${tr ? 'Gün Batımı' : 'Sunset'}'),
           (SmartDisplayVisualTheme.aurora, '🌌 ${tr ? 'Kutup Işıkları' : 'Aurora'}'),
-          (SmartDisplayVisualTheme.minimalist, '🌚 Minimalist'),
+          (SmartDisplayVisualTheme.minimalist, '🌊 ${tr ? 'Okyanus Dalgaları' : 'Ocean Waves'}'),
         ];
 
         final eqStyles = [

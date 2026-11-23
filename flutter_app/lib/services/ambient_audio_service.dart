@@ -273,15 +273,11 @@ class AmbientAudioService {
     return buffer.buffer.asUint8List();
   }
 
-  static AudioSpectrumProfile _analyzeBuiltInTrack(AmbientSoundtrack track) {
-    final key = 'builtIn_${track.name}';
-    final cached = _profileCache[key];
-    if (cached != null) return cached;
-    final wav = generateAmbientWavBytes(track);
-    final analyzed = AudioTempoAnalyzer.analyzeWavBytes(wav) ??
-        AudioTempoAnalyzer.buildFallbackBeatProfile(track: track);
-    _profileCache[key] = analyzed;
-    return analyzed;
+  static bool canPlayCustomAudio(String customSource) {
+    final trimmed = customSource.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return true;
+    if (kIsWeb) return _customAudioBytes != null;
+    return trimmed.isNotEmpty;
   }
 
   static Future<void> _loadCustomAudioSpectrum({
@@ -330,54 +326,55 @@ class AmbientAudioService {
 
     try {
       await _player.stop();
-      if (track == AmbientSoundtrack.silent || volume <= 0.005) {
+      if (track != AmbientSoundtrack.customMp3 || volume <= 0.005) {
         _playing = false;
         _paused = false;
         _activeProfile = null;
         return;
       }
+
+      final trimmed = customSource.trim();
+      final isHttpUrl = trimmed.startsWith('http://') || trimmed.startsWith('https://');
+      final hasWebBytes = kIsWeb && _customAudioBytes != null;
+      final hasNativeFile = !kIsWeb && trimmed.isNotEmpty;
+
+      if (!isHttpUrl && !hasWebBytes && !hasNativeFile) {
+        _playing = false;
+        _paused = false;
+        _activeProfile = null;
+        return;
+      }
+
       await _player.setReleaseMode(ReleaseMode.loop);
       await _player.setVolume(_activeVolume);
 
-      final trimmed = customSource.trim();
-      if (track == AmbientSoundtrack.customMp3) {
-        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-          unawaited(_loadCustomAudioSpectrum(
-            token: token,
-            track: track,
-            source: trimmed,
-            customBytes: null,
-          ));
-          await _player.play(UrlSource(trimmed));
-        } else if (kIsWeb && _customAudioBytes != null) {
-          final bytes = _customAudioBytes!;
-          unawaited(_loadCustomAudioSpectrum(
-            token: token,
-            track: track,
-            source: trimmed,
-            customBytes: bytes,
-          ));
-          await _player.play(BytesSource(bytes));
-        } else if (!kIsWeb && trimmed.isNotEmpty) {
-          unawaited(_loadCustomAudioSpectrum(
-            token: token,
-            track: track,
-            source: trimmed,
-            customBytes: null,
-          ));
-          await _player.play(DeviceFileSource(trimmed));
-        } else {
-          _activeProfile = _analyzeBuiltInTrack(track);
-          await _player.play(BytesSource(generateAmbientWavBytes(track)));
-        }
+      if (isHttpUrl) {
+        unawaited(_loadCustomAudioSpectrum(
+          token: token,
+          track: track,
+          source: trimmed,
+          customBytes: null,
+        ));
+        await _player.play(UrlSource(trimmed));
+      } else if (hasWebBytes) {
+        final bytes = _customAudioBytes!;
+        unawaited(_loadCustomAudioSpectrum(
+          token: token,
+          track: track,
+          source: trimmed,
+          customBytes: bytes,
+        ));
+        await _player.play(BytesSource(bytes));
       } else {
-        final wavBytes = generateAmbientWavBytes(track);
-        _activeProfile = _profileCache['builtIn_${track.name}'] ??
-            (AudioTempoAnalyzer.analyzeWavBytes(wavBytes) ??
-                AudioTempoAnalyzer.buildFallbackBeatProfile(track: track));
-        _profileCache['builtIn_${track.name}'] = _activeProfile!;
-        await _player.play(BytesSource(wavBytes));
+        unawaited(_loadCustomAudioSpectrum(
+          token: token,
+          track: track,
+          source: trimmed,
+          customBytes: null,
+        ));
+        await _player.play(DeviceFileSource(trimmed));
       }
+
       if (_sessionToken == token) {
         _playing = true;
         _paused = false;
