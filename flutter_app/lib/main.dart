@@ -78,6 +78,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   VisualCustomizationState _visual = VisualCustomizationState.defaults();
   bool _savedNotice = false;
   bool _ambientMode = false;
+  bool _ambientForcedAod = false;
   bool _screensaverPreview = false;
   bool _aiCallOpen = false;
   AiCallReason _aiCallReason = AiCallReason.ignition;
@@ -141,12 +142,16 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           if (_ambientMode) {
             _ambientElapsedSeconds++;
             final sleepMinutes = _settings.displaySleepMinutes;
-            if (sleepMinutes > 0 && _ambientElapsedSeconds >= sleepMinutes * 60) {
-              _exitAmbientMode();
+            if (!_ambientForcedAod &&
+                _settings.smartDisplayMode != SmartDisplayMode.aod &&
+                sleepMinutes > 0 &&
+                _ambientElapsedSeconds >= sleepMinutes * 60) {
+              _ambientForcedAod = true;
+              AmbientAudioService.stop();
             }
-            if (_settings.smartDisplayMode == SmartDisplayMode.slideshow) {
+            if (!_ambientForcedAod && _settings.smartDisplayMode == SmartDisplayMode.slideshow) {
               _slideTicks++;
-              final slideCount = _settings.slideImages.isNotEmpty ? _settings.slideImages.length : 4;
+              final slideCount = _settings.slideImages.isNotEmpty ? _settings.slideImages.length : 5;
               if (_slideTicks >= _settings.slideDurationSeconds) {
                 _slideTicks = 0;
                 _slideIndex = (_slideIndex + 1) % slideCount;
@@ -191,7 +196,23 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
   void _resetIdleTimer() {
     _idleTimer?.cancel();
-    if (_settings.termoBotEnabled && !_screensaverPreview && !_aiCallOpen) {
+    if (_settings.smartDisplayEnabled &&
+        _settings.smartDisplayAutoMinutes > 0 &&
+        !_ambientMode &&
+        !_aiCallOpen) {
+      _idleTimer = Timer(Duration(minutes: _settings.smartDisplayAutoMinutes), () {
+        if (mounted &&
+            _settings.smartDisplayEnabled &&
+            !_ambientMode &&
+            !_voiceOpen &&
+            !_modalSheetOpen &&
+            !_showBootCeremony &&
+            !_aiCallOpen &&
+            !_screensaverPreview) {
+          _enterAmbientMode();
+        }
+      });
+    } else if (_settings.termoBotEnabled && !_screensaverPreview && !_aiCallOpen) {
       _idleTimer = Timer(Duration(seconds: _settings.screensaverIdleSeconds), () {
         if (mounted &&
             _settings.termoBotEnabled &&
@@ -315,13 +336,17 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   }
 
   void _enterAmbientMode() {
+    _idleTimer?.cancel();
     setState(() {
       _now = DateTime.now();
       _slideTicks = 0;
       _ambientElapsedSeconds = 0;
+      _ambientForcedAod = false;
       _ambientMode = true;
     });
-    if (_settings.ambientSoundtrack != AmbientSoundtrack.silent && _settings.ambientVolume > 0.01) {
+    if (_settings.smartDisplayMode != SmartDisplayMode.aod &&
+        _settings.ambientSoundtrack != AmbientSoundtrack.silent &&
+        _settings.ambientVolume > 0.01) {
       AmbientAudioService.start(
         track: _settings.ambientSoundtrack,
         customSource: _settings.customAudioSource.isNotEmpty
@@ -342,13 +367,16 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     if (_ambientMode) {
       setState(() {
         _ambientMode = false;
+        _ambientForcedAod = false;
         _ambientElapsedSeconds = 0;
       });
     } else {
+      _ambientForcedAod = false;
       _ambientElapsedSeconds = 0;
     }
     AmbientAudioService.stop();
     HardwareService.exitSmartDisplayHardware();
+    _resetIdleTimer();
   }
 
   void _appendEspLog(
@@ -991,18 +1019,21 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                     child: Icon(Icons.dashboard_customize_outlined, size: 17, color: palette.textPrimary),
                                   ),
 
-                                  if (_settings.smartDisplayEnabled) ...[
-                                    const SizedBox(width: 5),
-                                    _TopActionButton(
-                                      palette: palette,
-                                        onTap: () {
-                                          _triggerHaptic();
-                                          _enterAmbientMode();
-                                        },
-                                        child: Icon(Icons.tv_rounded, size: 17, color: palette.textPrimary),
-                                      ),
-                                    ],
-                                    const SizedBox(width: 5),
+                                  const SizedBox(width: 5),
+                                  // Always-available Manual Smart Display TV Launch Button
+                                  _TopActionButton(
+                                    palette: palette,
+                                    onTap: () {
+                                      _triggerHaptic();
+                                      _enterAmbientMode();
+                                    },
+                                    child: Icon(
+                                      Icons.tv_rounded,
+                                      size: 17,
+                                      color: _settings.smartDisplayEnabled ? activeColor : palette.textPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 5),
 
                                     // System Settings Sheet
                                     _TopActionButton(
@@ -1195,14 +1226,35 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                    accentColor: activeColor,
                    lang: _lang,
                    paletteTag: _visual.theme.name,
+                   forcedAod: _ambientForcedAod,
+                   onWakeFromAutoAod: () {
+                     setState(() {
+                       _ambientForcedAod = false;
+                       _ambientElapsedSeconds = 0;
+                     });
+                     if (_settings.ambientSoundtrack != AmbientSoundtrack.silent &&
+                         _settings.ambientVolume > 0.01) {
+                       AmbientAudioService.start(
+                         track: _settings.ambientSoundtrack,
+                         customSource: _settings.customAudioSource.isNotEmpty
+                             ? _settings.customAudioSource
+                             : _settings.customAudioLabel,
+                         volume: _settings.ambientVolume,
+                       );
+                     }
+                   },
                    onChangeTargetTemp: (next) => _changeTarget(next),
                    onSelectPreset: _selectPreset,
                    onUpdateSettings: (next) {
-                     setState(() => _settings = next);
+                     setState(() {
+                       _settings = next;
+                       _ambientForcedAod = false;
+                       _ambientElapsedSeconds = 0;
+                     });
                      _persist();
                    },
                    onStepSlideIndex: (delta) {
-                     final total = _settings.slideImages.isNotEmpty ? _settings.slideImages.length : 4;
+                     final total = _settings.slideImages.isNotEmpty ? _settings.slideImages.length : 5;
                      setState(() {
                        _slideTicks = 0;
                        _slideIndex = ((_slideIndex + delta) % total + total) % total;

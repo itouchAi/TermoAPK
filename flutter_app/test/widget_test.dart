@@ -58,12 +58,15 @@ void main() {
       ambientSoundtrack: AmbientSoundtrack.customMp3,
       customAudioLabel: 'Lo-Fi Chill.mp3',
       customAudioSource: '/storage/emulated/0/Music/Lo-Fi Chill.mp3',
+      customVideoLabel: 'fireplace_loop.mp4',
+      customVideoSource: 'https://example.com/fireplace_loop.mp4',
       ambientVolume: 0.75,
       marqueeTrackEnabled: false,
       equalizerEnabled: true,
       equalizerStyle: EqualizerStyle.wave,
       displayBrightness: 50,
-      displaySleepMinutes: 15,
+      smartDisplayAutoMinutes: 15,
+      displaySleepMinutes: 60,
       oledPixelShiftEnabled: false,
       weatherAlertsEnabled: false,
       notifyChimeEnabled: false,
@@ -89,13 +92,16 @@ void main() {
     expect(restored.ambientSoundtrack, AmbientSoundtrack.customMp3);
     expect(restored.customAudioLabel, 'Lo-Fi Chill.mp3');
     expect(restored.customAudioSource, '/storage/emulated/0/Music/Lo-Fi Chill.mp3');
+    expect(restored.customVideoLabel, 'fireplace_loop.mp4');
+    expect(restored.customVideoSource, 'https://example.com/fireplace_loop.mp4');
     expect(restored.ambientTrackTitle(LangCode.tr), 'Lo-Fi Chill.mp3');
     expect(restored.ambientVolume, 0.75);
     expect(restored.marqueeTrackEnabled, isFalse);
     expect(restored.equalizerEnabled, isTrue);
     expect(restored.equalizerStyle, EqualizerStyle.wave);
     expect(restored.displayBrightness, 50);
-    expect(restored.displaySleepMinutes, 15);
+    expect(restored.smartDisplayAutoMinutes, 15);
+    expect(restored.displaySleepMinutes, 60);
     expect(restored.oledPixelShiftEnabled, isFalse);
     expect(restored.weatherAlertsEnabled, isFalse);
     expect(restored.notifyChimeEnabled, isFalse);
@@ -113,9 +119,16 @@ void main() {
     expect(restored.screensaverCustomBgLabel, 'example.com');
     expect(restored.mascotScale, 1.35);
 
-    final clamped = initial.copyWith(bootCeremonyDurationMs: 9000, mascotScale: 3.0);
+    final clamped = initial.copyWith(
+      bootCeremonyDurationMs: 9000,
+      mascotScale: 3.0,
+      smartDisplayAutoMinutes: 99,
+      displaySleepMinutes: 200,
+    );
     expect(clamped.bootCeremonyDurationMs, 3500);
     expect(clamped.mascotScale, 1.60);
+    expect(clamped.smartDisplayAutoMinutes, 60);
+    expect(clamped.displaySleepMinutes, 120);
     expect(initial.copyWith(mascotScale: 0.10).mascotScale, 0.60);
   });
 
@@ -836,5 +849,34 @@ void main() {
     expect(SystemSettingsState.extractCityName('Ev (Kadıköy)'), 'Kadıköy');
     expect(SystemSettingsState.extractCityName('Yazlık · İzmir'), 'İzmir');
     expect(SystemSettingsState.extractCityName('Ankara'), 'Ankara');
+  });
+
+  test('Smart Display theme assets, singlePhoto migration, and Smart Display vs Maskot mutual exclusion', () {
+    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.fireplace), 'assets/themes/fireplace.jpg');
+    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.rainy), 'assets/themes/rainy.jpg');
+    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.winterSnow), 'assets/themes/winter_snow.jpg');
+    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.sunset), 'assets/themes/sunset.jpg');
+    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.aurora), 'assets/themes/aurora.jpg');
+    expect(smartDisplayThemeAssetPath(SmartDisplayVisualTheme.minimalist), isNull);
+
+    // Legacy singlePhoto + singleDisplayImage cleanly migrate to slideshow + slideImages,
+    // and simultaneous smartDisplayEnabled + termoBotEnabled resolves in favor of Maskot
+    final legacyMap = SystemSettingsState.defaults().toJson();
+    legacyMap['smartDisplayEnabled'] = true;
+    legacyMap['termoBotEnabled'] = true;
+    legacyMap['smartDisplayMode'] = 'singlePhoto';
+    legacyMap['slideImages'] = [];
+    legacyMap['singleDisplayImage'] = SmartDisplaySlideImage(
+      id: 'legacy_1',
+      name: 'legacy_wall.png',
+      dataBase64: base64Encode([9, 8, 7, 6]),
+    ).toJson();
+
+    final migrated = SystemSettingsState.fromJson(legacyMap);
+    expect(migrated.smartDisplayMode, SmartDisplayMode.slideshow);
+    expect(migrated.slideImages.length, 1);
+    expect(migrated.slideImages.first.id, 'legacy_1');
+    expect(migrated.termoBotEnabled, isTrue);
+    expect(migrated.smartDisplayEnabled, isFalse);
   });
 }

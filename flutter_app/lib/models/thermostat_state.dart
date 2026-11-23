@@ -725,6 +725,23 @@ enum SmartDisplayVisualTheme {
   minimalist,
 }
 
+String smartDisplayThemeAssetPath(SmartDisplayVisualTheme theme) {
+  switch (theme) {
+    case SmartDisplayVisualTheme.fireplace:
+      return 'assets/themes/fireplace.jpg';
+    case SmartDisplayVisualTheme.rainy:
+      return 'assets/themes/rainy.jpg';
+    case SmartDisplayVisualTheme.winterSnow:
+      return 'assets/themes/winter_snow.jpg';
+    case SmartDisplayVisualTheme.sunset:
+      return 'assets/themes/sunset.jpg';
+    case SmartDisplayVisualTheme.aurora:
+      return 'assets/themes/aurora.jpg';
+    case SmartDisplayVisualTheme.minimalist:
+      return '';
+  }
+}
+
 enum EqualizerStyle {
   bars,
   wave,
@@ -1116,11 +1133,14 @@ class SystemSettingsState {
   final AmbientSoundtrack ambientSoundtrack;
   final String customAudioLabel;
   final String customAudioSource;
+  final String customVideoLabel;
+  final String customVideoSource;
   final double ambientVolume;
   final bool marqueeTrackEnabled;
   final bool equalizerEnabled;
   final EqualizerStyle equalizerStyle;
   final int displayBrightness;
+  final int smartDisplayAutoMinutes;
   final int displaySleepMinutes;
   final bool oledPixelShiftEnabled;
   final bool notifications3hEnabled;
@@ -1189,11 +1209,14 @@ class SystemSettingsState {
     required this.ambientSoundtrack,
     required this.customAudioLabel,
     required this.customAudioSource,
+    this.customVideoLabel = '',
+    this.customVideoSource = '',
     required this.ambientVolume,
     required this.marqueeTrackEnabled,
     required this.equalizerEnabled,
     required this.equalizerStyle,
     required this.displayBrightness,
+    this.smartDisplayAutoMinutes = 5,
     required this.displaySleepMinutes,
     required this.oledPixelShiftEnabled,
     required this.notifications3hEnabled,
@@ -1266,8 +1289,8 @@ class SystemSettingsState {
         telegramChatId: '',
         googleHomeLinked: false,
         googleHomeRoom: 'Salon',
-        smartDisplayEnabled: true,
-        smartDisplayMode: SmartDisplayMode.slideshow,
+        smartDisplayEnabled: false,
+        smartDisplayMode: SmartDisplayMode.liveNature,
         slideDurationSeconds: 15,
         slideEffect: SlideTransitionEffect.slide,
         smartDisplayLayout: VisualLayoutMode.cover,
@@ -1277,12 +1300,15 @@ class SystemSettingsState {
         ambientSoundtrack: AmbientSoundtrack.fireplaceCrackling,
         customAudioLabel: '',
         customAudioSource: '',
+        customVideoLabel: '',
+        customVideoSource: '',
         ambientVolume: 0.5,
         marqueeTrackEnabled: true,
         equalizerEnabled: true,
         equalizerStyle: EqualizerStyle.bars,
         displayBrightness: 85,
-        displaySleepMinutes: 0,
+        smartDisplayAutoMinutes: 5,
+        displaySleepMinutes: 15,
         oledPixelShiftEnabled: true,
         notifications3hEnabled: true,
         emergencyBoilerAlerts: true,
@@ -1414,11 +1440,14 @@ class SystemSettingsState {
     AmbientSoundtrack? ambientSoundtrack,
     String? customAudioLabel,
     String? customAudioSource,
+    String? customVideoLabel,
+    String? customVideoSource,
     double? ambientVolume,
     bool? marqueeTrackEnabled,
     bool? equalizerEnabled,
     EqualizerStyle? equalizerStyle,
     int? displayBrightness,
+    int? smartDisplayAutoMinutes,
     int? displaySleepMinutes,
     bool? oledPixelShiftEnabled,
     bool? notifications3hEnabled,
@@ -1487,12 +1516,15 @@ class SystemSettingsState {
       ambientSoundtrack: ambientSoundtrack ?? this.ambientSoundtrack,
       customAudioLabel: customAudioLabel ?? this.customAudioLabel,
       customAudioSource: customAudioSource ?? this.customAudioSource,
+      customVideoLabel: customVideoLabel ?? this.customVideoLabel,
+      customVideoSource: customVideoSource ?? this.customVideoSource,
       ambientVolume: (ambientVolume ?? this.ambientVolume).clamp(0.0, 1.0),
       marqueeTrackEnabled: marqueeTrackEnabled ?? this.marqueeTrackEnabled,
       equalizerEnabled: equalizerEnabled ?? this.equalizerEnabled,
       equalizerStyle: equalizerStyle ?? this.equalizerStyle,
       displayBrightness: (displayBrightness ?? this.displayBrightness).clamp(10, 100),
-      displaySleepMinutes: displaySleepMinutes ?? this.displaySleepMinutes,
+      smartDisplayAutoMinutes: (smartDisplayAutoMinutes ?? this.smartDisplayAutoMinutes).clamp(0, 60),
+      displaySleepMinutes: (displaySleepMinutes ?? this.displaySleepMinutes).clamp(0, 120),
       oledPixelShiftEnabled: oledPixelShiftEnabled ?? this.oledPixelShiftEnabled,
       notifications3hEnabled: notifications3hEnabled ?? this.notifications3hEnabled,
       emergencyBoilerAlerts: emergencyBoilerAlerts ?? this.emergencyBoilerAlerts,
@@ -1561,11 +1593,14 @@ class SystemSettingsState {
         'ambientSoundtrack': ambientSoundtrack.name,
         'customAudioLabel': customAudioLabel,
         'customAudioSource': customAudioSource,
+        'customVideoLabel': customVideoLabel,
+        'customVideoSource': customVideoSource,
         'ambientVolume': ambientVolume,
         'marqueeTrackEnabled': marqueeTrackEnabled,
         'equalizerEnabled': equalizerEnabled,
         'equalizerStyle': equalizerStyle.name,
         'displayBrightness': displayBrightness,
+        'smartDisplayAutoMinutes': smartDisplayAutoMinutes,
         'displaySleepMinutes': displaySleepMinutes,
         'oledPixelShiftEnabled': oledPixelShiftEnabled,
         'notifications3hEnabled': notifications3hEnabled,
@@ -1676,8 +1711,16 @@ class SystemSettingsState {
       telegramChatId: (map['telegramChatId'] as String?) ?? defaults.telegramChatId,
       googleHomeLinked: (map['googleHomeLinked'] as bool?) ?? defaults.googleHomeLinked,
       googleHomeRoom: (map['googleHomeRoom'] as String?) ?? defaults.googleHomeRoom,
-      smartDisplayEnabled: (map['smartDisplayEnabled'] as bool?) ?? defaults.smartDisplayEnabled,
-      smartDisplayMode: _parseEnum(map['smartDisplayMode'] as String?, SmartDisplayMode.values, defaults.smartDisplayMode),
+      smartDisplayEnabled: () {
+        final sd = (map['smartDisplayEnabled'] as bool?) ?? defaults.smartDisplayEnabled;
+        final tb = (map['termoBotEnabled'] as bool?) ?? defaults.termoBotEnabled;
+        if (sd && tb) return false; // Mutually exclusive: resolve stale dual-on to TermoBot
+        return sd;
+      }(),
+      smartDisplayMode: () {
+        final parsed = _parseEnum(map['smartDisplayMode'] as String?, SmartDisplayMode.values, defaults.smartDisplayMode);
+        return parsed == SmartDisplayMode.singlePhoto ? SmartDisplayMode.slideshow : parsed;
+      }(),
       slideDurationSeconds: (map['slideDurationSeconds'] as int?) ?? defaults.slideDurationSeconds,
       slideEffect: _parseEnum(map['slideEffect'] as String?, SlideTransitionEffect.values, defaults.slideEffect),
       smartDisplayLayout: _parseEnum(map['smartDisplayLayout'] as String?, VisualLayoutMode.values, defaults.smartDisplayLayout),
@@ -1688,15 +1731,24 @@ class SystemSettingsState {
       ),
       slideImages: () {
         final raw = map['slideImages'];
-        if (raw is! List) return defaults.slideImages;
         final list = <SmartDisplaySlideImage>[];
-        for (final item in raw) {
-          if (item is Map<String, dynamic>) {
-            list.add(SmartDisplaySlideImage.fromJson(item));
-          } else if (item is Map) {
-            list.add(SmartDisplaySlideImage.fromJson(Map<String, dynamic>.from(item)));
+        if (raw is List) {
+          for (final item in raw) {
+            if (item is Map<String, dynamic>) {
+              list.add(SmartDisplaySlideImage.fromJson(item));
+            } else if (item is Map) {
+              list.add(SmartDisplaySlideImage.fromJson(Map<String, dynamic>.from(item)));
+            }
+            if (list.length >= 12) break;
           }
-          if (list.length >= 12) break;
+        }
+        // Migrate legacy singleDisplayImage into slideImages if slideImages was empty
+        if (list.isEmpty && map['singleDisplayImage'] is Map) {
+          list.add(
+            SmartDisplaySlideImage.fromJson(
+              Map<String, dynamic>.from(map['singleDisplayImage'] as Map),
+            ),
+          );
         }
         return list;
       }(),
@@ -1712,11 +1764,14 @@ class SystemSettingsState {
       ambientSoundtrack: _parseEnum(map['ambientSoundtrack'] as String?, AmbientSoundtrack.values, defaults.ambientSoundtrack),
       customAudioLabel: (map['customAudioLabel'] as String?) ?? defaults.customAudioLabel,
       customAudioSource: (map['customAudioSource'] as String?) ?? defaults.customAudioSource,
+      customVideoLabel: (map['customVideoLabel'] as String?) ?? defaults.customVideoLabel,
+      customVideoSource: (map['customVideoSource'] as String?) ?? defaults.customVideoSource,
       ambientVolume: (map['ambientVolume'] as num?)?.toDouble() ?? defaults.ambientVolume,
       marqueeTrackEnabled: (map['marqueeTrackEnabled'] as bool?) ?? defaults.marqueeTrackEnabled,
       equalizerEnabled: (map['equalizerEnabled'] as bool?) ?? defaults.equalizerEnabled,
       equalizerStyle: _parseEnum(map['equalizerStyle'] as String?, EqualizerStyle.values, defaults.equalizerStyle),
       displayBrightness: (map['displayBrightness'] as int?) ?? defaults.displayBrightness,
+      smartDisplayAutoMinutes: (map['smartDisplayAutoMinutes'] as int?) ?? defaults.smartDisplayAutoMinutes,
       displaySleepMinutes: (map['displaySleepMinutes'] as int?) ?? defaults.displaySleepMinutes,
       oledPixelShiftEnabled: (map['oledPixelShiftEnabled'] as bool?) ?? defaults.oledPixelShiftEnabled,
       notifications3hEnabled: (map['notifications3hEnabled'] as bool?) ?? defaults.notifications3hEnabled,

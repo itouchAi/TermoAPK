@@ -10,6 +10,7 @@ import '../services/esp_log_service.dart';
 import '../services/firebase_sync_service.dart';
 import '../services/hardware_service.dart';
 import '../services/notification_service.dart';
+import '../services/video_source_bridge.dart';
 import '../services/voice_gender_classifier.dart';
 import '../services/voice_speech_service.dart';
 import '../widgets/missed_call_alert.dart';
@@ -135,6 +136,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
   final _firebaseNodeCtrl = TextEditingController();
   final _espIdCtrl = TextEditingController();
   final _customAudioCtrl = TextEditingController();
+  final _customVideoUrlCtrl = TextEditingController();
   final _screensaverBgUrlCtrl = TextEditingController();
 
   static const _locations = ['Ev · İstanbul', 'Yazlık · İzmir', 'Ofis · Ankara'];
@@ -285,7 +287,10 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     _firebaseNodeCtrl.text = _draft.firebaseNodePath;
     _espIdCtrl.text = _draft.espDeviceId;
     _customAudioCtrl.text = _draft.customAudioLabel;
-    _themesAudioAccordionExpanded = _draft.smartDisplayMode != SmartDisplayMode.aod;
+    _customVideoUrlCtrl.text = _draft.customVideoSource.startsWith('http')
+        ? _draft.customVideoSource
+        : _draft.customVideoLabel;
+    _themesAudioAccordionExpanded = _draft.smartDisplayMode == SmartDisplayMode.liveNature;
     if (_draft.screensaverCustomBgSource.startsWith('http')) {
       _screensaverBgUrlCtrl.text = _draft.screensaverCustomBgSource;
     }
@@ -305,6 +310,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     _firebaseNodeCtrl.dispose();
     _espIdCtrl.dispose();
     _customAudioCtrl.dispose();
+    _customVideoUrlCtrl.dispose();
     _screensaverBgUrlCtrl.dispose();
     super.dispose();
   }
@@ -435,33 +441,86 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     } catch (_) {}
   }
 
-  Future<void> _pickSingleDisplayImage() async {
+  String _resolveVideoSource() {
+    final typed = _customVideoUrlCtrl.text.trim();
+    if (typed.startsWith('http://') ||
+        typed.startsWith('https://') ||
+        typed.startsWith('blob:') ||
+        typed.startsWith('data:')) {
+      return typed;
+    }
+    return _draft.customVideoSource.trim();
+  }
+
+  Future<void> _pickCustomVideo() async {
     _hapticTap();
+    final tr = _lang == LangCode.tr;
     try {
       final result = await FilePicker.platform.pickFiles(
-        type: FileType.image,
+        type: FileType.video,
         allowMultiple: false,
-        withData: true,
+        withData: kIsWeb,
       );
       if (result == null || result.files.isEmpty) return;
-      final file = result.files.first;
-      final bytes = file.bytes;
-      if (bytes == null || bytes.isEmpty) return;
-      final img = SmartDisplaySlideImage(
-        id: '${DateTime.now().microsecondsSinceEpoch}_single',
-        name: file.name,
-        dataBase64: base64Encode(bytes),
-        filePath: kIsWeb ? '' : (file.path ?? ''),
+      final picked = result.files.first;
+      String source = '';
+      if (kIsWeb) {
+        final bytes = picked.bytes;
+        if (bytes == null || bytes.isEmpty) {
+          if (mounted) {
+            setState(() {
+              _statusBanner = tr
+                  ? 'Video dosyası tarayıcıda okunamadı.'
+                  : 'Could not read video bytes in browser.';
+            });
+          }
+          return;
+        }
+        final ext = (picked.extension ?? '').toLowerCase();
+        final mime = ext == 'webm'
+            ? 'video/webm'
+            : (ext == 'mov' ? 'video/quicktime' : 'video/mp4');
+        VideoSourceBridge.revokeObjectUrl(_draft.customVideoSource);
+        source = VideoSourceBridge.createObjectUrlFromBytes(bytes, mimeType: mime);
+      } else {
+        source = picked.path ?? '';
+      }
+      if (source.isEmpty || !mounted) return;
+      setState(() {
+        _customVideoUrlCtrl.text = picked.name;
+        _draft = _draft.copyWith(
+          smartDisplayMode: SmartDisplayMode.silentVideoMp3,
+          customVideoLabel: picked.name,
+          customVideoSource: source,
+        );
+        _statusBanner = tr
+            ? 'Sessiz video yüklendi: ${picked.name}'
+            : 'Muted video loaded: ${picked.name}';
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _statusBanner = tr ? 'Video seçilemedi.' : 'Could not select video.';
+        });
+      }
+    }
+  }
+
+  void _clearCustomVideo() {
+    _hapticTap();
+    VideoSourceBridge.revokeObjectUrl(_draft.customVideoSource);
+    _customVideoUrlCtrl.clear();
+    setState(() {
+      _draft = _draft.copyWith(
+        customVideoLabel: '',
+        customVideoSource: '',
       );
-      if (!mounted) return;
-      setState(() => _draft = _draft.copyWith(singleDisplayImage: img));
-    } catch (_) {}
+    });
   }
 
   void _showSlidePhotoPreviewDialog({
     required List<SmartDisplaySlideImage> images,
     int initialIndex = 0,
-    bool isSlideshow = true,
   }) {
     if (images.isEmpty) return;
     final tr = _lang == LangCode.tr;
@@ -471,9 +530,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
       context: context,
       builder: (dCtx) => StatefulBuilder(
         builder: (dCtx, setModalState) {
-          final currentList = isSlideshow
-              ? _draft.slideImages
-              : (_draft.singleDisplayImage != null ? [_draft.singleDisplayImage!] : <SmartDisplaySlideImage>[]);
+          final currentList = _draft.slideImages;
           if (currentList.isEmpty) {
             return AlertDialog(
               backgroundColor: const Color(0xFF13131A),
@@ -584,18 +641,13 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                             TextButton.icon(
                               onPressed: () {
                                 _hapticTap();
-                                if (isSlideshow) {
-                                  final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages)
-                                    ..removeAt(currentIdx);
-                                  setState(() => _draft = _draft.copyWith(slideImages: updated));
-                                  if (updated.isEmpty) {
-                                    Navigator.of(dCtx).pop();
-                                  } else {
-                                    setModalState(() {});
-                                  }
-                                } else {
-                                  setState(() => _draft = _draft.copyWith(clearSingleDisplayImage: true));
+                                final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages)
+                                  ..removeAt(currentIdx);
+                                setState(() => _draft = _draft.copyWith(slideImages: updated));
+                                if (updated.isEmpty) {
                                   Navigator.of(dCtx).pop();
+                                } else {
+                                  setModalState(() {});
                                 }
                               },
                               icon: const Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFFCA5A5)),
@@ -969,6 +1021,14 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                                 ? _draft.firebaseNodePath
                                 : _firebaseNodeCtrl.text.trim(),
                           );
+                          final resolvedVideoSource = _resolveVideoSource();
+                          final typedVideo = _customVideoUrlCtrl.text.trim();
+                          final videoHost = Uri.tryParse(typedVideo)?.host ?? '';
+                          final resolvedVideoLabel = resolvedVideoSource.isEmpty
+                              ? ''
+                              : (typedVideo.startsWith('http://') || typedVideo.startsWith('https://'))
+                                  ? (videoHost.isNotEmpty ? videoHost : 'Video URL')
+                                  : (_draft.customVideoLabel.isNotEmpty ? _draft.customVideoLabel : typedVideo);
                           final updated = _draft.copyWith(
                             firebaseRtdbUrl: _firebaseUrlCtrl.text.trim(),
                             firebaseApiKey: _firebaseApiKeyCtrl.text.trim(),
@@ -976,6 +1036,8 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                             espDeviceId: typedEspId.isEmpty ? _draft.espDeviceId : typedEspId,
                             customAudioLabel: _customAudioCtrl.text.trim(),
                             customAudioSource: _resolveAudioSource(),
+                            customVideoLabel: resolvedVideoLabel,
+                            customVideoSource: resolvedVideoSource,
                           );
                           widget.onChangeLang(_lang);
                           widget.onChangeLocation(_location);
@@ -1255,7 +1317,14 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             color: const Color(0xFFEA580C),
             onTap: () {
               _hapticTap();
-              setState(() => _draft = _draft.copyWith(smartDisplayEnabled: !_draft.smartDisplayEnabled));
+              final nextSmart = !_draft.smartDisplayEnabled;
+              setState(() => _draft = _draft.copyWith(
+                smartDisplayEnabled: nextSmart,
+                termoBotEnabled: nextSmart ? false : _draft.termoBotEnabled,
+                smartDisplayAutoMinutes: nextSmart && _draft.smartDisplayAutoMinutes == 0
+                    ? 5
+                    : _draft.smartDisplayAutoMinutes,
+              ));
             },
           ),
         );
@@ -1323,7 +1392,11 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             color: const Color(0xFFEA580C),
             onTap: () {
               _hapticTap();
-              setState(() => _draft = _draft.copyWith(termoBotEnabled: !_draft.termoBotEnabled));
+              final nextBot = !_draft.termoBotEnabled;
+              setState(() => _draft = _draft.copyWith(
+                termoBotEnabled: nextBot,
+                smartDisplayEnabled: nextBot ? false : _draft.smartDisplayEnabled,
+              ));
             },
           ),
         );
@@ -1538,22 +1611,17 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           (
             SmartDisplayMode.silentVideoMp3,
             '🎬 ${tr ? 'Sessiz Video + MP3' : 'Silent Video + MP3'}',
-            tr ? 'Canlı arka plan + ortam müziği' : 'Live background + ambient audio',
+            tr ? 'Videonun sesi kapalı + MP3 çalma' : 'Muted loop video + MP3 audio',
           ),
           (
             SmartDisplayMode.liveNature,
             '🔥 ${tr ? 'Canlı Video / Doğa' : 'Live Video / Nature'}',
-            tr ? 'Şömine & canlı doğa döngüsü' : 'Fireplace & live nature loop',
+            tr ? 'Şömine & canlı doğa sahneleri' : 'Fireplace & live nature scenes',
           ),
           (
             SmartDisplayMode.slideshow,
             '🖼️ ${tr ? 'Slayt Gösterisi' : 'Slideshow'}',
-            tr ? 'Fotoğraflar arası otomatik geçiş' : 'Automatic photo transitions',
-          ),
-          (
-            SmartDisplayMode.singlePhoto,
-            '📷 ${tr ? 'Tekli Görsel' : 'Single Photo'}',
-            tr ? 'Sakin sabit fotoğraf' : 'Calm static backdrop',
+            tr ? 'Tekli veya çoklu görsel akışı' : 'Single or multi-photo stream',
           ),
         ];
         const slideDurations = [5, 10, 15, 30];
@@ -1609,19 +1677,380 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           (85, '☀️ ${tr ? 'Normal' : 'Normal'} (%85)'),
           (100, '⚡ ${tr ? 'Tam' : 'Full'} (%100)'),
         ];
-        final sleepOptions = [
-          (0, tr ? 'Sürekli Açık' : 'Always On'),
+        final autoStartOptions = [
+          (0, tr ? 'Manuel (Kapalı)' : 'Manual (Off)'),
           (1, tr ? '1 Dk' : '1 Min'),
           (5, tr ? '5 Dk' : '5 Min'),
           (15, tr ? '15 Dk' : '15 Min'),
           (30, tr ? '30 Dk' : '30 Min'),
         ];
+        final aodSleepOptions = [
+          (0, tr ? 'Sürekli Açık' : 'Always On'),
+          (5, tr ? '5 Dk' : '5 Min'),
+          (15, tr ? '15 Dk' : '15 Min'),
+          (30, tr ? '30 Dk' : '30 Min'),
+          (60, tr ? '1 Saat' : '1 Hour'),
+        ];
 
-        final activeMode = _draft.smartDisplayMode;
+        final activeMode = _draft.smartDisplayMode == SmartDisplayMode.singlePhoto
+            ? SmartDisplayMode.slideshow
+            : _draft.smartDisplayMode;
         final isAod = activeMode == SmartDisplayMode.aod;
+        final isSilentVideo = activeMode == SmartDisplayMode.silentVideoMp3;
+        final isLiveNature = activeMode == SmartDisplayMode.liveNature;
         final isSlideshow = activeMode == SmartDisplayMode.slideshow;
-        final isSinglePhoto = activeMode == SmartDisplayMode.singlePhoto;
         final brightnessFactor = (_draft.displayBrightness / 100.0).clamp(0.10, 1.0);
+
+        Widget buildModeCard((SmartDisplayMode, String, String) m) {
+          final selected = activeMode == m.$1;
+          return GestureDetector(
+            onTap: () {
+              _hapticTap();
+              setState(() {
+                _draft = _draft.copyWith(smartDisplayMode: m.$1);
+                if (m.$1 == SmartDisplayMode.liveNature) {
+                  _themesAudioAccordionExpanded = true;
+                }
+              });
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: selected
+                    ? const Color(0xFFF59E0B).withValues(alpha: 0.14)
+                    : Colors.white.withValues(alpha: 0.03),
+                borderRadius: BorderRadius.circular(11),
+                border: Border.all(
+                  color: selected
+                      ? const Color(0xFFFBBF24)
+                      : Colors.white.withValues(alpha: 0.10),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          m.$2,
+                          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (selected)
+                        const Icon(Icons.check_rounded, size: 13, color: Color(0xFFFBBF24)),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    m.$3,
+                    style: TextStyle(fontSize: 9.0, color: Colors.white.withValues(alpha: 0.56)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        Widget buildLayoutSelectorCard({Widget? trailingChild}) {
+          return Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.03),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  tr ? '📚 Görsel Yerleşim Modu:' : '📚 Visual Layout Mode:',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF93C5FD)),
+                ),
+                const SizedBox(height: 7),
+                Row(
+                  children: [
+                    for (int idx = 0; idx < layoutModes.length; idx++) ...[
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            _hapticTap();
+                            setState(() => _draft = _draft.copyWith(smartDisplayLayout: layoutModes[idx].$1));
+                          },
+                          child: Container(
+                            margin: EdgeInsets.only(right: idx == layoutModes.length - 1 ? 0 : 6),
+                            padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
+                            decoration: BoxDecoration(
+                              color: _draft.smartDisplayLayout == layoutModes[idx].$1
+                                  ? const Color(0xFF4F46E5).withValues(alpha: 0.50)
+                                  : Colors.white.withValues(alpha: 0.04),
+                              borderRadius: BorderRadius.circular(11),
+                              border: Border.all(
+                                color: _draft.smartDisplayLayout == layoutModes[idx].$1
+                                    ? const Color(0xFF818CF8)
+                                    : Colors.white.withValues(alpha: 0.10),
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  layoutModes[idx].$2,
+                                  style: const TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  layoutModes[idx].$3,
+                                  style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.62)),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                if (trailingChild != null) ...[
+                  const SizedBox(height: 10),
+                  Divider(color: Colors.white.withValues(alpha: 0.08), height: 1),
+                  const SizedBox(height: 10),
+                  trailingChild,
+                ],
+              ],
+            ),
+          );
+        }
+
+        Widget buildAudioPlaylistSection() {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                tr ? '🎵 Ortam Sesi Çalma Listesi:' : '🎵 Ambient Sound Playlist:',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFFFBBF24),
+                ),
+              ),
+              const SizedBox(height: 7),
+              Row(
+                children: [
+                  for (int idx = 0; idx < 3; idx++)
+                    Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.only(right: idx < 2 ? 6 : 0),
+                        child: GestureDetector(
+                          onTap: () {
+                            _hapticTap();
+                            final t = audioTracks[idx].$1;
+                            setState(() => _draft = _draft.copyWith(ambientSoundtrack: t));
+                            if (t == AmbientSoundtrack.silent) {
+                              AmbientAudioService.stop();
+                              setState(() => _audioPreviewPlaying = false);
+                            } else if (_audioPreviewPlaying) {
+                              AmbientAudioService.start(
+                                track: t,
+                                customSource: _resolveAudioSource(),
+                                volume: _draft.ambientVolume,
+                              );
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: _draft.ambientSoundtrack == audioTracks[idx].$1
+                                  ? const Color(0xFFF59E0B)
+                                  : Colors.white.withValues(alpha: 0.04),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: _draft.ambientSoundtrack == audioTracks[idx].$1
+                                    ? const Color(0xFFFCD34D)
+                                    : Colors.white.withValues(alpha: 0.10),
+                              ),
+                            ),
+                            child: Text(
+                              audioTracks[idx].$2,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: _draft.ambientSoundtrack == audioTracks[idx].$1
+                                    ? Colors.black
+                                    : Colors.white,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  for (int idx = 3; idx < 6; idx++)
+                    Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.only(right: idx < 5 ? 6 : 0),
+                        child: GestureDetector(
+                          onTap: () {
+                            _hapticTap();
+                            final t = audioTracks[idx].$1;
+                            setState(() => _draft = _draft.copyWith(ambientSoundtrack: t));
+                            if (_audioPreviewPlaying) {
+                              AmbientAudioService.start(
+                                track: t,
+                                customSource: _resolveAudioSource(),
+                                volume: _draft.ambientVolume,
+                              );
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: _draft.ambientSoundtrack == audioTracks[idx].$1
+                                  ? const Color(0xFFF59E0B)
+                                  : Colors.white.withValues(alpha: 0.04),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: _draft.ambientSoundtrack == audioTracks[idx].$1
+                                    ? const Color(0xFFFCD34D)
+                                    : Colors.white.withValues(alpha: 0.10),
+                              ),
+                            ),
+                            child: Text(
+                              audioTracks[idx].$2,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: _draft.ambientSoundtrack == audioTracks[idx].$1
+                                    ? Colors.black
+                                    : Colors.white,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      tr ? '🔊 Ortam Sesi Seviyesi & Dışarıdan MP3:' : '🔊 Volume & External MP3:',
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFFCD34D),
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${tr ? 'Ses' : 'Vol'}: %${(_draft.ambientVolume * 100).round()}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFFFBBF24),
+                    ),
+                  ),
+                ],
+              ),
+              Slider(
+                value: _draft.ambientVolume,
+                min: 0.0,
+                max: 1.0,
+                divisions: 20,
+                activeColor: const Color(0xFFF59E0B),
+                onChanged: (v) {
+                  setState(() => _draft = _draft.copyWith(ambientVolume: v));
+                  if (_audioPreviewPlaying) {
+                    AmbientAudioService.setVolume(v);
+                  }
+                },
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: _DarkTextField(
+                      controller: _customAudioCtrl,
+                      hint: tr ? 'MP3 URL veya dosya adı' : 'MP3 URL or filename',
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  FilledButton.tonalIcon(
+                    onPressed: _pickLocalMp3,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.30),
+                      foregroundColor: const Color(0xFF7DD3FC),
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    icon: const Icon(Icons.audio_file_outlined, size: 15),
+                    label: Text(
+                      tr ? 'MP3 Seç' : 'MP3',
+                      style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  GestureDetector(
+                    onTap: _toggleAudioPreview,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _audioPreviewPlaying
+                            ? const Color(0xFFEF4444).withValues(alpha: 0.25)
+                            : const Color(0xFF0284C7).withValues(alpha: 0.25),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: _audioPreviewPlaying
+                              ? const Color(0xFFFCA5A5)
+                              : const Color(0xFF38BDF8),
+                        ),
+                      ),
+                      child: Icon(
+                        _audioPreviewPlaying ? Icons.stop_rounded : Icons.volume_up_rounded,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _MiniToggleTile(
+                label: tr ? 'Üst Kayan Yazı Şarkı İsmi' : 'Top Marquee Track Name',
+                value: _draft.marqueeTrackEnabled,
+                activeColor: const Color(0xFF38BDF8),
+                onTap: () {
+                  _hapticTap();
+                  setState(() => _draft = _draft.copyWith(marqueeTrackEnabled: !_draft.marqueeTrackEnabled));
+                },
+              ),
+            ],
+          );
+        }
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1640,9 +2069,19 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                     AmbientAudioService.stop();
                     _audioPreviewPlaying = false;
                   }
+                  final resolvedVideoSource = _resolveVideoSource();
+                  final typedVideo = _customVideoUrlCtrl.text.trim();
+                  final videoHost = Uri.tryParse(typedVideo)?.host ?? '';
+                  final resolvedVideoLabel = resolvedVideoSource.isEmpty
+                      ? ''
+                      : (typedVideo.startsWith('http://') || typedVideo.startsWith('https://'))
+                          ? (videoHost.isNotEmpty ? videoHost : 'Video URL')
+                          : (_draft.customVideoLabel.isNotEmpty ? _draft.customVideoLabel : typedVideo);
                   final updated = _draft.copyWith(
                     customAudioLabel: _customAudioCtrl.text.trim(),
                     customAudioSource: _resolveAudioSource(),
+                    customVideoLabel: resolvedVideoLabel,
+                    customVideoSource: resolvedVideoSource,
                   );
                   widget.onSaveSettings(updated);
                   Navigator.of(context).pop();
@@ -1662,76 +2101,30 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             ),
             const SizedBox(height: 11),
 
-            // 1. Compact Screen Mode Grid (Image 1 proportions)
+            // 1. Compact Fixed-Height 2x2 Display Mode Grid (No Tekli Görsel!)
             Text(
               tr ? '📺 Ekran Modu:' : '📺 Display Mode:',
               style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
             ),
             const SizedBox(height: 7),
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              crossAxisSpacing: 7,
-              mainAxisSpacing: 7,
-              childAspectRatio: 3.15,
+            Row(
               children: [
-                for (final m in displayModes)
-                  GestureDetector(
-                    onTap: () {
-                      _hapticTap();
-                      setState(() {
-                        _draft = _draft.copyWith(smartDisplayMode: m.$1);
-                        _themesAudioAccordionExpanded = m.$1 != SmartDisplayMode.aod;
-                      });
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: activeMode == m.$1
-                            ? const Color(0xFFF59E0B).withValues(alpha: 0.14)
-                            : Colors.white.withValues(alpha: 0.03),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: activeMode == m.$1
-                              ? const Color(0xFFFBBF24)
-                              : Colors.white.withValues(alpha: 0.10),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  m.$2,
-                                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              if (activeMode == m.$1)
-                                const Icon(Icons.check_rounded, size: 13, color: Color(0xFFFBBF24)),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            m.$3,
-                            style: TextStyle(fontSize: 9.0, color: Colors.white.withValues(alpha: 0.56)),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                Expanded(child: buildModeCard(displayModes[0])),
+                const SizedBox(width: 7),
+                Expanded(child: buildModeCard(displayModes[1])),
+              ],
+            ),
+            const SizedBox(height: 7),
+            Row(
+              children: [
+                Expanded(child: buildModeCard(displayModes[2])),
+                const SizedBox(width: 7),
+                Expanded(child: buildModeCard(displayModes[3])),
               ],
             ),
             const SizedBox(height: 10),
 
-            // 2. Context-Sensitive Mode Sub-Options
+            // 2. Context-Sensitive Panels per Selected Mode
             if (isAod) ...[
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
@@ -1758,8 +2151,334 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               const SizedBox(height: 10),
             ],
 
+            if (isSilentVideo) ...[
+              // Muted Video Picker & URL Card + Layout + MP3 Playlist
+              Container(
+                padding: const EdgeInsets.all(11),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0284C7).withValues(alpha: 0.09),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.28)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                tr ? '🎬 Video Seçimi (Sessiz Döngü)' : '🎬 Video Source (Muted Loop)',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF7DD3FC),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                tr
+                                    ? 'Yüklenen videonun kendi sesi otomatik kapatılır; seçtiğiniz MP3 veya ortam sesi çalar.'
+                                    : 'The video\'s own audio track is always muted while your selected MP3 or ambient audio plays.',
+                                style: TextStyle(
+                                  fontSize: 9.8,
+                                  color: Colors.white.withValues(alpha: 0.68),
+                                  height: 1.3,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.icon(
+                          onPressed: _pickCustomVideo,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF0284C7),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          icon: const Icon(Icons.video_library_outlined, size: 15),
+                          label: Text(
+                            tr ? 'Video Seç' : 'Pick Video',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _DarkTextField(
+                            controller: _customVideoUrlCtrl,
+                            hint: tr ? 'Veya Video URL (https://...mp4 / webm)' : 'Or Video URL (https://...mp4)',
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        FilledButton(
+                          onPressed: () {
+                            _hapticTap();
+                            final raw = _customVideoUrlCtrl.text.trim();
+                            if (raw.startsWith('http://') || raw.startsWith('https://')) {
+                              final host = Uri.tryParse(raw)?.host ?? '';
+                              setState(() {
+                                _draft = _draft.copyWith(
+                                  smartDisplayMode: SmartDisplayMode.silentVideoMp3,
+                                  customVideoSource: raw,
+                                  customVideoLabel: host.isNotEmpty ? host : 'Video URL',
+                                );
+                                _statusBanner = tr ? 'Video URL uygulandı.' : 'Video URL applied.';
+                              });
+                            } else {
+                              setState(() {
+                                _statusBanner = tr
+                                    ? 'Geçerli bir https:// video URL girin veya Video Seç kullanın.'
+                                    : 'Enter a valid https:// video URL or pick a local video.';
+                              });
+                            }
+                          },
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFF59E0B),
+                            foregroundColor: const Color(0xFF18181B),
+                            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 11),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          child: Text(
+                            tr ? 'Uygula' : 'Apply',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 7),
+                    Row(
+                      children: [
+                        Icon(
+                          _draft.customVideoSource.isNotEmpty
+                              ? Icons.check_circle_outline_rounded
+                              : Icons.info_outline_rounded,
+                          size: 14,
+                          color: _draft.customVideoSource.isNotEmpty
+                              ? const Color(0xFF34D399)
+                              : Colors.white54,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            _draft.customVideoSource.isNotEmpty
+                                ? (tr
+                                    ? 'Aktif Video (Sessiz): ${_draft.customVideoLabel.isNotEmpty ? _draft.customVideoLabel : 'Video Yüklendi'}'
+                                    : 'Active Muted Video: ${_draft.customVideoLabel}')
+                                : (tr
+                                    ? 'Henüz video seçilmedi (boşken aktif tema sahnesi sessiz akar).'
+                                    : 'No video selected yet (falls back to active ambient backdrop).'),
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: _draft.customVideoSource.isNotEmpty
+                                  ? const Color(0xFF6EE7B7)
+                                  : Colors.white60,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (_draft.customVideoSource.isNotEmpty)
+                          GestureDetector(
+                            onTap: _clearCustomVideo,
+                            child: Text(
+                              tr ? 'Temizle' : 'Clear',
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFFF87171),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              buildLayoutSelectorCard(),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(11),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.03),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                ),
+                child: buildAudioPlaylistSection(),
+              ),
+              const SizedBox(height: 10),
+            ],
+
+            if (isLiveNature) ...[
+              buildLayoutSelectorCard(),
+              const SizedBox(height: 10),
+              // Image 7: Default Visual Themes & Ambient Audio Card (ONLY visible in Canlı Video / Doğa!)
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.03),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () {
+                        _hapticTap();
+                        setState(() => _themesAudioAccordionExpanded = !_themesAudioAccordionExpanded);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                tr ? '🎨 Varsayılan Temalar & Ambiyans Sesleri' : '🎨 Default Themes & Ambient Audio',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFFCD34D),
+                                ),
+                              ),
+                            ),
+                            Icon(
+                              _themesAudioAccordionExpanded
+                                  ? Icons.keyboard_arrow_up_rounded
+                                  : Icons.keyboard_arrow_down_rounded,
+                              size: 18,
+                              color: Colors.white70,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (_themesAudioAccordionExpanded)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(11, 0, 11, 11),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Divider(color: Colors.white.withValues(alpha: 0.08), height: 1),
+                            const SizedBox(height: 10),
+                            Text(
+                              tr ? '🖼️ Görsel / Video Teması:' : '🖼️ Visual / Video Theme:',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF38BDF8),
+                              ),
+                            ),
+                            const SizedBox(height: 7),
+                            Row(
+                              children: [
+                                for (int idx = 0; idx < 3; idx++)
+                                  Expanded(
+                                    child: Padding(
+                                      padding: EdgeInsets.only(right: idx < 2 ? 6 : 0),
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          _hapticTap();
+                                          setState(() => _draft = _draft.copyWith(
+                                                smartDisplayVisualTheme: visualThemes[idx].$1,
+                                              ));
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 9),
+                                          alignment: Alignment.center,
+                                          decoration: BoxDecoration(
+                                            color: _draft.smartDisplayVisualTheme == visualThemes[idx].$1
+                                                ? const Color(0xFF0284C7).withValues(alpha: 0.42)
+                                                : Colors.white.withValues(alpha: 0.04),
+                                            borderRadius: BorderRadius.circular(10),
+                                            border: Border.all(
+                                              color: _draft.smartDisplayVisualTheme == visualThemes[idx].$1
+                                                  ? const Color(0xFF38BDF8)
+                                                  : Colors.white.withValues(alpha: 0.10),
+                                            ),
+                                          ),
+                                          child: Text(
+                                            visualThemes[idx].$2,
+                                            style: const TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w700,
+                                              color: Colors.white,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                for (int idx = 3; idx < 6; idx++)
+                                  Expanded(
+                                    child: Padding(
+                                      padding: EdgeInsets.only(right: idx < 5 ? 6 : 0),
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          _hapticTap();
+                                          setState(() => _draft = _draft.copyWith(
+                                                smartDisplayVisualTheme: visualThemes[idx].$1,
+                                              ));
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 9),
+                                          alignment: Alignment.center,
+                                          decoration: BoxDecoration(
+                                            color: _draft.smartDisplayVisualTheme == visualThemes[idx].$1
+                                                ? const Color(0xFF0284C7).withValues(alpha: 0.42)
+                                                : Colors.white.withValues(alpha: 0.04),
+                                            borderRadius: BorderRadius.circular(10),
+                                            border: Border.all(
+                                              color: _draft.smartDisplayVisualTheme == visualThemes[idx].$1
+                                                  ? const Color(0xFF38BDF8)
+                                                  : Colors.white.withValues(alpha: 0.10),
+                                            ),
+                                          ),
+                                          child: Text(
+                                            visualThemes[idx].$2,
+                                            style: const TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w700,
+                                              color: Colors.white,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 11),
+                            buildAudioPlaylistSection(),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+
             if (isSlideshow) ...[
-              // Compact Slide Duration & Transition Effect Card (Image 1 & 3)
+              // Compact Slide Duration & Transition Effect Card
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
@@ -1886,341 +2605,152 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 ),
               ),
               const SizedBox(height: 10),
-            ],
-
-            if (!isAod) ...[
-              // Visual Layout Mode: Oto (Cover) / Fit (Sığdır) / Stretch (Image 1 & 3)
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.03),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                ),
-                child: Column(
+              buildLayoutSelectorCard(
+                trailingChild: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      tr ? '📚 Görsel Yerleşim Modu:' : '📚 Visual Layout Mode:',
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF93C5FD)),
-                    ),
-                    const SizedBox(height: 7),
                     Row(
                       children: [
-                        for (int idx = 0; idx < layoutModes.length; idx++) ...[
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () {
-                                _hapticTap();
-                                setState(() => _draft = _draft.copyWith(smartDisplayLayout: layoutModes[idx].$1));
-                              },
-                              child: Container(
-                                margin: EdgeInsets.only(right: idx == layoutModes.length - 1 ? 0 : 6),
-                                padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
-                                decoration: BoxDecoration(
-                                  color: _draft.smartDisplayLayout == layoutModes[idx].$1
-                                      ? const Color(0xFF4F46E5).withValues(alpha: 0.50)
-                                      : Colors.white.withValues(alpha: 0.04),
-                                  borderRadius: BorderRadius.circular(11),
-                                  border: Border.all(
-                                    color: _draft.smartDisplayLayout == layoutModes[idx].$1
-                                        ? const Color(0xFF818CF8)
-                                        : Colors.white.withValues(alpha: 0.10),
-                                  ),
-                                ),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      layoutModes[idx].$2,
-                                      style: const TextStyle(
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.white,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      layoutModes[idx].$3,
-                                      style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.62)),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ],
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                tr ? 'Çoklu Görsel & Slayt Listesi' : 'Multi-Photo Slideshow List',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
                                 ),
                               ),
-                            ),
+                              const SizedBox(height: 2),
+                              Text(
+                                tr
+                                    ? '${_draft.slideImages.length} Görsel Yüklendi (1 veya daha fazla seçebilirsiniz)'
+                                    : '${_draft.slideImages.length} Images Loaded (pick 1 or more)',
+                                style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.60)),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
+                        FilledButton.icon(
+                          onPressed: _pickMultipleSlideImages,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF0284C7),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                          ),
+                          icon: const Icon(Icons.upload_rounded, size: 15),
+                          label: Text(
+                            tr ? 'Çoklu Görsel Seç' : 'Select Images',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                          ),
+                        ),
                       ],
                     ),
-                    if (isSlideshow) ...[
-                      const SizedBox(height: 10),
-                      Divider(color: Colors.white.withValues(alpha: 0.08), height: 1),
-                      const SizedBox(height: 10),
+                    if (_draft.slideImages.isNotEmpty) ...[
+                      const SizedBox(height: 8),
                       Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  tr ? 'Çoklu Görsel & Slayt Listesi' : 'Multi-Photo Slideshow List',
-                                  style: const TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  tr
-                                      ? '${_draft.slideImages.length} Görsel Yüklendi'
-                                      : '${_draft.slideImages.length} Images Loaded',
-                                  style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.60)),
-                                ),
-                              ],
+                          OutlinedButton.icon(
+                            onPressed: () => _showSlidePhotoPreviewDialog(
+                              images: _draft.slideImages,
+                              initialIndex: 0,
                             ),
-                          ),
-                          FilledButton.icon(
-                            onPressed: _pickMultipleSlideImages,
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFF0284C7),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF7DD3FC),
+                              side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.45)),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              minimumSize: const Size(0, 30),
                             ),
-                            icon: const Icon(Icons.upload_rounded, size: 15),
+                            icon: const Icon(Icons.visibility_outlined, size: 14),
                             label: Text(
-                              tr ? 'Çoklu Görsel Seç' : 'Select Images',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                              tr ? 'Önizle' : 'Preview',
+                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
                             ),
                           ),
-                        ],
-                      ),
-                      if (_draft.slideImages.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            OutlinedButton.icon(
-                              onPressed: () => _showSlidePhotoPreviewDialog(
-                                images: _draft.slideImages,
-                                initialIndex: 0,
-                                isSlideshow: true,
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF7DD3FC),
-                                side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.45)),
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                minimumSize: const Size(0, 30),
-                              ),
-                              icon: const Icon(Icons.visibility_outlined, size: 14),
-                              label: Text(
-                                tr ? 'Önizle' : 'Preview',
-                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
-                              ),
-                            ),
-                            const SizedBox(width: 7),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                _hapticTap();
-                                setState(() => _draft = _draft.copyWith(slideImages: const []));
-                              },
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFFFCA5A5),
-                                side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.45)),
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                minimumSize: const Size(0, 30),
-                              ),
-                              icon: const Icon(Icons.delete_sweep_outlined, size: 14),
-                              label: Text(
-                                tr ? 'Tümünü Sil' : 'Delete All',
-                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          height: 76,
-                          child: ListView.separated(
-                            scrollDirection: Axis.horizontal,
-                            itemCount: _draft.slideImages.length,
-                            separatorBuilder: (_, __) => const SizedBox(width: 8),
-                            itemBuilder: (_, idx) {
-                              final item = _draft.slideImages[idx];
-                              final bytes = item.decodeBytes();
-                              return Stack(
-                                children: [
-                                  GestureDetector(
-                                    onTap: () => _showSlidePhotoPreviewDialog(
-                                      images: _draft.slideImages,
-                                      initialIndex: idx,
-                                      isSlideshow: true,
-                                    ),
-                                    child: Container(
-                                      width: 76,
-                                      height: 76,
-                                      decoration: BoxDecoration(
-                                        color: Colors.black,
-                                        borderRadius: BorderRadius.circular(11),
-                                        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-                                      ),
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(10),
-                                        child: bytes != null
-                                            ? Image.memory(bytes, fit: BoxFit.cover)
-                                            : const Icon(Icons.image_outlined, color: Colors.white38),
-                                      ),
-                                    ),
-                                  ),
-                                  Positioned(
-                                    top: 3,
-                                    right: 3,
-                                    child: GestureDetector(
-                                      onTap: () {
-                                        _hapticTap();
-                                        final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages)
-                                          ..removeAt(idx);
-                                        setState(() => _draft = _draft.copyWith(slideImages: updated));
-                                      },
-                                      child: Container(
-                                        width: 20,
-                                        height: 20,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: Colors.black.withValues(alpha: 0.78),
-                                          border: Border.all(color: const Color(0xFFFCA5A5).withValues(alpha: 0.75)),
-                                        ),
-                                        child: const Icon(Icons.close_rounded, size: 12, color: Color(0xFFFCA5A5)),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              );
+                          const SizedBox(width: 7),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              _hapticTap();
+                              setState(() => _draft = _draft.copyWith(slideImages: const []));
                             },
-                          ),
-                        ),
-                      ],
-                    ],
-                    if (isSinglePhoto) ...[
-                      const SizedBox(height: 10),
-                      Divider(color: Colors.white.withValues(alpha: 0.08), height: 1),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  tr ? 'Tekli Sabit Görsel' : 'Single Static Photo',
-                                  style: const TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  _draft.singleDisplayImage != null
-                                      ? _draft.singleDisplayImage!.name
-                                      : (tr ? 'Henüz fotoğraf seçilmedi' : 'No photo selected'),
-                                  style: TextStyle(fontSize: 10, color: Colors.white.withValues(alpha: 0.60)),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFFFCA5A5),
+                              side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.45)),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              minimumSize: const Size(0, 30),
                             ),
-                          ),
-                          FilledButton.icon(
-                            onPressed: _pickSingleDisplayImage,
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFF0284C7),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-                            ),
-                            icon: const Icon(Icons.add_photo_alternate_outlined, size: 15),
+                            icon: const Icon(Icons.delete_sweep_outlined, size: 14),
                             label: Text(
-                              tr ? 'Görsel Seç' : 'Pick Photo',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                              tr ? 'Tümünü Sil' : 'Delete All',
+                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
                             ),
                           ),
                         ],
                       ),
-                      if (_draft.singleDisplayImage != null) ...[
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            GestureDetector(
-                              onTap: () => _showSlidePhotoPreviewDialog(
-                                images: [_draft.singleDisplayImage!],
-                                initialIndex: 0,
-                                isSlideshow: false,
-                              ),
-                              child: Container(
-                                width: 64,
-                                height: 64,
-                                decoration: BoxDecoration(
-                                  color: Colors.black,
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 76,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _draft.slideImages.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 8),
+                          itemBuilder: (_, idx) {
+                            final item = _draft.slideImages[idx];
+                            final bytes = item.decodeBytes();
+                            return Stack(
+                              children: [
+                                GestureDetector(
+                                  onTap: () => _showSlidePhotoPreviewDialog(
+                                    images: _draft.slideImages,
+                                    initialIndex: idx,
+                                  ),
+                                  child: Container(
+                                    width: 76,
+                                    height: 76,
+                                    decoration: BoxDecoration(
+                                      color: Colors.black,
+                                      borderRadius: BorderRadius.circular(11),
+                                      border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: bytes != null
+                                          ? Image.memory(bytes, fit: BoxFit.cover)
+                                          : const Icon(Icons.image_outlined, color: Colors.white38),
+                                    ),
+                                  ),
                                 ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(9),
-                                  child: () {
-                                    final b = _draft.singleDisplayImage!.decodeBytes();
-                                    return b != null
-                                        ? Image.memory(b, fit: BoxFit.cover)
-                                        : const Icon(Icons.image_outlined, color: Colors.white38);
-                                  }(),
+                                Positioned(
+                                  top: 3,
+                                  right: 3,
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      _hapticTap();
+                                      final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages)
+                                        ..removeAt(idx);
+                                      setState(() => _draft = _draft.copyWith(slideImages: updated));
+                                    },
+                                    child: Container(
+                                      width: 20,
+                                      height: 20,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: Colors.black.withValues(alpha: 0.78),
+                                        border: Border.all(color: const Color(0xFFFCA5A5).withValues(alpha: 0.75)),
+                                      ),
+                                      child: const Icon(Icons.close_rounded, size: 12, color: Color(0xFFFCA5A5)),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            OutlinedButton.icon(
-                              onPressed: () => _showSlidePhotoPreviewDialog(
-                                images: [_draft.singleDisplayImage!],
-                                initialIndex: 0,
-                                isSlideshow: false,
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF7DD3FC),
-                                side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.45)),
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                minimumSize: const Size(0, 30),
-                              ),
-                              icon: const Icon(Icons.visibility_outlined, size: 14),
-                              label: Text(
-                                tr ? 'Önizle' : 'Preview',
-                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                _hapticTap();
-                                setState(() => _draft = _draft.copyWith(clearSingleDisplayImage: true));
-                              },
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFFFCA5A5),
-                                side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.45)),
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                minimumSize: const Size(0, 30),
-                              ),
-                              icon: const Icon(Icons.delete_outline_rounded, size: 14),
-                              label: Text(
-                                tr ? 'Sil' : 'Delete',
-                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
-                              ),
-                            ),
-                          ],
+                              ],
+                            );
+                          },
                         ),
-                      ],
+                      ),
                     ],
                   ],
                 ),
@@ -2228,272 +2758,8 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               const SizedBox(height: 10),
             ],
 
-            // 3. Separate Default Visual Themes & Ambient Soundtracks Accordion (Image 2 & 4)
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.03),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  InkWell(
-                    borderRadius: BorderRadius.circular(14),
-                    onTap: () {
-                      _hapticTap();
-                      setState(() => _themesAudioAccordionExpanded = !_themesAudioAccordionExpanded);
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              tr ? '🎨 Varsayılan Temalar & Ambiyans Sesleri' : '🎨 Default Themes & Ambient Audio',
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFFFCD34D),
-                              ),
-                            ),
-                          ),
-                          Icon(
-                            _themesAudioAccordionExpanded
-                                ? Icons.keyboard_arrow_up_rounded
-                                : Icons.keyboard_arrow_down_rounded,
-                            size: 18,
-                            color: Colors.white70,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (_themesAudioAccordionExpanded)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(11, 0, 11, 11),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Divider(color: Colors.white.withValues(alpha: 0.08), height: 1),
-                          const SizedBox(height: 10),
-                          Text(
-                            tr ? '🖼️ Görsel / Video Teması:' : '🖼️ Visual / Video Theme:',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF38BDF8),
-                            ),
-                          ),
-                          const SizedBox(height: 7),
-                          GridView.count(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            crossAxisCount: 3,
-                            crossAxisSpacing: 6,
-                            mainAxisSpacing: 6,
-                            childAspectRatio: 2.75,
-                            children: [
-                              for (final vt in visualThemes)
-                                GestureDetector(
-                                  onTap: () {
-                                    _hapticTap();
-                                    setState(() => _draft = _draft.copyWith(smartDisplayVisualTheme: vt.$1));
-                                  },
-                                  child: Container(
-                                    alignment: Alignment.center,
-                                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                                    decoration: BoxDecoration(
-                                      color: _draft.smartDisplayVisualTheme == vt.$1
-                                          ? const Color(0xFF0284C7).withValues(alpha: 0.42)
-                                          : Colors.white.withValues(alpha: 0.04),
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(
-                                        color: _draft.smartDisplayVisualTheme == vt.$1
-                                            ? const Color(0xFF38BDF8)
-                                            : Colors.white.withValues(alpha: 0.10),
-                                      ),
-                                    ),
-                                    child: Text(
-                                      vt.$2,
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.white,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 11),
-                          Text(
-                            tr ? '🎵 Ortam Sesi Çalma Listesi:' : '🎵 Ambient Sound Playlist:',
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFFFBBF24),
-                            ),
-                          ),
-                          const SizedBox(height: 7),
-                          GridView.count(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            crossAxisCount: 3,
-                            crossAxisSpacing: 6,
-                            mainAxisSpacing: 6,
-                            childAspectRatio: 2.75,
-                            children: [
-                              for (final track in audioTracks)
-                                GestureDetector(
-                                  onTap: () {
-                                    _hapticTap();
-                                    setState(() => _draft = _draft.copyWith(ambientSoundtrack: track.$1));
-                                    if (track.$1 == AmbientSoundtrack.silent) {
-                                      AmbientAudioService.stop();
-                                      setState(() => _audioPreviewPlaying = false);
-                                    } else if (_audioPreviewPlaying) {
-                                      AmbientAudioService.start(
-                                        track: track.$1,
-                                        customSource: _resolveAudioSource(),
-                                        volume: _draft.ambientVolume,
-                                      );
-                                    }
-                                  },
-                                  child: Container(
-                                    alignment: Alignment.center,
-                                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                                    decoration: BoxDecoration(
-                                      color: _draft.ambientSoundtrack == track.$1
-                                          ? const Color(0xFFF59E0B)
-                                          : Colors.white.withValues(alpha: 0.04),
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(
-                                        color: _draft.ambientSoundtrack == track.$1
-                                            ? const Color(0xFFFCD34D)
-                                            : Colors.white.withValues(alpha: 0.10),
-                                      ),
-                                    ),
-                                    child: Text(
-                                      track.$2,
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w700,
-                                        color: _draft.ambientSoundtrack == track.$1 ? Colors.black : Colors.white,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  tr ? '🔊 Ortam Sesi Seviyesi & Dışarıdan MP3:' : '🔊 Volume & External MP3:',
-                                  style: const TextStyle(
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: Color(0xFFFCD34D),
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                '${tr ? 'Ses' : 'Vol'}: %${(_draft.ambientVolume * 100).round()}',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  color: Color(0xFFFBBF24),
-                                ),
-                              ),
-                            ],
-                          ),
-                          Slider(
-                            value: _draft.ambientVolume,
-                            min: 0.0,
-                            max: 1.0,
-                            divisions: 20,
-                            activeColor: const Color(0xFFF59E0B),
-                            onChanged: (v) {
-                              setState(() => _draft = _draft.copyWith(ambientVolume: v));
-                              if (_audioPreviewPlaying) {
-                                AmbientAudioService.setVolume(v);
-                              }
-                            },
-                          ),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _DarkTextField(
-                                  controller: _customAudioCtrl,
-                                  hint: tr ? 'MP3 URL veya dosya adı' : 'MP3 URL or filename',
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              FilledButton.tonalIcon(
-                                onPressed: _pickLocalMp3,
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.30),
-                                  foregroundColor: const Color(0xFF7DD3FC),
-                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                                icon: const Icon(Icons.audio_file_outlined, size: 15),
-                                label: Text(
-                                  tr ? 'MP3 Seç' : 'MP3',
-                                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              GestureDetector(
-                                onTap: _toggleAudioPreview,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
-                                  decoration: BoxDecoration(
-                                    color: _audioPreviewPlaying
-                                        ? const Color(0xFFEF4444).withValues(alpha: 0.25)
-                                        : const Color(0xFF0284C7).withValues(alpha: 0.25),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                      color: _audioPreviewPlaying
-                                          ? const Color(0xFFFCA5A5)
-                                          : const Color(0xFF38BDF8),
-                                    ),
-                                  ),
-                                  child: Icon(
-                                    _audioPreviewPlaying ? Icons.stop_rounded : Icons.volume_up_rounded,
-                                    size: 16,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          _MiniToggleTile(
-                            label: tr ? 'Üst Kayan Yazı Şarkı İsmi' : 'Top Marquee Track Name',
-                            value: _draft.marqueeTrackEnabled,
-                            activeColor: const Color(0xFF38BDF8),
-                            onTap: () {
-                              _hapticTap();
-                              setState(() => _draft = _draft.copyWith(marqueeTrackEnabled: !_draft.marqueeTrackEnabled));
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-
-            if (!isAod) ...[
-              // 4. Live Music Equalizer Mode + 3 Visual Types
+            if (isSilentVideo || isLiveNature) ...[
+              // Live Music Equalizer Mode + 3 Visual Types
               Container(
                 padding: const EdgeInsets.all(11),
                 decoration: BoxDecoration(
@@ -2578,7 +2844,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               const SizedBox(height: 10),
             ],
 
-            // 5. Built-in Display Brightness Live Mini Preview + Slider + 4 Presets (Image 5)
+            // 5. Built-in Display Brightness Live Mini Preview + Slider + 4 Presets
             Container(
               padding: const EdgeInsets.all(11),
               decoration: BoxDecoration(
@@ -2608,7 +2874,6 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                     ],
                   ),
                   const SizedBox(height: 9),
-                  // Dark Mini Live Screen Brightness Preview (Image 5)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                     decoration: BoxDecoration(
@@ -2729,7 +2994,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             ),
             const SizedBox(height: 10),
 
-            // 6. Screen Sleep / Auto-Off Timeout + OLED Pixel Protection
+            // 6. Auto-Activation Timeout + Auto-AOD Sleep + Mutual Exclusion Notice (Image 8)
             Container(
               padding: const EdgeInsets.all(11),
               decoration: BoxDecoration(
@@ -2740,16 +3005,81 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    tr ? '⏱️ Ekran Uyku / Kapanma Süresi' : '⏱️ Display Sleep Timeout',
-                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.white),
+                  _MiniToggleTile(
+                    label: tr
+                        ? '📺 Smart Display Otomatik Başlatma'
+                        : '📺 Smart Display Auto-Activation',
+                    value: _draft.smartDisplayEnabled,
+                    activeColor: const Color(0xFFEA580C),
+                    onTap: () {
+                      _hapticTap();
+                      final nextSmart = !_draft.smartDisplayEnabled;
+                      setState(() => _draft = _draft.copyWith(
+                        smartDisplayEnabled: nextSmart,
+                        termoBotEnabled: nextSmart ? false : _draft.termoBotEnabled,
+                        smartDisplayAutoMinutes: nextSmart && _draft.smartDisplayAutoMinutes == 0
+                            ? 5
+                            : _draft.smartDisplayAutoMinutes,
+                      ));
+                    },
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
+                  Text(
+                    tr
+                        ? '⏱️ Otomatik Aktivasyon Süresi (Boşta Kalma):'
+                        : '⏱️ Auto-Activation Delay (Idle):',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                  ),
+                  const SizedBox(height: 7),
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
                     children: [
-                      for (final sl in sleepOptions)
+                      for (final autoOpt in autoStartOptions)
+                        GestureDetector(
+                          onTap: () {
+                            _hapticTap();
+                            final val = autoOpt.$1;
+                            setState(() => _draft = _draft.copyWith(
+                              smartDisplayAutoMinutes: val,
+                              smartDisplayEnabled: val > 0,
+                              termoBotEnabled: val > 0 ? false : _draft.termoBotEnabled,
+                            ));
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: (_draft.smartDisplayEnabled ? _draft.smartDisplayAutoMinutes : 0) == autoOpt.$1
+                                  ? const Color(0xFFEA580C).withValues(alpha: 0.28)
+                                  : Colors.white.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(9),
+                              border: Border.all(
+                                color: (_draft.smartDisplayEnabled ? _draft.smartDisplayAutoMinutes : 0) == autoOpt.$1
+                                    ? const Color(0xFFFB923C)
+                                    : Colors.white.withValues(alpha: 0.10),
+                              ),
+                            ),
+                            child: Text(
+                              autoOpt.$2,
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    tr
+                        ? '🌙 Aktif Olduktan Sonra AOD\'a Geçiş Süresi:'
+                        : '🌙 Auto-Switch to AOD After Active:',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                  ),
+                  const SizedBox(height: 7),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      for (final sl in aodSleepOptions)
                         GestureDetector(
                           onTap: () {
                             _hapticTap();
@@ -2785,6 +3115,34 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                       _hapticTap();
                       setState(() => _draft = _draft.copyWith(oledPixelShiftEnabled: !_draft.oledPixelShiftEnabled));
                     },
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF59E0B).withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(11),
+                      border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.32)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.swap_horiz_rounded, size: 15, color: Color(0xFFFBBF24)),
+                        const SizedBox(width: 7),
+                        Expanded(
+                          child: Text(
+                            tr
+                                ? 'Not: Smart Display otomatik modu ile Sanal Asistan (Maskot) ekran koruyucusu aynı anda aktif olamaz. Smart Display\'i açtığınızda Maskot pasife düşer; ana ekrandaki TV butonundan manuel açılış her zaman aktiftir.'
+                                : 'Note: Smart Display auto-activation and Mascot Screensaver are mutually exclusive. Enabling Smart Display disables Mascot; manual launch via the TV button always remains available.',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.white.withValues(alpha: 0.78),
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -3350,6 +3708,22 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            _MiniToggleTile(
+              label: tr
+                  ? '🤖 Maskot Ekran Koruyucu (Otomatik Mod)'
+                  : '🤖 Mascot Screensaver (Auto Mode)',
+              value: _draft.termoBotEnabled,
+              activeColor: const Color(0xFFEA580C),
+              onTap: () {
+                _hapticTap();
+                final nextBot = !_draft.termoBotEnabled;
+                setState(() => _draft = _draft.copyWith(
+                  termoBotEnabled: nextBot,
+                  smartDisplayEnabled: nextBot ? false : _draft.smartDisplayEnabled,
+                ));
+              },
+            ),
+            const SizedBox(height: 10),
             Wrap(
               spacing: 6,
               runSpacing: 6,
@@ -3843,6 +4217,34 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                     ),
                   );
                 },
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF59E0B).withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(11),
+                border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.32)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.swap_horiz_rounded, size: 15, color: Color(0xFFFBBF24)),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      tr
+                          ? 'Not: Maskot Ekran Koruyucu ile Smart Display otomatik modu aynı anda aktif olamaz. Maskotu aktif ettiğinizde Smart Display otomatik aktivasyonu pasife alınır (üst bardaki TV butonundan manuel açılış devam eder).'
+                          : 'Note: Mascot Screensaver and Smart Display auto-mode cannot run together. Enabling Mascot sets Smart Display auto-mode to inactive (manual TV launch stays available).',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.white.withValues(alpha: 0.78),
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

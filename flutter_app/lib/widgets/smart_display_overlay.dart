@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:video_player/video_player.dart';
 import '../models/thermostat_state.dart';
 import '../services/ambient_audio_service.dart';
 import '../services/hardware_service.dart';
+import '../services/video_source_bridge.dart';
 
 class SmartDisplayOverlay extends StatefulWidget {
   final SystemSettingsState settings;
@@ -17,6 +19,8 @@ class SmartDisplayOverlay extends StatefulWidget {
   final Color accentColor;
   final LangCode lang;
   final String paletteTag;
+  final bool forcedAod;
+  final VoidCallback? onWakeFromAutoAod;
   final ValueChanged<double> onChangeTargetTemp;
   final ValueChanged<ThermostatPreset> onSelectPreset;
   final ValueChanged<SystemSettingsState> onUpdateSettings;
@@ -35,6 +39,8 @@ class SmartDisplayOverlay extends StatefulWidget {
     required this.accentColor,
     required this.lang,
     required this.paletteTag,
+    this.forcedAod = false,
+    this.onWakeFromAutoAod,
     required this.onChangeTargetTemp,
     required this.onSelectPreset,
     required this.onUpdateSettings,
@@ -62,12 +68,23 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
   // Lightweight memory cache for base64 slide photos to avoid re-decoding every 1s clock tick
   final Map<String, Uint8List> _decodedImageCache = {};
 
+  VideoPlayerController? _videoCtrl;
+  String _activeVideoSource = '';
+  bool _videoReady = false;
+
+  SmartDisplayMode get _effectiveMode {
+    if (widget.forcedAod) return SmartDisplayMode.aod;
+    final raw = widget.settings.smartDisplayMode;
+    return raw == SmartDisplayMode.singlePhoto ? SmartDisplayMode.slideshow : raw;
+  }
+
   @override
   void initState() {
     super.initState();
     _muted = widget.settings.ambientSoundtrack == AmbientSoundtrack.silent ||
         widget.settings.ambientVolume <= 0.01;
     _animCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 12))..repeat();
+    _syncVideoController();
   }
 
   @override
@@ -76,14 +93,78 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     if (oldWidget.settings.ambientSoundtrack != widget.settings.ambientSoundtrack) {
       _muted = widget.settings.ambientSoundtrack == AmbientSoundtrack.silent;
     }
+    if (oldWidget.settings.customVideoSource != widget.settings.customVideoSource ||
+        oldWidget.settings.smartDisplayMode != widget.settings.smartDisplayMode ||
+        oldWidget.forcedAod != widget.forcedAod) {
+      _syncVideoController();
+    }
   }
 
   @override
   void dispose() {
     _thermostatTimer?.cancel();
     _hintTimer?.cancel();
+    _videoCtrl?.dispose();
     _animCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _syncVideoController() async {
+    final mode = _effectiveMode;
+    final wanted = (mode == SmartDisplayMode.silentVideoMp3 &&
+            widget.settings.customVideoSource.trim().isNotEmpty)
+        ? widget.settings.customVideoSource.trim()
+        : '';
+
+    if (wanted == _activeVideoSource) {
+      final ctrl = _videoCtrl;
+      if (ctrl != null && _videoReady) {
+        try {
+          await ctrl.setVolume(0.0);
+          if (_paused) {
+            await ctrl.pause();
+          } else {
+            await ctrl.play();
+          }
+        } catch (_) {}
+      }
+      return;
+    }
+
+    final old = _videoCtrl;
+    _videoCtrl = null;
+    _videoReady = false;
+    _activeVideoSource = wanted;
+    if (old != null) {
+      unawaited(old.dispose());
+    }
+    if (wanted.isEmpty) {
+      if (mounted) setState(() {});
+      return;
+    }
+
+    try {
+      final ctrl = VideoSourceBridge.createController(wanted);
+      if (ctrl == null) return;
+      _videoCtrl = ctrl;
+      await ctrl.initialize();
+      if (!mounted || _activeVideoSource != wanted) {
+        await ctrl.dispose();
+        return;
+      }
+      await ctrl.setLooping(true);
+      await ctrl.setVolume(0.0); // Video track stays muted; user MP3/ambient provides audio
+      if (!_paused) {
+        await ctrl.play();
+      }
+      if (mounted) {
+        setState(() => _videoReady = true);
+      }
+    } catch (_) {
+      if (mounted && _activeVideoSource == wanted) {
+        setState(() => _videoReady = false);
+      }
+    }
   }
 
   void _haptic() {
@@ -112,8 +193,13 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
       _paused = !_paused;
       if (_paused) {
         _animCtrl.stop();
+        _videoCtrl?.pause();
       } else {
         _animCtrl.repeat();
+        if (_videoReady) {
+          _videoCtrl?.setVolume(0.0);
+          _videoCtrl?.play();
+        }
       }
     });
   }
@@ -285,7 +371,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     final isLandscape = size.width > size.height;
     final compactHeight = size.height < 460;
     final s = widget.settings;
-    final mode = s.smartDisplayMode;
+    final mode = _effectiveMode;
 
     // Subtle OLED pixel-shift drift
     final aodShift = (s.oledPixelShiftEnabled || mode == SmartDisplayMode.aod)
@@ -298,7 +384,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     final (cityName, outdoorTemp, weatherIcon) = _resolveOutdoorWeather();
 
     final dimAlpha = ((1.0 - (s.displayBrightness / 100.0)) * 0.72).clamp(0.0, 0.72);
-    final isAudioActive = !_muted && s.ambientSoundtrack != AmbientSoundtrack.silent;
+    final isAudioActive = !_muted && !widget.forcedAod && s.ambientSoundtrack != AmbientSoundtrack.silent;
 
     final clockFontSize = compactHeight
         ? 54.0
@@ -307,33 +393,36 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
 
     return Material(
       color: Colors.black,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // 1. Dynamic Full-Screen Visual / Slide / Theme Backdrop Layer
-          Positioned.fill(
-            child: _buildBackgroundLayer(s),
-          ),
-
-          // Readability dark gradient scrim (except pure black AOD)
-          if (mode != SmartDisplayMode.aod)
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: widget.forcedAod ? widget.onWakeFromAutoAod : null,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 1. Dynamic Full-Screen Visual / Video / Slide / Theme Backdrop Layer
             Positioned.fill(
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.42),
-                        Colors.black.withValues(alpha: 0.16),
-                        Colors.black.withValues(alpha: 0.56),
-                      ],
+              child: _buildBackgroundLayer(s),
+            ),
+
+            // Readability dark gradient scrim (except pure black AOD)
+            if (mode != SmartDisplayMode.aod)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Colors.black.withValues(alpha: 0.42),
+                          Colors.black.withValues(alpha: 0.16),
+                          Colors.black.withValues(alpha: 0.56),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
 
           // 2. Display Brightness Dimming Overlay
           if (dimAlpha > 0.01)
@@ -712,6 +801,33 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
               ),
             ),
 
+          // Brief auto-AOD sleep pill indicator
+          if (widget.forcedAod)
+            Positioned(
+              bottom: 72,
+              left: 20,
+              right: 20,
+              child: IgnorePointer(
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+                    ),
+                    child: Text(
+                      tr
+                          ? '🌙 Otomatik Uyku AOD Modu · Uyandırmak için ekrana dokunun'
+                          : '🌙 Auto-Sleep AOD · Tap anywhere to wake',
+                      style: const TextStyle(fontSize: 11, color: Colors.white60, fontWeight: FontWeight.w500),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
           // 4. Embedded Termostat Kontrolü Modal (Image 7)
           if (_thermostatModalOpen)
             Positioned.fill(
@@ -735,13 +851,14 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                 onClose: _closeThermostatModal,
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildBackgroundLayer(SystemSettingsState s) {
-    final mode = s.smartDisplayMode;
+    final mode = _effectiveMode;
     if (mode == SmartDisplayMode.aod) {
       return Container(color: Colors.black);
     }
@@ -783,7 +900,34 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
       );
     }
 
-    // Uploaded Slideshow Photos
+    // 1. Muted Custom Video Loop in Sessiz Video + MP3 Mode
+    if (mode == SmartDisplayMode.silentVideoMp3 &&
+        _videoCtrl != null &&
+        _videoReady &&
+        _videoCtrl!.value.isInitialized) {
+      final vSize = _videoCtrl!.value.size;
+      final vw = vSize.width > 0 ? vSize.width : 1280.0;
+      final vh = vSize.height > 0 ? vSize.height : 720.0;
+      return wrapTransition(
+        ValueKey('silent_video_${_activeVideoSource.hashCode}'),
+        Container(
+          color: Colors.black,
+          width: double.infinity,
+          height: double.infinity,
+          child: FittedBox(
+            fit: fit,
+            clipBehavior: Clip.hardEdge,
+            child: SizedBox(
+              width: vw,
+              height: vh,
+              child: VideoPlayer(_videoCtrl!),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // 2. Uploaded Slideshow Photos (1 or more photos)
     if (mode == SmartDisplayMode.slideshow && s.slideImages.isNotEmpty) {
       final safeIdx = widget.slideIndex % s.slideImages.length;
       final img = s.slideImages[safeIdx];
@@ -795,62 +939,91 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
             color: Colors.black,
             width: double.infinity,
             height: double.infinity,
-            child: Image.memory(
-              bytes,
-              fit: fit,
-              width: double.infinity,
-              height: double.infinity,
-              gaplessPlayback: true,
+            child: AnimatedBuilder(
+              animation: _animCtrl,
+              builder: (_, child) {
+                final kenBurns = s.smartDisplayLayout == VisualLayoutMode.cover
+                    ? (1.0 + 0.04 * (0.5 - 0.5 * math.cos(_animCtrl.value * math.pi * 2)))
+                    : 1.0;
+                return Transform.scale(scale: kenBurns, child: child);
+              },
+              child: Image.memory(
+                bytes,
+                fit: fit,
+                width: double.infinity,
+                height: double.infinity,
+                gaplessPlayback: true,
+              ),
             ),
           ),
         );
       }
     }
 
-    // Uploaded Single Photo
-    if (mode == SmartDisplayMode.singlePhoto && s.singleDisplayImage != null) {
-      final img = s.singleDisplayImage!;
-      final bytes = _bytesForImage(img);
-      if (bytes != null) {
-        return wrapTransition(
-          ValueKey('single_photo_${img.id}'),
-          Container(
-            color: Colors.black,
-            width: double.infinity,
-            height: double.infinity,
-            child: Image.memory(
-              bytes,
-              fit: fit,
-              width: double.infinity,
-              height: double.infinity,
-              gaplessPlayback: true,
-            ),
-          ),
-        );
-      }
-    }
-
-    // Procedural Theme / Built-in Slideshow Scenic Canvas
+    // 3. Built-in Live Photorealistic Themes + Real-time Animated Atmospheric Particles
     final effectiveTheme = mode == SmartDisplayMode.slideshow
         ? [
             SmartDisplayVisualTheme.sunset,
             SmartDisplayVisualTheme.fireplace,
             SmartDisplayVisualTheme.aurora,
             SmartDisplayVisualTheme.winterSnow,
-          ][widget.slideIndex % 4]
+            SmartDisplayVisualTheme.rainy,
+          ][widget.slideIndex % 5]
         : s.smartDisplayVisualTheme;
+    final themeAsset = smartDisplayThemeAssetPath(effectiveTheme);
 
     return wrapTransition(
       ValueKey('theme_${mode.name}_${effectiveTheme.name}_${widget.slideIndex}'),
-      AnimatedBuilder(
-        animation: _animCtrl,
-        builder: (_, __) => CustomPaint(
-          painter: _SmartDisplayScenePainter(
-            theme: effectiveTheme,
-            phase: _animCtrl.value,
+      Stack(
+        fit: StackFit.expand,
+        children: [
+          if (themeAsset.isNotEmpty)
+            AnimatedBuilder(
+              animation: _animCtrl,
+              builder: (_, child) {
+                final t = _animCtrl.value * math.pi * 2;
+                final scale = 1.03 + 0.035 * (0.5 - 0.5 * math.cos(t));
+                final dx = math.sin(t) * 10.0;
+                final dy = math.cos(t * 0.5) * 6.0;
+                return Transform.translate(
+                  offset: Offset(dx, dy),
+                  child: Transform.scale(scale: scale, child: child),
+                );
+              },
+              child: Image.asset(
+                themeAsset,
+                fit: fit,
+                width: double.infinity,
+                height: double.infinity,
+                gaplessPlayback: true,
+                errorBuilder: (_, __, ___) => CustomPaint(
+                  painter: _SmartDisplayScenePainter(
+                    theme: effectiveTheme,
+                    phase: _animCtrl.value,
+                    drawBackdrop: true,
+                  ),
+                  size: Size.infinite,
+                ),
+              ),
+            )
+          else
+            Container(color: const Color(0xFF0A0A10)),
+
+          // Real-time 60fps weather/ember/aurora/droplet motion layer on top of backdrop
+          IgnorePointer(
+            child: AnimatedBuilder(
+              animation: _animCtrl,
+              builder: (_, __) => CustomPaint(
+                painter: _SmartDisplayScenePainter(
+                  theme: effectiveTheme,
+                  phase: _animCtrl.value,
+                  drawBackdrop: themeAsset.isEmpty,
+                ),
+                size: Size.infinite,
+              ),
+            ),
           ),
-          size: Size.infinite,
-        ),
+        ],
       ),
     );
   }
@@ -1186,10 +1359,9 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     final s = widget.settings;
     final modes = [
       (SmartDisplayMode.aod, 'AOD'),
-      (SmartDisplayMode.silentVideoMp3, tr ? 'Video+MP3' : 'Video+MP3'),
+      (SmartDisplayMode.silentVideoMp3, 'Video+MP3'),
       (SmartDisplayMode.liveNature, tr ? 'Canlı Doğa' : 'Live Nature'),
       (SmartDisplayMode.slideshow, tr ? 'Slayt' : 'Slideshow'),
-      (SmartDisplayMode.singlePhoto, tr ? 'Tekli' : 'Photo'),
     ];
     final themes = [
       (SmartDisplayVisualTheme.fireplace, '🔥 ${tr ? 'Şömine' : 'Fire'}'),
@@ -2093,10 +2265,12 @@ class _SmartEqualizerPainter extends CustomPainter {
 class _SmartDisplayScenePainter extends CustomPainter {
   final SmartDisplayVisualTheme theme;
   final double phase;
+  final bool drawBackdrop;
 
   const _SmartDisplayScenePainter({
     required this.theme,
     required this.phase,
+    this.drawBackdrop = true,
   });
 
   @override
@@ -2104,130 +2278,152 @@ class _SmartDisplayScenePainter extends CustomPainter {
     final rect = Offset.zero & size;
     switch (theme) {
       case SmartDisplayVisualTheme.fireplace:
-        canvas.drawRect(
-          rect,
-          Paint()
-            ..shader = const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFF1A0905), Color(0xFF451306), Color(0xFF0E0402)],
-            ).createShader(rect),
-        );
-        final emberCenter = Offset(size.width * 0.5, size.height * 0.78);
-        final glowR = size.shortestSide * (0.48 + 0.04 * math.sin(phase * math.pi * 4));
+        if (drawBackdrop) {
+          canvas.drawRect(
+            rect,
+            Paint()
+              ..shader = const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFF1A0905), Color(0xFF451306), Color(0xFF0E0402)],
+              ).createShader(rect),
+          );
+        }
+        // Flickering warm fire glow pulse & floating embers
+        final emberCenter = Offset(size.width * 0.5, size.height * 0.72);
+        final flicker = 0.5 + 0.5 * math.sin(phase * math.pi * 10);
+        final glowR = size.shortestSide * (0.46 + 0.06 * flicker);
         canvas.drawCircle(
           emberCenter,
           glowR,
           Paint()
             ..shader = RadialGradient(
               colors: [
-                const Color(0xFFEA580C).withValues(alpha: 0.65),
-                const Color(0xFF9A3412).withValues(alpha: 0.25),
+                const Color(0xFFEA580C).withValues(alpha: drawBackdrop ? 0.65 : (0.14 + 0.12 * flicker)),
+                const Color(0xFF9A3412).withValues(alpha: drawBackdrop ? 0.25 : 0.06),
                 Colors.transparent,
               ],
             ).createShader(Rect.fromCircle(center: emberCenter, radius: glowR)),
         );
-        for (int i = 0; i < 24; i++) {
+        for (int i = 0; i < 28; i++) {
           final seed = i * 1.37;
-          final progress = (phase * 1.4 + seed) % 1.0;
-          final x = size.width * (0.25 + 0.50 * ((math.sin(seed * 7.1) + 1) / 2)) +
-              math.sin(progress * math.pi * 3 + seed) * 14;
-          final y = size.height * (0.88 - progress * 0.65);
+          final progress = (phase * 1.6 + seed) % 1.0;
+          final x = size.width * (0.22 + 0.56 * ((math.sin(seed * 7.1) + 1) / 2)) +
+              math.sin(progress * math.pi * 3 + seed) * 16;
+          final y = size.height * (0.90 - progress * 0.70);
           canvas.drawCircle(
             Offset(x, y),
-            1.8 + (i % 3),
-            Paint()..color = const Color(0xFFFBBF24).withValues(alpha: (1.0 - progress) * 0.75),
+            1.6 + (i % 3) * 0.7,
+            Paint()..color = const Color(0xFFFBBF24).withValues(alpha: (1.0 - progress) * 0.72),
           );
         }
         break;
 
       case SmartDisplayVisualTheme.rainy:
-        canvas.drawRect(
-          rect,
-          Paint()
-            ..shader = const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFF0B1628), Color(0xFF162B47), Color(0xFF09111E)],
-            ).createShader(rect),
-        );
+        if (drawBackdrop) {
+          canvas.drawRect(
+            rect,
+            Paint()
+              ..shader = const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFF0B1628), Color(0xFF162B47), Color(0xFF09111E)],
+              ).createShader(rect),
+          );
+        }
         final rainPaint = Paint()
-          ..color = const Color(0xFF93C5FD).withValues(alpha: 0.34)
-          ..strokeWidth = 1.4
+          ..color = const Color(0xFFBFDBFE).withValues(alpha: drawBackdrop ? 0.34 : 0.22)
+          ..strokeWidth = 1.3
           ..strokeCap = StrokeCap.round;
-        for (int i = 0; i < 48; i++) {
+        for (int i = 0; i < 42; i++) {
           final col = ((i * 29) % 100) / 100.0;
           final fall = (phase * 3.0 + i * 0.13) % 1.0;
-          final x = col * size.width - fall * 26;
+          final x = col * size.width - fall * 24;
           final y = fall * (size.height + 60) - 30;
-          canvas.drawLine(Offset(x, y), Offset(x - 6, y + 22), rainPaint);
+          canvas.drawLine(Offset(x, y), Offset(x - 5, y + 20), rainPaint);
+        }
+        // Slow sliding water droplets on window glass
+        for (int d = 0; d < 12; d++) {
+          final col = ((d * 41 + 13) % 100) / 100.0;
+          final drip = (phase * 0.65 + d * 0.19) % 1.0;
+          final x = col * size.width + math.sin(drip * math.pi * 4 + d) * 3;
+          final y = drip * size.height;
+          canvas.drawCircle(
+            Offset(x, y),
+            2.2 + (d % 2),
+            Paint()..color = Colors.white.withValues(alpha: 0.28),
+          );
         }
         break;
 
       case SmartDisplayVisualTheme.winterSnow:
-        canvas.drawRect(
-          rect,
-          Paint()
-            ..shader = const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFF0C1A32), Color(0xFF1E3A5F), Color(0xFF0B1424)],
-            ).createShader(rect),
-        );
-        for (int i = 0; i < 42; i++) {
+        if (drawBackdrop) {
+          canvas.drawRect(
+            rect,
+            Paint()
+              ..shader = const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFF0C1A32), Color(0xFF1E3A5F), Color(0xFF0B1424)],
+              ).createShader(rect),
+          );
+        }
+        for (int i = 0; i < 52; i++) {
           final seed = i * 0.73;
-          final fall = (phase * 1.2 + seed) % 1.0;
-          final x = (((i * 37) % 100) / 100.0) * size.width + math.sin(fall * math.pi * 2 + seed) * 18;
+          final fall = (phase * 1.3 + seed) % 1.0;
+          final x = (((i * 37) % 100) / 100.0) * size.width + math.sin(fall * math.pi * 2 + seed) * 22;
           final y = fall * size.height;
           canvas.drawCircle(
             Offset(x, y),
-            1.6 + (i % 3) * 0.9,
-            Paint()..color = Colors.white.withValues(alpha: 0.55 - fall * 0.25),
+            1.4 + (i % 4) * 0.75,
+            Paint()..color = Colors.white.withValues(alpha: (0.62 - fall * 0.28).clamp(0.1, 0.7)),
           );
         }
         break;
 
       case SmartDisplayVisualTheme.sunset:
-        // Warm ocean sunset sky & gentle shoreline matching Image 6 mood
-        canvas.drawRect(
-          rect,
-          Paint()
-            ..shader = const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              stops: [0.0, 0.42, 0.56, 0.78, 1.0],
-              colors: [
-                Color(0xFF2E384E),
-                Color(0xFFB4785A),
-                Color(0xFFE09F67),
-                Color(0xFF174A54),
-                Color(0xFF1B242B),
-              ],
-            ).createShader(rect),
-        );
-        final sunCenter = Offset(size.width * 0.34, size.height * 0.48);
-        final sunRadius = size.shortestSide * 0.26;
+        if (drawBackdrop) {
+          canvas.drawRect(
+            rect,
+            Paint()
+              ..shader = const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                stops: [0.0, 0.42, 0.56, 0.78, 1.0],
+                colors: [
+                  Color(0xFF2E384E),
+                  Color(0xFFB4785A),
+                  Color(0xFFE09F67),
+                  Color(0xFF174A54),
+                  Color(0xFF1B242B),
+                ],
+              ).createShader(rect),
+          );
+        }
+        final sunCenter = Offset(size.width * 0.62, size.height * 0.44);
+        final pulse = 0.5 + 0.5 * math.sin(phase * math.pi * 2);
+        final sunRadius = size.shortestSide * (0.28 + 0.04 * pulse);
         canvas.drawCircle(
           sunCenter,
           sunRadius,
           Paint()
             ..shader = RadialGradient(
               colors: [
-                const Color(0xFFFDE68A).withValues(alpha: 0.65),
-                const Color(0xFFF59E0B).withValues(alpha: 0.20),
+                const Color(0xFFFDE68A).withValues(alpha: drawBackdrop ? 0.65 : (0.14 + 0.08 * pulse)),
+                const Color(0xFFF59E0B).withValues(alpha: drawBackdrop ? 0.20 : 0.06),
                 Colors.transparent,
               ],
             ).createShader(Rect.fromCircle(center: sunCenter, radius: sunRadius)),
         );
         final wavePaint = Paint()
-          ..color = Colors.white.withValues(alpha: 0.14)
+          ..color = const Color(0xFFFDE68A).withValues(alpha: drawBackdrop ? 0.16 : 0.10)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1.6;
+          ..strokeWidth = 1.4;
         for (int w = 0; w < 4; w++) {
-          final baseY = size.height * (0.64 + w * 0.08);
+          final baseY = size.height * (0.68 + w * 0.07);
           final path = Path();
-          for (double x = 0; x <= size.width; x += 12) {
-            final y = baseY + math.sin((x / size.width) * math.pi * 4 + phase * math.pi * 2 + w) * 6;
+          for (double x = 0; x <= size.width; x += 14) {
+            final y = baseY + math.sin((x / size.width) * math.pi * 4 + phase * math.pi * 2 + w) * 4;
             if (x == 0) {
               path.moveTo(x, y);
             } else {
@@ -2239,31 +2435,34 @@ class _SmartDisplayScenePainter extends CustomPainter {
         break;
 
       case SmartDisplayVisualTheme.aurora:
-        canvas.drawRect(
-          rect,
-          Paint()
-            ..shader = const LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0xFF040814), Color(0xFF0A1D2A), Color(0xFF070B16)],
-            ).createShader(rect),
-        );
+        if (drawBackdrop) {
+          canvas.drawRect(
+            rect,
+            Paint()
+              ..shader = const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFF040814), Color(0xFF0A1D2A), Color(0xFF070B16)],
+              ).createShader(rect),
+          );
+        }
         for (int b = 0; b < 3; b++) {
-          final bandY = size.height * (0.28 + b * 0.12);
+          final bandY = size.height * (0.24 + b * 0.11);
           final ribbon = Path()..moveTo(0, bandY);
           for (double x = 0; x <= size.width; x += 16) {
-            final y = bandY + math.sin((x / size.width) * math.pi * 2.5 + phase * math.pi * 2 + b * 1.4) * 32;
+            final y = bandY + math.sin((x / size.width) * math.pi * 2.5 + phase * math.pi * 2 + b * 1.4) * 28;
             ribbon.lineTo(x, y);
           }
-          ribbon.lineTo(size.width, bandY + 80);
-          ribbon.lineTo(0, bandY + 80);
+          ribbon.lineTo(size.width, bandY + 85);
+          ribbon.lineTo(0, bandY + 85);
           ribbon.close();
           canvas.drawPath(
             ribbon,
             Paint()
               ..shader = LinearGradient(
                 colors: [
-                  (b == 1 ? const Color(0xFF8B5CF6) : const Color(0xFF10B981)).withValues(alpha: 0.34),
+                  (b == 1 ? const Color(0xFF8B5CF6) : const Color(0xFF10B981))
+                      .withValues(alpha: drawBackdrop ? 0.34 : 0.16),
                   Colors.transparent,
                 ],
                 begin: Alignment.topCenter,
@@ -2271,24 +2470,33 @@ class _SmartDisplayScenePainter extends CustomPainter {
               ).createShader(Rect.fromLTWH(0, bandY - 40, size.width, 130)),
           );
         }
+        // Subtle twinkling night stars
+        for (int st = 0; st < 20; st++) {
+          final sx = (((st * 53) % 97) / 97.0) * size.width;
+          final sy = (((st * 31) % 45) / 100.0) * size.height;
+          final tw = 0.25 + 0.55 * (0.5 + 0.5 * math.sin(phase * math.pi * 4 + st));
+          canvas.drawCircle(Offset(sx, sy), 1.1, Paint()..color = Colors.white.withValues(alpha: tw));
+        }
         break;
 
       case SmartDisplayVisualTheme.minimalist:
-        canvas.drawRect(
-          rect,
-          Paint()
-            ..shader = const RadialGradient(
-              center: Alignment(0, -0.1),
-              radius: 1.1,
-              colors: [Color(0xFF1B1C24), Color(0xFF09090D)],
-            ).createShader(rect),
-        );
+        if (drawBackdrop) {
+          canvas.drawRect(
+            rect,
+            Paint()
+              ..shader = const RadialGradient(
+                center: Alignment(0, -0.1),
+                radius: 1.1,
+                colors: [Color(0xFF1B1C24), Color(0xFF09090D)],
+              ).createShader(rect),
+          );
+        }
         final breathe = 0.25 + 0.04 * math.sin(phase * math.pi * 2);
         canvas.drawCircle(
           Offset(size.width / 2, size.height / 2),
           size.shortestSide * breathe,
           Paint()
-            ..color = Colors.white.withValues(alpha: 0.04)
+            ..color = Colors.white.withValues(alpha: 0.05)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.5,
         );
@@ -2298,5 +2506,5 @@ class _SmartDisplayScenePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _SmartDisplayScenePainter oldDelegate) =>
-      oldDelegate.theme != theme || oldDelegate.phase != phase;
+      oldDelegate.theme != theme || oldDelegate.phase != phase || oldDelegate.drawBackdrop != drawBackdrop;
 }
