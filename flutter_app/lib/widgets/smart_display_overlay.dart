@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import '../models/thermostat_state.dart';
@@ -72,8 +73,10 @@ class SmartDisplayOverlay extends StatefulWidget {
   State<SmartDisplayOverlay> createState() => _SmartDisplayOverlayState();
 }
 
-class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTickerProviderStateMixin {
+class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerProviderStateMixin {
   late final AnimationController _animCtrl;
+  late final AnimationController _leftBarCtrl;
+  late final AnimationController _rightBarCtrl;
   bool _hudHidden = false;
   bool _controlsIdleHidden = false;
   bool _paused = false;
@@ -107,10 +110,61 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     return raw == SmartDisplayMode.singlePhoto ? SmartDisplayMode.slideshow : raw;
   }
 
+  bool _hasCustomAudio(SystemSettingsState s) =>
+      s.customAudioSource.trim().isNotEmpty || s.customAudioLabel.trim().isNotEmpty;
+
+  bool _isVideoBackedMode(SmartDisplayMode mode, SystemSettingsState s) {
+    if (mode == SmartDisplayMode.aod) return false;
+    if (mode == SmartDisplayMode.silentVideoMp3) {
+      return s.customVideoSource.trim().isNotEmpty ||
+          s.smartDisplayVisualTheme != SmartDisplayVisualTheme.minimalist;
+    }
+    if (mode == SmartDisplayMode.liveNature) {
+      return s.smartDisplayVisualTheme != SmartDisplayVisualTheme.minimalist;
+    }
+    if (mode == SmartDisplayMode.slideshow && s.slideImages.isEmpty) {
+      return _activeThemeForMode(s, mode) != SmartDisplayVisualTheme.minimalist;
+    }
+    return false;
+  }
+
   double get _effectiveBlurSigma => _effectiveMode == SmartDisplayMode.aod ? 0.0 : widget.settings.smartDisplayBlur;
 
   void _syncDomVideoBlur() {
     VideoSourceBridge.applyDomVideoBlur(_effectiveBlurSigma);
+  }
+
+  void _showHint(String msg) {
+    _hintTimer?.cancel();
+    setState(() => _hudHintBanner = msg);
+    _hintTimer = Timer(const Duration(milliseconds: 2200), () {
+      if (mounted) setState(() => _hudHintBanner = null);
+    });
+  }
+
+  void _setLeftExpanded(bool open) {
+    _leftCollapseTimer?.cancel();
+    setState(() {
+      _leftExpanded = open;
+      if (!open) _volumePopupOpen = false;
+    });
+    if (open) {
+      _leftBarCtrl.forward();
+      _scheduleLeftCollapse();
+    } else {
+      _leftBarCtrl.reverse();
+    }
+  }
+
+  void _setRightExpanded(bool open) {
+    _rightCollapseTimer?.cancel();
+    setState(() => _rightExpanded = open);
+    if (open) {
+      _rightBarCtrl.forward();
+      _scheduleRightCollapse();
+    } else {
+      _rightBarCtrl.reverse();
+    }
   }
 
   void _wakeBottomControls() {
@@ -129,6 +183,8 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
         _leftExpanded = false;
         _rightExpanded = false;
       });
+      _leftBarCtrl.reverse();
+      _rightBarCtrl.reverse();
     });
   }
 
@@ -138,7 +194,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     _leftCollapseTimer = Timer(const Duration(milliseconds: 1500), () {
       if (!mounted) return;
       if (_leftExpanded && !_volumePopupOpen) {
-        setState(() => _leftExpanded = false);
+        _setLeftExpanded(false);
       }
     });
   }
@@ -149,7 +205,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     _rightCollapseTimer = Timer(const Duration(milliseconds: 1500), () {
       if (!mounted) return;
       if (_rightExpanded && !_draggingBrightness) {
-        setState(() => _rightExpanded = false);
+        _setRightExpanded(false);
       }
     });
   }
@@ -157,9 +213,12 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
   @override
   void initState() {
     super.initState();
-    _muted = widget.settings.ambientSoundtrack == AmbientSoundtrack.silent ||
+    _muted = widget.settings.ambientSoundtrack != AmbientSoundtrack.customMp3 ||
+        !_hasCustomAudio(widget.settings) ||
         widget.settings.ambientVolume <= 0.01;
     _animCtrl = AnimationController(vsync: this, duration: const Duration(seconds: 12))..repeat();
+    _leftBarCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 260));
+    _rightBarCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 260));
     _syncVideoController();
     _wakeBottomControls();
     WidgetsBinding.instance.addPostFrameCallback((_) => _syncDomVideoBlur());
@@ -168,8 +227,10 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
   @override
   void didUpdateWidget(covariant SmartDisplayOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.settings.ambientSoundtrack != widget.settings.ambientSoundtrack) {
-      _muted = widget.settings.ambientSoundtrack == AmbientSoundtrack.silent;
+    if (oldWidget.settings.ambientSoundtrack != widget.settings.ambientSoundtrack ||
+        oldWidget.settings.customAudioSource != widget.settings.customAudioSource) {
+      _muted = widget.settings.ambientSoundtrack != AmbientSoundtrack.customMp3 ||
+          !_hasCustomAudio(widget.settings);
     }
     if (oldWidget.settings.customVideoSource != widget.settings.customVideoSource ||
         oldWidget.settings.smartDisplayMode != widget.settings.smartDisplayMode ||
@@ -184,6 +245,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     if (oldWidget.settings.smartDisplayBlur != widget.settings.smartDisplayBlur ||
         oldWidget.forcedAod != widget.forcedAod ||
         oldWidget.settings.smartDisplayMode != widget.settings.smartDisplayMode) {
+      _syncDomVideoBlur();
       WidgetsBinding.instance.addPostFrameCallback((_) => _syncDomVideoBlur());
     }
   }
@@ -197,6 +259,8 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     _hintTimer?.cancel();
     VideoSourceBridge.applyDomVideoBlur(0.0);
     _videoCtrl?.dispose();
+    _leftBarCtrl.dispose();
+    _rightBarCtrl.dispose();
     _animCtrl.dispose();
     super.dispose();
   }
@@ -272,12 +336,13 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
         return;
       }
       await ctrl.setLooping(true);
-      await ctrl.setVolume(0.0); // Video stays muted; user MP3 / ambient playlist supplies audio
+      await ctrl.setVolume(0.0); // Video stays muted; external MP3 supplies audio
       if (!_paused) {
         await ctrl.play();
       }
       if (mounted) {
         setState(() => _videoReady = true);
+        _syncDomVideoBlur();
         WidgetsBinding.instance.addPostFrameCallback((_) => _syncDomVideoBlur());
       }
     } catch (_) {
@@ -328,23 +393,30 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
 
   void _toggleMute() {
     _haptic();
+    final s = widget.settings;
+    final hasCustom = _hasCustomAudio(s);
     final nextMuted = !_muted;
+    if (!nextMuted && !hasCustom) {
+      setState(() => _muted = true);
+      AmbientAudioService.stop();
+      _showHint(
+        widget.lang == LangCode.tr
+            ? 'MP3 çalmak için Ayarlar → Smart Display bölümünden MP3 ekleyin'
+            : 'Add an MP3 in Settings → Smart Display to play audio',
+      );
+      return;
+    }
     setState(() => _muted = nextMuted);
     if (nextMuted) {
       AmbientAudioService.stop();
     } else {
-      final track = widget.settings.ambientSoundtrack == AmbientSoundtrack.silent
-          ? AmbientSoundtrack.fireplaceCrackling
-          : widget.settings.ambientSoundtrack;
-      if (widget.settings.ambientSoundtrack == AmbientSoundtrack.silent) {
-        widget.onUpdateSettings(widget.settings.copyWith(ambientSoundtrack: track));
+      if (s.ambientSoundtrack != AmbientSoundtrack.customMp3) {
+        widget.onUpdateSettings(s.copyWith(ambientSoundtrack: AmbientSoundtrack.customMp3));
       }
       AmbientAudioService.start(
-        track: track,
-        customSource: widget.settings.customAudioSource.isNotEmpty
-            ? widget.settings.customAudioSource
-            : widget.settings.customAudioLabel,
-        volume: widget.settings.ambientVolume <= 0.05 ? 0.5 : widget.settings.ambientVolume,
+        track: AmbientSoundtrack.customMp3,
+        customSource: s.customAudioSource.isNotEmpty ? s.customAudioSource : s.customAudioLabel,
+        volume: s.ambientVolume <= 0.05 ? 0.5 : s.ambientVolume,
       );
     }
   }
@@ -358,18 +430,10 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
         : delta;
     widget.onStepSlideIndex(slideStep);
 
-    final hasCustom = s.customAudioSource.trim().isNotEmpty || s.customAudioLabel.trim().isNotEmpty;
-    final nextTrack = AmbientAudioService.stepPlaylistTrack(
-      s.ambientSoundtrack,
-      delta,
-      hasCustomAudio: hasCustom,
-      shuffle: _shuffleEnabled,
-    );
-    final nextSettings = s.copyWith(ambientSoundtrack: nextTrack);
-    widget.onUpdateSettings(nextSettings);
-    if (!_muted && nextTrack != AmbientSoundtrack.silent) {
+    final hasCustom = _hasCustomAudio(s);
+    if (!_muted && hasCustom && s.ambientSoundtrack == AmbientSoundtrack.customMp3) {
       AmbientAudioService.start(
-        track: nextTrack,
+        track: AmbientSoundtrack.customMp3,
         customSource: s.customAudioSource.isNotEmpty ? s.customAudioSource : s.customAudioLabel,
         volume: s.ambientVolume <= 0.05 ? 0.5 : s.ambientVolume,
       );
@@ -395,6 +459,8 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
           : null;
     });
     if (next) {
+      _leftBarCtrl.reverse();
+      _rightBarCtrl.reverse();
       _hintTimer = Timer(const Duration(milliseconds: 2200), () {
         if (mounted) setState(() => _hudHintBanner = null);
       });
@@ -523,7 +589,13 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     final (cityName, outdoorTemp, weatherIcon) = _resolveOutdoorWeather();
 
     final dimAlpha = ((1.0 - (s.displayBrightness / 100.0)) * 0.72).clamp(0.0, 0.72);
-    final isAudioActive = !_muted && !widget.forcedAod && s.ambientSoundtrack != AmbientSoundtrack.silent;
+    final hasCustomAudio = _hasCustomAudio(s);
+    final isAudioActive = !_muted &&
+        !widget.forcedAod &&
+        hasCustomAudio &&
+        s.ambientSoundtrack == AmbientSoundtrack.customMp3;
+    final videoBacked = _isVideoBackedMode(mode, s);
+    final applyFlutterImageBlur = mode != SmartDisplayMode.aod && s.smartDisplayBlur > 0.1 && !(kIsWeb && videoBacked);
 
     final targetHeightFont = compactHeight
         ? size.height * 0.23
@@ -531,7 +603,18 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     final maxByWidth = ((size.width - 48) / 4.35).clamp(44.0, 168.0);
     final clockFontSize = math.min(targetHeightFont, maxByWidth);
     final secFontSize = (clockFontSize * 0.26).clamp(15.0, 38.0);
-    final bottomControlsHidden = _hudHidden || _controlsIdleHidden;
+    final clockColonPad = (clockFontSize * 0.045).clamp(2.0, 6.0);
+    final clockDigitStyle = TextStyle(
+      fontSize: clockFontSize,
+      fontWeight: FontWeight.w600,
+      color: Colors.white.withValues(alpha: 0.94),
+      letterSpacing: 0.8,
+      height: 0.95,
+      fontFeatures: const [FontFeature.tabularFigures()],
+      shadows: [
+        Shadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 18),
+      ],
+    );
 
     return Material(
       color: Colors.black,
@@ -555,7 +638,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                 // 1. Dynamic Full-Screen Visual / Video / Slide / Theme Backdrop Layer (+ Configurable Blur)
                 Positioned.fill(
                   child: ClipRect(
-                    child: (mode != SmartDisplayMode.aod && s.smartDisplayBlur > 0.1)
+                    child: applyFlutterImageBlur
                         ? Transform.scale(
                             scale: 1.0 + s.smartDisplayBlur / 140.0,
                             child: ImageFiltered(
@@ -630,16 +713,16 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                           ),
                         ),
 
-                        // CENTER CLOCK, DATE, ROOM/TARGET PILL & EQUALIZER
+                        // CENTER CLOCK, DATE, ROOM/TARGET PILL & EQUALIZER (Recedes smoothly backward on hide)
                         Expanded(
                           child: Center(
-                            child: AnimatedSlide(
-                              offset: _hudHidden ? const Offset(0, -0.35) : Offset.zero,
-                              duration: const Duration(milliseconds: 440),
+                            child: AnimatedScale(
+                              scale: _hudHidden ? 0.84 : 1.0,
+                              duration: const Duration(milliseconds: 380),
                               curve: Curves.easeInOutCubic,
                               child: AnimatedOpacity(
                                 opacity: _hudHidden ? 0.0 : 1.0,
-                                duration: const Duration(milliseconds: 320),
+                                duration: const Duration(milliseconds: 300),
                                 child: IgnorePointer(
                                   ignoring: _hudHidden,
                                   child: Transform.translate(
@@ -649,7 +732,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                                       child: Column(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          // Huge Dynamic Crisp Clock HH : MM  ss
+                                          // Huge Dynamic Crisp Clock HH:MM  ss (compact colon spacing)
                                           FittedBox(
                                             fit: BoxFit.scaleDown,
                                             child: Row(
@@ -657,21 +740,18 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                                               crossAxisAlignment: CrossAxisAlignment.baseline,
                                               textBaseline: TextBaseline.alphabetic,
                                               children: [
-                                                Text(
-                                                  '$hh : $mm',
-                                                  style: TextStyle(
-                                                    fontSize: clockFontSize,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: Colors.white.withValues(alpha: 0.94),
-                                                    letterSpacing: 3.0,
-                                                    height: 0.95,
-                                                    fontFeatures: const [FontFeature.tabularFigures()],
-                                                    shadows: [
-                                                      Shadow(color: Colors.black.withValues(alpha: 0.55), blurRadius: 18),
-                                                    ],
+                                                Text(hh, style: clockDigitStyle),
+                                                Padding(
+                                                  padding: EdgeInsets.symmetric(horizontal: clockColonPad),
+                                                  child: Text(
+                                                    ':',
+                                                    style: clockDigitStyle.copyWith(
+                                                      color: Colors.white.withValues(alpha: 0.86),
+                                                    ),
                                                   ),
                                                 ),
-                                                const SizedBox(width: 10),
+                                                Text(mm, style: clockDigitStyle),
+                                                const SizedBox(width: 8),
                                                 Text(
                                                   ss,
                                                   style: TextStyle(
@@ -833,7 +913,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                         ),
 
                         // Quick Upward Drawers / Volume Slider Popup
-                        if (!bottomControlsHidden && (_leftDrawerOpen || _volumePopupOpen))
+                        if (!(_hudHidden || _controlsIdleHidden) && (_leftDrawerOpen || _volumePopupOpen))
                           Padding(
                             padding: const EdgeInsets.only(bottom: 10),
                             child: Align(
@@ -842,68 +922,86 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                             ),
                           ),
 
-                        // BOTTOM-CENTER MARQUEE TRACK PILL (Img 10)
-                        if (!_hudHidden && s.marqueeTrackEnabled && isAudioActive)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Center(
-                              child: Container(
-                                constraints: const BoxConstraints(maxWidth: 256),
-                                padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.46),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.36)),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.music_note_rounded, size: 13, color: Color(0xFF7DD3FC)),
-                                    const SizedBox(width: 6),
-                                    Flexible(
-                                      child: _ScrollingMarqueeText(
-                                        text: '${s.ambientTrackTitle(widget.lang)} · %${(s.ambientVolume * 100).round()}',
-                                        style: const TextStyle(
-                                          fontSize: 11.5,
-                                          fontWeight: FontWeight.w600,
-                                          color: Color(0xFFE0F2FE),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-
-                        // BOTTOM TOOLBAR ROW (Auto-hides after 10s idle; Paintbrush stays clickable when HUD cleaned)
+                        // BOTTOM TOOLBAR ROW (Left Pill + Centered Inline Marquee + Right Pill & Paintbrush)
                         AnimatedOpacity(
                           opacity: _controlsIdleHidden ? 0.0 : 1.0,
                           duration: const Duration(milliseconds: 300),
                           child: IgnorePointer(
                             ignoring: _controlsIdleHidden,
                             child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              crossAxisAlignment: CrossAxisAlignment.end,
+                              crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                // Bottom-Left Collapsible Pill Bar (Img 3)
-                                Flexible(
-                                  child: AnimatedSlide(
-                                    offset: _hudHidden ? const Offset(0, 2.2) : Offset.zero,
-                                    duration: const Duration(milliseconds: 420),
-                                    curve: Curves.easeInOutCubic,
-                                    child: AnimatedOpacity(
-                                      opacity: _hudHidden ? 0.0 : 1.0,
-                                      duration: const Duration(milliseconds: 280),
-                                      child: IgnorePointer(
-                                        ignoring: _hudHidden,
-                                        child: _buildBottomLeftPill(tr),
-                                      ),
+                                // Bottom-Left Collapsible Pill Bar
+                                AnimatedSlide(
+                                  offset: _hudHidden ? const Offset(0, 2.2) : Offset.zero,
+                                  duration: const Duration(milliseconds: 420),
+                                  curve: Curves.easeInOutCubic,
+                                  child: AnimatedOpacity(
+                                    opacity: _hudHidden ? 0.0 : 1.0,
+                                    duration: const Duration(milliseconds: 280),
+                                    child: IgnorePointer(
+                                      ignoring: _hudHidden,
+                                      child: _buildBottomLeftPill(tr),
                                     ),
                                   ),
                                 ),
 
-                                // Bottom-Right Collapsible Pill + Paintbrush Clean Toggle (Img 4)
+                                // Inline Centered Track Marquee Pill (vertically aligned between left & right pills)
+                                Expanded(
+                                  child: AnimatedOpacity(
+                                    opacity: (!_hudHidden && s.marqueeTrackEnabled && isAudioActive) ? 1.0 : 0.0,
+                                    duration: const Duration(milliseconds: 260),
+                                    child: (!_hudHidden && s.marqueeTrackEnabled && isAudioActive)
+                                        ? LayoutBuilder(
+                                            builder: (_, box) {
+                                              if (box.maxWidth < 76) return const SizedBox.shrink();
+                                              return Padding(
+                                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                                child: Center(
+                                                  child: Container(
+                                                    constraints: BoxConstraints(
+                                                      maxWidth: math.min(264.0, box.maxWidth),
+                                                    ),
+                                                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.black.withValues(alpha: 0.46),
+                                                      borderRadius: BorderRadius.circular(20),
+                                                      border: Border.all(
+                                                        color: const Color(0xFF38BDF8).withValues(alpha: 0.36),
+                                                      ),
+                                                    ),
+                                                    child: Row(
+                                                      mainAxisSize: MainAxisSize.min,
+                                                      children: [
+                                                        const Icon(
+                                                          Icons.music_note_rounded,
+                                                          size: 13,
+                                                          color: Color(0xFF7DD3FC),
+                                                        ),
+                                                        const SizedBox(width: 6),
+                                                        Flexible(
+                                                          child: _ScrollingMarqueeText(
+                                                            text:
+                                                                '${s.ambientTrackTitle(widget.lang)} · %${(s.ambientVolume * 100).round()}',
+                                                            style: const TextStyle(
+                                                              fontSize: 11.5,
+                                                              fontWeight: FontWeight.w600,
+                                                              color: Color(0xFFE0F2FE),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                          )
+                                        : const SizedBox.shrink(),
+                                  ),
+                                ),
+
+                                // Bottom-Right Collapsible Pill + Paintbrush Clean Toggle
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
@@ -1049,6 +1147,23 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     );
   }
 
+  List<Color> _ambientBackdropColors(SmartDisplayVisualTheme theme) {
+    switch (theme) {
+      case SmartDisplayVisualTheme.fireplace:
+        return const [Color(0xFF281209), Color(0xFF0A0605)];
+      case SmartDisplayVisualTheme.rainy:
+        return const [Color(0xFF112130), Color(0xFF06090F)];
+      case SmartDisplayVisualTheme.winterSnow:
+        return const [Color(0xFF132238), Color(0xFF070B12)];
+      case SmartDisplayVisualTheme.sunset:
+        return const [Color(0xFF27142C), Color(0xFF09070F)];
+      case SmartDisplayVisualTheme.aurora:
+        return const [Color(0xFF0B2420), Color(0xFF060911)];
+      case SmartDisplayVisualTheme.minimalist:
+        return const [Color(0xFF1A1B24), Color(0xFF09090D)];
+    }
+  }
+
   Widget _buildBackgroundLayer(SystemSettingsState s) {
     final mode = _effectiveMode;
     if (mode == SmartDisplayMode.aod) {
@@ -1058,18 +1173,20 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
     final fit = _boxFitForLayout(s.smartDisplayLayout);
     final isFramed = s.smartDisplayLayout == VisualLayoutMode.framed;
 
-    Widget wrapTransition(Key key, Widget child) {
-      final padded = isFramed
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 54),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(26),
-                  child: child,
-                ),
-              ),
-            )
-          : child;
+    Widget wrapFrame(Widget child) {
+      if (!isFramed) return child;
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 54),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(26),
+            child: child,
+          ),
+        ),
+      );
+    }
+
+    Widget wrapPhotoTransition(Key key, Widget child) {
       return AnimatedSwitcher(
         duration: const Duration(milliseconds: 620),
         transitionBuilder: (c, anim) {
@@ -1088,46 +1205,63 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
               );
           }
         },
-        child: KeyedSubtree(key: key, child: padded),
+        child: KeyedSubtree(key: key, child: wrapFrame(child)),
       );
     }
 
-    // 1. Real Muted Video Backdrop (User Video in silentVideoMp3, or Wikimedia .webm Theme Video)
-    if ((mode == SmartDisplayMode.silentVideoMp3 ||
-            mode == SmartDisplayMode.liveNature ||
-            (mode == SmartDisplayMode.slideshow && s.slideImages.isEmpty)) &&
-        _videoCtrl != null &&
-        _videoReady &&
-        _videoCtrl!.value.isInitialized) {
-      final vSize = _videoCtrl!.value.size;
+    final effectiveTheme = _activeThemeForMode(s, mode);
+
+    // 1. Direct Video Backdrop (No black spinner card, no slide-in animation!)
+    if (_isVideoBackedMode(mode, s)) {
+      final hasReadyVideo = _videoCtrl != null && _videoReady && _videoCtrl!.value.isInitialized;
+      final vSize = hasReadyVideo ? _videoCtrl!.value.size : const Size(1280, 720);
       final vw = vSize.width > 0 ? vSize.width : 1280.0;
       final vh = vSize.height > 0 ? vSize.height : 720.0;
-      return wrapTransition(
-        ValueKey('video_bg_${_activeVideoSource.hashCode}'),
-        Container(
-          color: Colors.black,
-          width: double.infinity,
-          height: double.infinity,
-          child: FittedBox(
-            fit: fit,
-            clipBehavior: Clip.hardEdge,
-            child: SizedBox(
-              width: vw,
-              height: vh,
-              child: VideoPlayer(_videoCtrl!),
+
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: const Alignment(0, -0.15),
+                radius: 1.15,
+                colors: _ambientBackdropColors(effectiveTheme),
+              ),
             ),
           ),
-        ),
+          if (hasReadyVideo)
+            Positioned.fill(
+              child: wrapFrame(
+                ClipRect(
+                  child: SizedBox.expand(
+                    child: FittedBox(
+                      fit: fit,
+                      clipBehavior: Clip.hardEdge,
+                      child: SizedBox(
+                        width: vw,
+                        height: vh,
+                        child: VideoPlayer(
+                          _videoCtrl!,
+                          key: ValueKey('video_player_${_activeVideoSource.hashCode}'),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       );
     }
 
-    // 2. Uploaded Slideshow Photos (clean static presentation with slide transitions; no zoom drift)
+    // 2. Uploaded Slideshow Photos (clean presentation with slide transitions)
     if (mode == SmartDisplayMode.slideshow && s.slideImages.isNotEmpty) {
       final safeIdx = widget.slideIndex % s.slideImages.length;
       final img = s.slideImages[safeIdx];
       final bytes = _bytesForImage(img);
       if (bytes != null) {
-        return wrapTransition(
+        return wrapPhotoTransition(
           ValueKey('slide_photo_${img.id}_$safeIdx'),
           Container(
             color: Colors.black,
@@ -1145,38 +1279,13 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
       }
     }
 
-    // 3. Clean Dark Loader While Wikimedia / Custom Video Buffers (No Old Static Theme Images)
-    final effectiveTheme = _activeThemeForMode(s, mode);
-    if (effectiveTheme != SmartDisplayVisualTheme.minimalist &&
-        (mode == SmartDisplayMode.silentVideoMp3 ||
-            mode == SmartDisplayMode.liveNature ||
-            (mode == SmartDisplayMode.slideshow && s.slideImages.isEmpty))) {
-      return wrapTransition(
-        ValueKey('video_loading_${mode.name}_${effectiveTheme.name}'),
-        Container(
-          color: const Color(0xFF07080D),
-          alignment: Alignment.center,
-          child: const SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.0,
-              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF38BDF8)),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return wrapTransition(
-      ValueKey('theme_${mode.name}_${effectiveTheme.name}_${widget.slideIndex}'),
-      Container(
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment(0, -0.15),
-            radius: 1.15,
-            colors: [Color(0xFF1A1B24), Color(0xFF09090D)],
-          ),
+    // 3. Minimalist Ambient Backdrop
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: RadialGradient(
+          center: const Alignment(0, -0.15),
+          radius: 1.15,
+          colors: _ambientBackdropColors(effectiveTheme),
         ),
       ),
     );
@@ -1345,7 +1454,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
 
   Widget _buildBottomLeftPill(bool tr) {
     final s = widget.settings;
-    final mutedNow = _muted || s.ambientSoundtrack == AmbientSoundtrack.silent;
+    final mutedNow = _muted || s.ambientSoundtrack != AmbientSoundtrack.customMp3 || !_hasCustomAudio(s);
 
     Widget circleIcon({
       required IconData icon,
@@ -1375,9 +1484,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
       );
     }
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 240),
-      curve: Curves.easeOutCubic,
+    return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
       decoration: BoxDecoration(
         color: const Color(0xFF0B0B10).withValues(alpha: 0.88),
@@ -1387,155 +1494,148 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
           BoxShadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 14),
         ],
       ),
-      child: ClipRect(
-        child: AnimatedSize(
-          duration: const Duration(milliseconds: 240),
-          curve: Curves.easeOutCubic,
-          alignment: Alignment.centerLeft,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Music Note badge (opens Quick Mode/Theme/Ambience/Blur drawer)
-              circleIcon(
-                icon: Icons.music_note_rounded,
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFF97316), Color(0xFFE11D48)],
-                ),
-                shadows: [
-                  BoxShadow(color: const Color(0xFFF97316).withValues(alpha: 0.45), blurRadius: 10),
-                ],
-                onTap: () {
-                  _haptic();
-                  _wakeBottomControls();
-                  setState(() {
-                    _leftDrawerOpen = !_leftDrawerOpen;
-                    _volumePopupOpen = false;
-                  });
-                  _scheduleLeftCollapse();
-                },
-              ),
-
-              if (_leftExpanded) ...[
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Container(width: 1, height: 18, color: Colors.white.withValues(alpha: 0.14)),
-                ),
-                // Previous Track + Previous Slide
-                circleIcon(
-                  icon: Icons.skip_previous_rounded,
-                  bgColor: Colors.white.withValues(alpha: 0.08),
-                  onTap: () => _stepSlideAndAudio(-1),
-                ),
-                const SizedBox(width: 5),
-                // Play / Pause Gradient Pill
-                circleIcon(
-                  icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xFFF59E0B), Color(0xFFE11D48)],
-                  ),
-                  shadows: [
-                    BoxShadow(color: const Color(0xFFF59E0B).withValues(alpha: 0.42), blurRadius: 10),
-                  ],
-                  onTap: () {
-                    _wakeBottomControls();
-                    _togglePause();
-                    _scheduleLeftCollapse();
-                  },
-                ),
-                const SizedBox(width: 5),
-                // Next Track + Next Slide
-                circleIcon(
-                  icon: Icons.skip_next_rounded,
-                  bgColor: Colors.white.withValues(alpha: 0.08),
-                  onTap: () => _stepSlideAndAudio(1),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Container(width: 1, height: 18, color: Colors.white.withValues(alpha: 0.14)),
-                ),
-                // Shuffle Toggle
-                circleIcon(
-                  icon: Icons.shuffle_rounded,
-                  bgColor: _shuffleEnabled
-                      ? const Color(0xFFF59E0B).withValues(alpha: 0.24)
-                      : Colors.white.withValues(alpha: 0.08),
-                  borderColor: _shuffleEnabled ? const Color(0xFFF59E0B).withValues(alpha: 0.65) : null,
-                  iconColor: _shuffleEnabled ? const Color(0xFFFBBF24) : Colors.white70,
-                  onTap: () {
-                    _haptic();
-                    _wakeBottomControls();
-                    setState(() => _shuffleEnabled = !_shuffleEnabled);
-                    _scheduleLeftCollapse();
-                  },
-                ),
-                const SizedBox(width: 5),
-                // Upward Vertical Volume Slider & Mute Popup Trigger
-                circleIcon(
-                  icon: mutedNow ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                  bgColor: mutedNow
-                      ? const Color(0xFFEF4444).withValues(alpha: 0.18)
-                      : (_volumePopupOpen
-                          ? const Color(0xFF38BDF8).withValues(alpha: 0.28)
-                          : Colors.white.withValues(alpha: 0.08)),
-                  borderColor: _volumePopupOpen ? const Color(0xFF38BDF8).withValues(alpha: 0.65) : null,
-                  iconColor: mutedNow ? const Color(0xFFFCA5A5) : const Color(0xFF7DD3FC),
-                  onTap: () {
-                    _haptic();
-                    _wakeBottomControls();
-                    setState(() {
-                      _volumePopupOpen = !_volumePopupOpen;
-                      _leftDrawerOpen = false;
-                    });
-                    if (!_volumePopupOpen) {
-                      _scheduleLeftCollapse();
-                    } else {
-                      _leftCollapseTimer?.cancel();
-                    }
-                  },
-                ),
-              ],
-
-              const SizedBox(width: 4),
-              // Expand Right '>' or Collapse Left '<' Arrow (Img 3)
-              GestureDetector(
-                onTap: () {
-                  _haptic();
-                  _wakeBottomControls();
-                  setState(() {
-                    _leftExpanded = !_leftExpanded;
-                    if (!_leftExpanded) _volumePopupOpen = false;
-                  });
-                  if (_leftExpanded) {
-                    _scheduleLeftCollapse();
-                  } else {
-                    _leftCollapseTimer?.cancel();
-                  }
-                },
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                  child: Icon(
-                    _leftExpanded ? Icons.chevron_left_rounded : Icons.chevron_right_rounded,
-                    size: 19,
-                    color: Colors.white70,
-                  ),
-                ),
-              ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Music Note badge (opens Quick Mode/Theme/Blur drawer)
+          circleIcon(
+            icon: Icons.music_note_rounded,
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFFF97316), Color(0xFFE11D48)],
+            ),
+            shadows: [
+              BoxShadow(color: const Color(0xFFF97316).withValues(alpha: 0.45), blurRadius: 10),
             ],
+            onTap: () {
+              _haptic();
+              _wakeBottomControls();
+              setState(() {
+                _leftDrawerOpen = !_leftDrawerOpen;
+                _volumePopupOpen = false;
+              });
+              _scheduleLeftCollapse();
+            },
           ),
-        ),
+
+          // Smooth bidirectional horizontal slide-open & slide-close controls
+          ClipRect(
+            child: SizeTransition(
+              sizeFactor: CurvedAnimation(
+                parent: _leftBarCtrl,
+                curve: Curves.easeInOutCubic,
+              ),
+              axis: Axis.horizontal,
+              axisAlignment: -1.0,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Container(width: 1, height: 18, color: Colors.white.withValues(alpha: 0.14)),
+                  ),
+                  circleIcon(
+                    icon: Icons.skip_previous_rounded,
+                    bgColor: Colors.white.withValues(alpha: 0.08),
+                    onTap: () => _stepSlideAndAudio(-1),
+                  ),
+                  const SizedBox(width: 5),
+                  circleIcon(
+                    icon: _paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFFF59E0B), Color(0xFFE11D48)],
+                    ),
+                    shadows: [
+                      BoxShadow(color: const Color(0xFFF59E0B).withValues(alpha: 0.42), blurRadius: 10),
+                    ],
+                    onTap: () {
+                      _wakeBottomControls();
+                      _togglePause();
+                      _scheduleLeftCollapse();
+                    },
+                  ),
+                  const SizedBox(width: 5),
+                  circleIcon(
+                    icon: Icons.skip_next_rounded,
+                    bgColor: Colors.white.withValues(alpha: 0.08),
+                    onTap: () => _stepSlideAndAudio(1),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Container(width: 1, height: 18, color: Colors.white.withValues(alpha: 0.14)),
+                  ),
+                  circleIcon(
+                    icon: Icons.shuffle_rounded,
+                    bgColor: _shuffleEnabled
+                        ? const Color(0xFFF59E0B).withValues(alpha: 0.24)
+                        : Colors.white.withValues(alpha: 0.08),
+                    borderColor: _shuffleEnabled ? const Color(0xFFF59E0B).withValues(alpha: 0.65) : null,
+                    iconColor: _shuffleEnabled ? const Color(0xFFFBBF24) : Colors.white70,
+                    onTap: () {
+                      _haptic();
+                      _wakeBottomControls();
+                      setState(() => _shuffleEnabled = !_shuffleEnabled);
+                      _scheduleLeftCollapse();
+                    },
+                  ),
+                  const SizedBox(width: 5),
+                  circleIcon(
+                    icon: mutedNow ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                    bgColor: mutedNow
+                        ? const Color(0xFFEF4444).withValues(alpha: 0.18)
+                        : (_volumePopupOpen
+                            ? const Color(0xFF38BDF8).withValues(alpha: 0.28)
+                            : Colors.white.withValues(alpha: 0.08)),
+                    borderColor: _volumePopupOpen ? const Color(0xFF38BDF8).withValues(alpha: 0.65) : null,
+                    iconColor: mutedNow ? const Color(0xFFFCA5A5) : const Color(0xFF7DD3FC),
+                    onTap: () {
+                      _haptic();
+                      _wakeBottomControls();
+                      setState(() {
+                        _volumePopupOpen = !_volumePopupOpen;
+                        _leftDrawerOpen = false;
+                      });
+                      if (!_volumePopupOpen) {
+                        _scheduleLeftCollapse();
+                      } else {
+                        _leftCollapseTimer?.cancel();
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(width: 4),
+          // Rotating '>' / '<' toggle arrow
+          GestureDetector(
+            onTap: () {
+              _haptic();
+              _wakeBottomControls();
+              _setLeftExpanded(!_leftExpanded);
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              child: AnimatedRotation(
+                turns: _leftExpanded ? 0.5 : 0.0,
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeInOutCubic,
+                child: const Icon(Icons.chevron_right_rounded, size: 19, color: Colors.white70),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildBottomRightPill(bool tr) {
     final s = widget.settings;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 240),
-      curve: Curves.easeOutCubic,
+    return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
       decoration: BoxDecoration(
         color: const Color(0xFF0B0B10).withValues(alpha: 0.88),
@@ -1545,51 +1645,59 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
           BoxShadow(color: Colors.black.withValues(alpha: 0.45), blurRadius: 14),
         ],
       ),
-      child: ClipRect(
-        child: AnimatedSize(
-          duration: const Duration(milliseconds: 240),
-          curve: Curves.easeOutCubic,
-          alignment: Alignment.centerRight,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (!_rightExpanded) ...[
-                // Expand Left '<' Arrow (Img 4)
-                GestureDetector(
-                  onTap: () {
-                    _haptic();
-                    _wakeBottomControls();
-                    setState(() => _rightExpanded = true);
-                    _scheduleRightCollapse();
-                  },
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                    child: Icon(Icons.chevron_left_rounded, size: 19, color: Colors.white70),
-                  ),
-                ),
-                // Brightness Badge
-                GestureDetector(
-                  onTap: () {
-                    _haptic();
-                    _wakeBottomControls();
-                    setState(() => _rightExpanded = true);
-                    _scheduleRightCollapse();
-                  },
-                  child: Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: const Color(0xFFF59E0B).withValues(alpha: 0.22),
-                      border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.42)),
-                    ),
-                    child: const Icon(Icons.wb_sunny_outlined, size: 17, color: Color(0xFFFCD34D)),
-                  ),
-                ),
-              ] else ...[
-                // Inline Brightness Slider Pill (Img 4: [ ☀️ ━━━━●━ %85 ])
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Rotating '<' (open left) / '>' (collapse right) toggle arrow
+          GestureDetector(
+            onTap: () {
+              _haptic();
+              _wakeBottomControls();
+              _setRightExpanded(!_rightExpanded);
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              child: AnimatedRotation(
+                turns: _rightExpanded ? 0.5 : 0.0,
+                duration: const Duration(milliseconds: 240),
+                curve: Curves.easeInOutCubic,
+                child: const Icon(Icons.chevron_left_rounded, size: 19, color: Colors.white70),
+              ),
+            ),
+          ),
+
+          // Identical 34x34 circular Amber Brightness Button (kept constant in both collapsed & expanded states)
+          GestureDetector(
+            onTap: () {
+              _haptic();
+              _wakeBottomControls();
+              _setRightExpanded(!_rightExpanded);
+            },
+            child: Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFFF59E0B).withValues(alpha: _rightExpanded ? 0.30 : 0.22),
+                border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.45)),
+              ),
+              child: const Icon(Icons.wb_sunny_outlined, size: 17, color: Color(0xFFFCD34D)),
+            ),
+          ),
+
+          // Smooth bidirectional horizontal slide-open & slide-close brightness slider bar
+          ClipRect(
+            child: SizeTransition(
+              sizeFactor: CurvedAnimation(
+                parent: _rightBarCtrl,
+                curve: Curves.easeInOutCubic,
+              ),
+              axis: Axis.horizontal,
+              axisAlignment: 1.0,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.06),
                     borderRadius: BorderRadius.circular(999),
@@ -1598,9 +1706,8 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.wb_sunny_outlined, size: 16, color: Color(0xFFF59E0B)),
                       SizedBox(
-                        width: 96,
+                        width: 92,
                         height: 28,
                         child: SliderTheme(
                           data: SliderThemeData(
@@ -1647,51 +1754,36 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                     ],
                   ),
                 ),
-              ],
-
-              const SizedBox(width: 6),
-              // Red X Button (Completely exits Smart Display)
-              GestureDetector(
-                onTap: () {
-                  _haptic();
-                  widget.onClose();
-                },
-                child: Container(
-                  width: 34,
-                  height: 34,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Color(0xFFE11D48),
-                  ),
-                  child: const Icon(Icons.close_rounded, size: 18, color: Colors.white),
-                ),
               ),
-
-              if (_rightExpanded) ...[
-                const SizedBox(width: 4),
-                GestureDetector(
-                  onTap: () {
-                    _haptic();
-                    _wakeBottomControls();
-                    _rightCollapseTimer?.cancel();
-                    setState(() => _rightExpanded = false);
-                  },
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                    child: Icon(Icons.chevron_right_rounded, size: 19, color: Colors.white70),
-                  ),
-                ),
-              ],
-            ],
+            ),
           ),
-        ),
+
+          const SizedBox(width: 6),
+          // Red X Button (Completely exits Smart Display)
+          GestureDetector(
+            onTap: () {
+              _haptic();
+              widget.onClose();
+            },
+            child: Container(
+              width: 34,
+              height: 34,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: Color(0xFFE11D48),
+              ),
+              child: const Icon(Icons.close_rounded, size: 18, color: Colors.white),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildUpwardVolumePopup(bool tr) {
     final s = widget.settings;
-    final mutedNow = _muted || s.ambientSoundtrack == AmbientSoundtrack.silent;
+    final hasCustom = _hasCustomAudio(s);
+    final mutedNow = _muted || s.ambientSoundtrack != AmbientSoundtrack.customMp3 || !hasCustom;
     final vol = mutedNow ? 0.0 : s.ambientVolume.clamp(0.0, 1.0);
 
     return Container(
@@ -1737,16 +1829,16 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                   max: 1.0,
                   onChanged: (v) {
                     _wakeBottomControls();
-                    final nextTrack = (v > 0.02 && s.ambientSoundtrack == AmbientSoundtrack.silent)
-                        ? AmbientSoundtrack.fireplaceCrackling
-                        : s.ambientSoundtrack;
-                    setState(() => _muted = v <= 0.01);
+                    final nextTrack = (v > 0.02 && hasCustom)
+                        ? AmbientSoundtrack.customMp3
+                        : (hasCustom ? s.ambientSoundtrack : AmbientSoundtrack.silent);
+                    setState(() => _muted = v <= 0.01 || !hasCustom);
                     widget.onUpdateSettings(s.copyWith(ambientVolume: v, ambientSoundtrack: nextTrack));
-                    if (v <= 0.01) {
+                    if (v <= 0.01 || !hasCustom) {
                       AmbientAudioService.stop();
                     } else if (!AmbientAudioService.isPlaying) {
                       AmbientAudioService.start(
-                        track: nextTrack,
+                        track: AmbientSoundtrack.customMp3,
                         customSource: s.customAudioSource.isNotEmpty ? s.customAudioSource : s.customAudioLabel,
                         volume: v,
                       );
@@ -1801,14 +1893,6 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
       (SmartDisplayVisualTheme.aurora, '🌌 ${tr ? 'Kutup' : 'Aurora'}'),
       (SmartDisplayVisualTheme.minimalist, '🌚 ${tr ? 'Minimal' : 'Minimal'}'),
     ];
-    final tracks = [
-      (AmbientSoundtrack.silent, '🚫 ${tr ? 'Sessiz' : 'Mute'}'),
-      (AmbientSoundtrack.fireplaceCrackling, '🔥 ${tr ? 'Şömine' : 'Fire'}'),
-      (AmbientSoundtrack.nightRain, '🌧️ ${tr ? 'Yağmur' : 'Rain'}'),
-      (AmbientSoundtrack.cozyJazzLofi, '🎧 Lo-Fi'),
-      (AmbientSoundtrack.relaxPiano, '🎹 ${tr ? 'Piyano' : 'Piano'}'),
-      (AmbientSoundtrack.forestBreeze, '🌲 ${tr ? 'Doğa' : 'Nature'}'),
-    ];
 
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 380),
@@ -1827,7 +1911,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  tr ? 'Hızlı Mod, Blur & Ambiyans' : 'Quick Mode, Blur & Ambience',
+                  tr ? 'Hızlı Mod, Tema & Blur' : 'Quick Mode, Theme & Blur',
                   style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
                 ),
                 GestureDetector(
@@ -1861,32 +1945,6 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with SingleTi
                     active: s.smartDisplayVisualTheme == th.$1,
                     activeColor: const Color(0xFF0EA5E9),
                     onTap: () => widget.onUpdateSettings(s.copyWith(smartDisplayVisualTheme: th.$1)),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 5,
-              runSpacing: 5,
-              children: [
-                for (final tk in tracks)
-                  _QuickPill(
-                    label: tk.$2,
-                    active: s.ambientSoundtrack == tk.$1 && !_muted,
-                    activeColor: const Color(0xFF10B981),
-                    onTap: () {
-                      setState(() => _muted = tk.$1 == AmbientSoundtrack.silent);
-                      widget.onUpdateSettings(s.copyWith(ambientSoundtrack: tk.$1));
-                      if (tk.$1 == AmbientSoundtrack.silent) {
-                        AmbientAudioService.stop();
-                      } else {
-                        AmbientAudioService.start(
-                          track: tk.$1,
-                          customSource: s.customAudioSource,
-                          volume: s.ambientVolume <= 0.05 ? 0.5 : s.ambientVolume,
-                        );
-                      }
-                    },
                   ),
               ],
             ),

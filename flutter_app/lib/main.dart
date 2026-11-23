@@ -88,6 +88,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   AiCallLogEntry? _pendingMissedCallAlert;
   bool _voiceOpen = false;
   bool _modalSheetOpen = false;
+  bool _reopenSettingsToSmartDisplay = false;
   bool _showBootCeremony = false;
   DateTime _now = DateTime.now();
   int _slideIndex = 0;
@@ -345,11 +346,14 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       _ambientForcedAod = false;
       _ambientMode = true;
     });
+    final hasCustomAudio = _settings.customAudioSource.trim().isNotEmpty ||
+        _settings.customAudioLabel.trim().isNotEmpty;
     if (_settings.smartDisplayMode != SmartDisplayMode.aod &&
-        _settings.ambientSoundtrack != AmbientSoundtrack.silent &&
+        _settings.ambientSoundtrack == AmbientSoundtrack.customMp3 &&
+        hasCustomAudio &&
         _settings.ambientVolume > 0.01) {
       AmbientAudioService.start(
-        track: _settings.ambientSoundtrack,
+        track: AmbientSoundtrack.customMp3,
         customSource: _settings.customAudioSource.isNotEmpty
             ? _settings.customAudioSource
             : _settings.customAudioLabel,
@@ -365,6 +369,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   }
 
   void _exitAmbientMode() {
+    final shouldReopenSettings = _reopenSettingsToSmartDisplay;
+    _reopenSettingsToSmartDisplay = false;
     if (_ambientMode) {
       setState(() {
         _ambientMode = false;
@@ -377,7 +383,89 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     }
     AmbientAudioService.stop();
     HardwareService.exitSmartDisplayHardware();
-    _resetIdleTimer();
+    if (shouldReopenSettings && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_ambientMode) {
+          _openSettingsSheet(initialExpandedId: SettingsItemId.smartDisplay);
+        }
+      });
+    } else {
+      _resetIdleTimer();
+    }
+  }
+
+  Future<void> _openSettingsSheet({SettingsItemId? initialExpandedId}) async {
+    if (_modalSheetOpen || !mounted) return;
+    _modalSheetOpen = true;
+    _idleTimer?.cancel();
+    final boiler = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp);
+    final orderedTabs = _visual.orderedTabs;
+    final activeTabMeta = orderedTabs.firstWhere(
+      (t) => t.id == _activeTab,
+      orElse: () => orderedTabs.first,
+    );
+    final baseAccent = _activeTab == TabId.termo
+        ? ThermostatMath.resolveThermostatAccent(_targetTemp, _activePreset)
+        : activeTabMeta.accent;
+    final activeColor = (_visual.resolvePalette(_now).themeOverrideAccent ?? baseAccent).toColor();
+
+    await showSystemSettingsSheet(
+      context: context,
+      lang: _lang,
+      locationName: _locationName,
+      accentColor: activeColor,
+      roomTemp: _roomTemp,
+      targetTemp: _targetTemp,
+      boiler: boiler,
+      initialSettings: _settings,
+      initialExpandedId: initialExpandedId,
+      onChangeLang: (l) => setState(() => _lang = l),
+      onChangeLocation: (loc) => setState(() => _locationName = loc),
+      onChangeTargetTemp: _changeTarget,
+      onSaveSettings: (updated) {
+        setState(() {
+          _settings = updated;
+          _syncPreferredVoices(updated);
+        });
+        _resetIdleTimer();
+        _persist();
+      },
+      onOpenAmbient: () {
+        _reopenSettingsToSmartDisplay = true;
+        _enterAmbientMode();
+      },
+      onOpenScreensaverPreview: () => setState(() {
+        _screensaverPreview = true;
+      }),
+      onTestAiCall: (reason) => _launchAiCall(
+        reason: reason,
+        urgent: reason == AiCallReason.safetyAlert || reason == AiCallReason.hotRoom,
+        trackCooldown: false,
+      ),
+      onReplayBootCeremony: () => setState(() {
+        _showBootCeremony = true;
+      }),
+      onResetTelemetryHistory: () {
+        setState(() {
+          _schedule = ThermostatMath.defaultSchedule;
+          _targetTemp = 22.5;
+          _activePreset = PresetId.konfor;
+          _settings = _settings.copyWith(
+            espLogs: const [],
+            espOfflineBurnMinutes: 0,
+            espWdtResetCount: 0,
+            cloudLastSyncAt: '',
+            cloudLastSyncOk: false,
+            cloudLastSyncMessage: '',
+          );
+        });
+        _persist();
+      },
+    );
+    _modalSheetOpen = false;
+    if (mounted && !_ambientMode && !_screensaverPreview) {
+      _resetIdleTimer();
+    }
   }
 
   void _appendEspLog(
@@ -1054,6 +1142,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                     palette: palette,
                                     onTap: () {
                                       _triggerHaptic();
+                                      _reopenSettingsToSmartDisplay = false;
                                       _enterAmbientMode();
                                     },
                                     child: Icon(
@@ -1067,62 +1156,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                     // System Settings Sheet
                                     _TopActionButton(
                                       palette: palette,
-                                      onTap: () async {
+                                      onTap: () {
                                         _triggerHaptic();
-                                        _modalSheetOpen = true;
-                                        _idleTimer?.cancel();
-                                        await showSystemSettingsSheet(
-                                          context: context,
-                                          lang: _lang,
-                                          locationName: _locationName,
-                                          accentColor: activeColor,
-                                          roomTemp: _roomTemp,
-                                          targetTemp: _targetTemp,
-                                          boiler: boiler,
-                                          initialSettings: _settings,
-                                          onChangeLang: (l) => setState(() => _lang = l),
-                                          onChangeLocation: (loc) => setState(() => _locationName = loc),
-                                          onChangeTargetTemp: _changeTarget,
-                                          onSaveSettings: (updated) {
-                                            setState(() {
-                                              _settings = updated;
-                                              _syncPreferredVoices(updated);
-                                            });
-                                            _resetIdleTimer();
-                                            _persist();
-                                          },
-                                          onOpenAmbient: _enterAmbientMode,
-                                          onOpenScreensaverPreview: () => setState(() {
-                                            _screensaverPreview = true;
-                                          }),
-                                          onTestAiCall: (reason) => _launchAiCall(
-                                            reason: reason,
-                                            urgent: reason == AiCallReason.safetyAlert ||
-                                                reason == AiCallReason.hotRoom,
-                                            trackCooldown: false,
-                                          ),
-                                          onReplayBootCeremony: () => setState(() {
-                                            _showBootCeremony = true;
-                                          }),
-                                          onResetTelemetryHistory: () {
-                                            setState(() {
-                                              _schedule = ThermostatMath.defaultSchedule;
-                                              _targetTemp = 22.5;
-                                              _activePreset = PresetId.konfor;
-                                              _settings = _settings.copyWith(
-                                                espLogs: const [],
-                                                espOfflineBurnMinutes: 0,
-                                                espWdtResetCount: 0,
-                                                cloudLastSyncAt: '',
-                                                cloudLastSyncOk: false,
-                                                cloudLastSyncMessage: '',
-                                              );
-                                            });
-                                            _persist();
-                                          },
-                                        );
-                                        _modalSheetOpen = false;
-                                        if (mounted) _resetIdleTimer();
+                                        _openSettingsSheet();
                                       },
                                       child: Icon(Icons.settings_outlined, size: 17, color: palette.textPrimary),
                                     ),
@@ -1262,10 +1298,13 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                        _ambientForcedAod = false;
                        _ambientElapsedSeconds = 0;
                      });
-                     if (_settings.ambientSoundtrack != AmbientSoundtrack.silent &&
+                     final hasCustomAudio = _settings.customAudioSource.trim().isNotEmpty ||
+                         _settings.customAudioLabel.trim().isNotEmpty;
+                     if (_settings.ambientSoundtrack == AmbientSoundtrack.customMp3 &&
+                         hasCustomAudio &&
                          _settings.ambientVolume > 0.01) {
                        AmbientAudioService.start(
-                         track: _settings.ambientSoundtrack,
+                         track: AmbientSoundtrack.customMp3,
                          customSource: _settings.customAudioSource.isNotEmpty
                              ? _settings.customAudioSource
                              : _settings.customAudioLabel,

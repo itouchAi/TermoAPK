@@ -28,6 +28,7 @@ Future<void> showSystemSettingsSheet({
   required double targetTemp,
   required BoilerTelemetry boiler,
   required SystemSettingsState initialSettings,
+  SettingsItemId? initialExpandedId,
   required ValueChanged<LangCode> onChangeLang,
   required ValueChanged<String> onChangeLocation,
   required ValueChanged<double> onChangeTargetTemp,
@@ -50,6 +51,7 @@ Future<void> showSystemSettingsSheet({
       targetTemp: targetTemp,
       boiler: boiler,
       initialSettings: initialSettings,
+      initialExpandedId: initialExpandedId,
       onChangeLang: onChangeLang,
       onChangeLocation: onChangeLocation,
       onChangeTargetTemp: onChangeTargetTemp,
@@ -71,6 +73,7 @@ class _SystemSettingsModal extends StatefulWidget {
   final double targetTemp;
   final BoilerTelemetry boiler;
   final SystemSettingsState initialSettings;
+  final SettingsItemId? initialExpandedId;
   final ValueChanged<LangCode> onChangeLang;
   final ValueChanged<String> onChangeLocation;
   final ValueChanged<double> onChangeTargetTemp;
@@ -89,6 +92,7 @@ class _SystemSettingsModal extends StatefulWidget {
     required this.targetTemp,
     required this.boiler,
     required this.initialSettings,
+    this.initialExpandedId,
     required this.onChangeLang,
     required this.onChangeLocation,
     required this.onChangeTargetTemp,
@@ -284,6 +288,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     _lang = widget.lang;
     _location = widget.locationName;
     _liveTargetTemp = widget.targetTemp;
+    _expandedId = widget.initialExpandedId;
     _firebaseUrlCtrl.text = _draft.firebaseRtdbUrl;
     _firebaseApiKeyCtrl.text = _draft.firebaseApiKey;
     _firebaseNodeCtrl.text = _draft.firebaseNodePath;
@@ -382,9 +387,8 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
       return;
     }
     final typed = _customAudioCtrl.text.trim();
-    var targetTrack = _draft.ambientSoundtrack;
+    final source = _resolveAudioSource();
     if (typed.startsWith('http://') || typed.startsWith('https://')) {
-      targetTrack = AmbientSoundtrack.customMp3;
       if (mounted) {
         setState(() {
           _draft = _draft.copyWith(
@@ -394,21 +398,34 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           );
         });
       }
-    } else if (targetTrack == AmbientSoundtrack.silent) {
+      await AmbientAudioService.start(
+        track: AmbientSoundtrack.customMp3,
+        customSource: typed,
+        volume: _draft.ambientVolume,
+      );
+      if (mounted) setState(() => _audioPreviewPlaying = true);
+      return;
+    }
+    if (source.isEmpty) {
       await AmbientAudioService.stop();
       if (mounted) {
         setState(() {
           _audioPreviewPlaying = false;
           _statusBanner = _lang == LangCode.tr
-              ? 'Sessiz mod seçili — dinlemek için bir ortam sesi seçin.'
-              : 'Muted selected — pick an ambient soundtrack to preview.';
+              ? 'Dinlemek için MP3 dosyası seçin veya geçerli bir MP3 URL girin.'
+              : 'Pick an MP3 file or enter an MP3 URL to preview.';
         });
       }
       return;
     }
+    if (_draft.ambientSoundtrack != AmbientSoundtrack.customMp3 && mounted) {
+      setState(() {
+        _draft = _draft.copyWith(ambientSoundtrack: AmbientSoundtrack.customMp3);
+      });
+    }
     await AmbientAudioService.start(
-      track: targetTrack,
-      customSource: _resolveAudioSource(),
+      track: AmbientSoundtrack.customMp3,
+      customSource: source,
       volume: _draft.ambientVolume,
     );
     if (mounted) setState(() => _audioPreviewPlaying = true);
@@ -1043,13 +1060,19 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                               : (typedVideo.startsWith('http://') || typedVideo.startsWith('https://'))
                                   ? (videoHost.isNotEmpty ? videoHost : 'Video URL')
                                   : (_draft.customVideoLabel.isNotEmpty ? _draft.customVideoLabel : typedVideo);
+                          final resolvedAudioSource = _resolveAudioSource();
+                          final resolvedAudioLabel = _customAudioCtrl.text.trim();
+                          final resolvedTrack = (resolvedAudioSource.isNotEmpty || resolvedAudioLabel.isNotEmpty)
+                              ? AmbientSoundtrack.customMp3
+                              : AmbientSoundtrack.silent;
                           final updated = _draft.copyWith(
                             firebaseRtdbUrl: _firebaseUrlCtrl.text.trim(),
                             firebaseApiKey: _firebaseApiKeyCtrl.text.trim(),
                             firebaseNodePath: sanitizedNode,
                             espDeviceId: typedEspId.isEmpty ? _draft.espDeviceId : typedEspId,
-                            customAudioLabel: _customAudioCtrl.text.trim(),
-                            customAudioSource: _resolveAudioSource(),
+                            ambientSoundtrack: resolvedTrack,
+                            customAudioLabel: resolvedAudioLabel,
+                            customAudioSource: resolvedAudioSource,
                             customVideoLabel: resolvedVideoLabel,
                             customVideoSource: resolvedVideoSource,
                           );
@@ -1686,15 +1709,6 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           (SmartDisplayVisualTheme.minimalist, '🌚 Minimalist'),
         ];
 
-        final audioTracks = [
-          (AmbientSoundtrack.silent, '🚫 ${tr ? 'Sessiz' : 'Muted'}'),
-          (AmbientSoundtrack.fireplaceCrackling, '🔥 ${tr ? 'Şömine Çıtırtısı' : 'Fireplace'}'),
-          (AmbientSoundtrack.nightRain, '🌧️ ${tr ? 'Sakin Yağmur' : 'Calm Rain'}'),
-          (AmbientSoundtrack.cozyJazzLofi, '🎧 ${tr ? 'Lofi Akustik' : 'Lo-Fi Acoustic'}'),
-          (AmbientSoundtrack.relaxPiano, '🎹 ${tr ? 'Relax Piyano' : 'Relax Piano'}'),
-          (AmbientSoundtrack.forestBreeze, '🌲 ${tr ? 'Doğa & Kuşlar' : 'Nature & Birds'}'),
-        ];
-
         final eqStyles = [
           (EqualizerStyle.bars, '📊 ${tr ? 'Çubuklar' : 'Bars'}', tr ? 'Neon spektrum' : 'Neon spectrum'),
           (EqualizerStyle.wave, '🌊 ${tr ? 'Dalga' : 'Wave'}', tr ? 'Siber dalga boyu' : 'Cyber waveform'),
@@ -1864,131 +1878,17 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           );
         }
 
-        Widget buildAudioPlaylistSection() {
+        Widget buildExternalAudioSection() {
+          final hasCustomAudio = _customAudioCtrl.text.trim().isNotEmpty ||
+              _draft.customAudioSource.trim().isNotEmpty;
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                tr ? '🎵 Ortam Sesi Çalma Listesi:' : '🎵 Ambient Sound Playlist:',
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFFFBBF24),
-                ),
-              ),
-              const SizedBox(height: 7),
-              Row(
-                children: [
-                  for (int idx = 0; idx < 3; idx++)
-                    Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.only(right: idx < 2 ? 6 : 0),
-                        child: GestureDetector(
-                          onTap: () {
-                            _hapticTap();
-                            final t = audioTracks[idx].$1;
-                            setState(() => _draft = _draft.copyWith(ambientSoundtrack: t));
-                            if (t == AmbientSoundtrack.silent) {
-                              AmbientAudioService.stop();
-                              setState(() => _audioPreviewPlaying = false);
-                            } else if (_audioPreviewPlaying) {
-                              AmbientAudioService.start(
-                                track: t,
-                                customSource: _resolveAudioSource(),
-                                volume: _draft.ambientVolume,
-                              );
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: _draft.ambientSoundtrack == audioTracks[idx].$1
-                                  ? const Color(0xFFF59E0B)
-                                  : Colors.white.withValues(alpha: 0.04),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: _draft.ambientSoundtrack == audioTracks[idx].$1
-                                    ? const Color(0xFFFCD34D)
-                                    : Colors.white.withValues(alpha: 0.10),
-                              ),
-                            ),
-                            child: Text(
-                              audioTracks[idx].$2,
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                color: _draft.ambientSoundtrack == audioTracks[idx].$1
-                                    ? Colors.black
-                                    : Colors.white,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  for (int idx = 3; idx < 6; idx++)
-                    Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.only(right: idx < 5 ? 6 : 0),
-                        child: GestureDetector(
-                          onTap: () {
-                            _hapticTap();
-                            final t = audioTracks[idx].$1;
-                            setState(() => _draft = _draft.copyWith(ambientSoundtrack: t));
-                            if (_audioPreviewPlaying) {
-                              AmbientAudioService.start(
-                                track: t,
-                                customSource: _resolveAudioSource(),
-                                volume: _draft.ambientVolume,
-                              );
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: _draft.ambientSoundtrack == audioTracks[idx].$1
-                                  ? const Color(0xFFF59E0B)
-                                  : Colors.white.withValues(alpha: 0.04),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: _draft.ambientSoundtrack == audioTracks[idx].$1
-                                    ? const Color(0xFFFCD34D)
-                                    : Colors.white.withValues(alpha: 0.10),
-                              ),
-                            ),
-                            child: Text(
-                              audioTracks[idx].$2,
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                color: _draft.ambientSoundtrack == audioTracks[idx].$1
-                                    ? Colors.black
-                                    : Colors.white,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(
                     child: Text(
-                      tr ? '🔊 Ortam Sesi Seviyesi & Dışarıdan MP3:' : '🔊 Volume & External MP3:',
+                      tr ? '🔊 Ses Seviyesi & Dışarıdan MP3:' : '🔊 Volume & External MP3:',
                       style: const TextStyle(
                         fontSize: 10.5,
                         fontWeight: FontWeight.w700,
@@ -2065,11 +1965,39 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                       ),
                     ),
                   ),
+                  if (hasCustomAudio) ...[
+                    const SizedBox(width: 6),
+                    GestureDetector(
+                      onTap: () {
+                        _hapticTap();
+                        AmbientAudioService.stop();
+                        AmbientAudioService.setCustomAudioBytes(null);
+                        _customAudioCtrl.clear();
+                        setState(() {
+                          _audioPreviewPlaying = false;
+                          _draft = _draft.copyWith(
+                            ambientSoundtrack: AmbientSoundtrack.silent,
+                            customAudioLabel: '',
+                            customAudioSource: '',
+                          );
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEF4444).withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFFCA5A5).withValues(alpha: 0.55)),
+                        ),
+                        child: const Icon(Icons.close_rounded, size: 16, color: Color(0xFFFCA5A5)),
+                      ),
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: 8),
               _MiniToggleTile(
-                label: tr ? 'Üst Kayan Yazı Şarkı İsmi' : 'Top Marquee Track Name',
+                label: tr ? 'Alt Kayan Yazı Şarkı İsmi' : 'Bottom Marquee Track Name',
                 value: _draft.marqueeTrackEnabled,
                 activeColor: const Color(0xFF38BDF8),
                 onTap: () {
@@ -2106,9 +2034,15 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                       : (typedVideo.startsWith('http://') || typedVideo.startsWith('https://'))
                           ? (videoHost.isNotEmpty ? videoHost : 'Video URL')
                           : (_draft.customVideoLabel.isNotEmpty ? _draft.customVideoLabel : typedVideo);
+                  final resolvedAudioSource = _resolveAudioSource();
+                  final resolvedAudioLabel = _customAudioCtrl.text.trim();
+                  final resolvedTrack = (resolvedAudioSource.isNotEmpty || resolvedAudioLabel.isNotEmpty)
+                      ? AmbientSoundtrack.customMp3
+                      : AmbientSoundtrack.silent;
                   final updated = _draft.copyWith(
-                    customAudioLabel: _customAudioCtrl.text.trim(),
-                    customAudioSource: _resolveAudioSource(),
+                    ambientSoundtrack: resolvedTrack,
+                    customAudioLabel: resolvedAudioLabel,
+                    customAudioSource: resolvedAudioSource,
                     customVideoLabel: resolvedVideoLabel,
                     customVideoSource: resolvedVideoSource,
                   );
@@ -2342,7 +2276,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
                 ),
-                child: buildAudioPlaylistSection(),
+                child: buildExternalAudioSection(),
               ),
               const SizedBox(height: 10),
             ],
@@ -2350,7 +2284,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             if (isLiveNature) ...[
               buildLayoutSelectorCard(),
               const SizedBox(height: 10),
-              // Image 7: Default Visual Themes & Ambient Audio Card (ONLY visible in Canlı Video / Doğa!)
+              // Image 7: Default Visual Themes (ONLY visible in Canlı Video / Doğa, NO robotic preset audio!)
               Container(
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.03),
@@ -2372,7 +2306,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                           children: [
                             Expanded(
                               child: Text(
-                                tr ? '🎨 Varsayılan Temalar & Ambiyans Sesleri' : '🎨 Default Themes & Ambient Audio',
+                                tr ? '🎨 Varsayılan Temalar' : '🎨 Default Themes',
                                 style: const TextStyle(
                                   fontSize: 11.5,
                                   fontWeight: FontWeight.w700,
@@ -2495,8 +2429,6 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                                   ),
                               ],
                             ),
-                            const SizedBox(height: 11),
-                            buildAudioPlaylistSection(),
                           ],
                         ),
                       ),

@@ -1303,7 +1303,7 @@ class SystemSettingsState {
         smartDisplayVisualTheme: SmartDisplayVisualTheme.fireplace,
         slideImages: const [],
         singleDisplayImage: null,
-        ambientSoundtrack: AmbientSoundtrack.fireplaceCrackling,
+        ambientSoundtrack: AmbientSoundtrack.silent,
         customAudioLabel: '',
         customAudioSource: '',
         customVideoLabel: '',

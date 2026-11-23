@@ -846,6 +846,7 @@ void main() {
     final silentSettings = restored.copyWith(ambientSoundtrack: AmbientSoundtrack.silent);
     expect(silentSettings.ambientTrackTitle(LangCode.tr).contains('Sessiz'), isTrue);
     expect(restored.ambientTrackTitle(LangCode.tr).contains('Piyano'), isTrue);
+    expect(SystemSettingsState.defaults().ambientSoundtrack, AmbientSoundtrack.silent);
 
     expect(SystemSettingsState.extractCityName('Ev · İstanbul'), 'İstanbul');
     expect(SystemSettingsState.extractCityName('Ev (Kadıköy)'), 'Kadıköy');
