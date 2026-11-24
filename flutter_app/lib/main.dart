@@ -95,7 +95,10 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   bool _aiCallUrgent = false;
   DateTime? _lastAiCallAt;
   DateTime? _lastPassiveEventNotifyAt;
-  AiCallLogEntry? _pendingMissedCallAlert;
+  List<AiCallLogEntry> _unreadAlerts = const [];
+  bool _alertsExpanded = false;
+  String? _activeCallScheduleTr;
+  String? _activeCallScheduleEn;
   bool _voiceOpen = false;
   bool _modalSheetOpen = false;
   bool _reopenSettingsToSmartDisplay = false;
@@ -119,6 +122,29 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   DateTime? _heatingCycleStartedAt;
   DateTime? _lastWheelNavAt;
   bool _activeTabCanVertScroll = false;
+
+  void _enqueueUnreadAlert(AiCallLogEntry entry) {
+    if (!mounted) return;
+    final next = AiCallService.appendCallHistory(
+      _unreadAlerts,
+      entry,
+      maxEntries: 20,
+    );
+    setState(() => _unreadAlerts = next);
+    _persist();
+  }
+
+  void _markAlertRead(String id) {
+    if (!mounted) return;
+    final next = _unreadAlerts.where((e) => e.id != id).toList();
+    setState(() {
+      _unreadAlerts = next;
+      if (next.length <= 1) {
+        _alertsExpanded = false;
+      }
+    });
+    _persist();
+  }
 
   void _syncPreferredVoices(SystemSettingsState s) {
     VoiceSpeechService.preferredFemaleVoice = s.femaleVoiceName;
@@ -203,6 +229,35 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     _automationTimer = Timer.periodic(const Duration(hours: 3), (_) {
       if (!mounted || !_settings.notifications3hEnabled) return;
       final b = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp);
+      final roomStr = AiCallService.formatSpokenNumber(_roomTemp);
+      final targetStr = AiCallService.formatSpokenNumber(_targetTemp);
+      final summaryTr = b.isHeating
+          ? '3 saatlik durum özeti: Oda $roomStr°C, kombi $targetStr°C hedefte aktif. Eko 20°C\'ye alalım mı yoksa kapatalım mı?'
+          : '3 saatlik durum özeti: Oda $roomStr°C, kombi şu an kapalı. İsterseniz 22.5°C ile açalım mı?';
+      final summaryEn = b.isHeating
+          ? '3h status summary: Room is $roomStr°C with boiler active at $targetStr°C. Lower to Eco 20°C or turn off?'
+          : '3h status summary: Room is $roomStr°C and boiler is off. Should I turn it on at 22.5°C?';
+      _enqueueUnreadAlert(
+        AiCallLogEntry(
+          id: 'periodic_${DateTime.now().microsecondsSinceEpoch}',
+          timestamp: NotificationService.formatNowTime(),
+          character: _settings.mascotCharacter,
+          reason: AiCallReason.manualTest,
+          status: AiCallStatus.missed,
+          durationSeconds: 0,
+          summaryTr: summaryTr,
+          summaryEn: summaryEn,
+          actionTakenTr: '',
+          actionTakenEn: '',
+          roomTemp: _roomTemp,
+          targetTemp: _targetTemp,
+          boilerHeating: b.isHeating,
+          urgent: false,
+          isSystemAlert: true,
+          badgeLabelTr: '3 Saatlik Rapor',
+          badgeLabelEn: '3h Summary',
+        ),
+      );
       NotificationService.dispatchNotification(
         context: context,
         lang: _lang,
@@ -211,6 +266,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
         targetTemp: _targetTemp,
         boiler: b,
         settings: _settings,
+        customTitle: _lang == LangCode.tr ? '⏱ 3 Saatlik Asistan Özeti' : '⏱ 3h Assistant Summary',
+        customBody: _lang == LangCode.tr ? summaryTr : summaryEn,
+        showOverlayBanner: false,
       ).then((res) {
         if (!mounted) return;
         setState(() => _settings = _settings.copyWith(lastNotificationAt: res.timestampLabel));
@@ -310,6 +368,13 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                 if (item is Map<String, dynamic>) CustomScheduleRule.fromJson(item),
             ];
           }
+          final rawUnread = map['unreadAlerts'];
+          if (rawUnread is List) {
+            _unreadAlerts = [
+              for (final item in rawUnread)
+                if (item is Map<String, dynamic>) AiCallLogEntry.fromJson(item),
+            ];
+          }
         });
         if (ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating) {
           _heatingCycleStartedAt ??= DateTime.now();
@@ -349,6 +414,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
         'locationName': _locationName,
         'schedule': _schedule.map((s) => s.toJson()).toList(),
         'customScheduleRules': _customScheduleRules.map((r) => r.toJson()).toList(),
+        'unreadAlerts': _unreadAlerts.map((a) => a.toJson()).toList(),
         'settings': _settings.toJson(),
         'visual': _visual.toJson(),
       }),
@@ -757,6 +823,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     required AiCallReason reason,
     required bool urgent,
     bool trackCooldown = true,
+    String? scheduleTitleTr,
+    String? scheduleTitleEn,
   }) {
     if (!mounted || _aiCallOpen) return;
     _idleTimer?.cancel();
@@ -767,6 +835,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       _screensaverPreview = false;
       _aiCallReason = reason;
       _aiCallUrgent = urgent;
+      _activeCallScheduleTr = scheduleTitleTr;
+      _activeCallScheduleEn = scheduleTitleEn;
       _aiCallOpen = true;
       if (trackCooldown) {
         _lastAiCallAt = DateTime.now();
@@ -833,7 +903,12 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       );
       if (decision.shouldCall && decision.reason != null) {
         callLaunched = true;
-        _launchAiCall(reason: decision.reason!, urgent: decision.urgent);
+        _launchAiCall(
+          reason: decision.reason!,
+          urgent: decision.urgent,
+          scheduleTitleTr: scheduleTitleTr,
+          scheduleTitleEn: scheduleTitleEn,
+        );
       }
     }
 
@@ -858,6 +933,18 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       if (isPassiveEvent) {
         _lastPassiveEventNotifyAt = DateTime.now();
       }
+      if (!callLaunched) {
+        _enqueueUnreadAlert(
+          eventDecision.toAlertEntry(
+            id: 'alert_${DateTime.now().microsecondsSinceEpoch}',
+            character: _settings.mascotCharacter,
+            roomTemp: _roomTemp,
+            targetTemp: nextTargetTemp,
+            boilerHeating: nextBoiler.isHeating,
+            timestamp: NotificationService.formatNowTime(),
+          ),
+        );
+      }
       final tr = _lang == LangCode.tr;
       unawaited(
         NotificationService.dispatchNotification(
@@ -872,6 +959,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           customTitle: tr ? eventDecision.titleTr : eventDecision.titleEn,
           customBody: tr ? eventDecision.bodyTr : eventDecision.bodyEn,
           suppressChime: callLaunched,
+          showOverlayBanner: false,
         ).then((res) {
           if (!mounted) return;
           setState(() => _settings = _settings.copyWith(lastNotificationAt: res.timestampLabel));
@@ -934,7 +1022,10 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     _persist();
     _recordBoilerTransitionEspLog(prevHeating: prevHeating, nextTargetTemp: snapped);
     _syncFirebaseBackground(snapped);
-    if (!suppressAiCall && (snapped - prevTarget).abs() >= 0.05) {
+    final isScheduleEvent =
+        scheduleTitleTr != null && scheduleTitleTr.trim().isNotEmpty;
+    if (!suppressAiCall &&
+        (isScheduleEvent || (snapped - prevTarget).abs() >= 0.05)) {
       _scheduleSettledAiCallEvaluation(
         prevHeating: prevHeating,
         prevTarget: prevTarget,
@@ -1587,6 +1678,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                   boiler: boiler,
                 ),
                 lang: _lang,
+                scheduleTitleTr: _activeCallScheduleTr,
+                scheduleTitleEn: _activeCallScheduleEn,
                 onAdjustTargetTemp: (t) => _changeTarget(t, suppressAiCall: true),
                 onMissedCallNotify: () {
                   final tr = _lang == LangCode.tr;
@@ -1606,6 +1699,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                     customBody: tr
                         ? '$_locationName · Oda ${_roomTemp.toStringAsFixed(1)}°C / Hedef ${_targetTemp.toStringAsFixed(1)}°C · ${boiler.statusTextTr}'
                         : '$_locationName · Room ${_roomTemp.toStringAsFixed(1)}°C / Target ${_targetTemp.toStringAsFixed(1)}°C · ${boiler.statusTextEn}',
+                    showOverlayBanner: false,
                   );
                 },
                 onFinishCall: (entry) {
@@ -1616,15 +1710,17 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                   );
                   setState(() {
                     _settings = _settings.copyWith(aiCallHistory: nextHistory);
-                    if (entry.status == AiCallStatus.missed ||
-                        entry.status == AiCallStatus.declined) {
-                      _pendingMissedCallAlert = entry;
-                    }
                   });
+                  if (entry.status == AiCallStatus.missed ||
+                      entry.status == AiCallStatus.declined) {
+                    _enqueueUnreadAlert(entry);
+                  }
                 },
                 onCloseWithOutcome: (outcome) {
                   setState(() {
                     _aiCallOpen = false;
+                    _activeCallScheduleTr = null;
+                    _activeCallScheduleEn = null;
                     _settings = _settings.copyWith(aiCallLastOutcome: outcome);
                   });
                   _persist();
@@ -1632,23 +1728,36 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                 },
               ),
 
-            // Top Persistent Banner on Missed or Declined AI Call
-            if (_pendingMissedCallAlert != null &&
+            // Persistent Top Notification Queue: Single, Stepped Stack, or Telegram-style Capsules
+            if (_unreadAlerts.isNotEmpty &&
                 !_aiCallOpen &&
                 !_ambientMode &&
                 !_screensaverPreview &&
                 !_showBootCeremony)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: SafeArea(
-                  bottom: false,
-                  child: TopCallNotificationBanner(
-                    entry: _pendingMissedCallAlert!,
+              Builder(
+                builder: (context) {
+                  final isExpanded = _alertsExpanded && _unreadAlerts.length > 1;
+                  final stackWidget = TopAlertStack(
+                    alerts: _unreadAlerts,
+                    expanded: isExpanded,
                     lang: _lang,
-                    onTapBanner: () {
-                      final entry = _pendingMissedCallAlert!;
+                    onToggleExpand: () {
+                      _triggerHaptic();
+                      setState(() => _alertsExpanded = !_alertsExpanded);
+                    },
+                    onDismissAlert: (id) {
+                      _triggerHaptic();
+                      _markAlertRead(id);
+                    },
+                    onDismissAll: () {
+                      _triggerHaptic();
+                      setState(() {
+                        _unreadAlerts = const [];
+                        _alertsExpanded = false;
+                      });
+                      _persist();
+                    },
+                    onTapAlert: (entry) {
                       _triggerHaptic();
                       _modalSheetOpen = true;
                       _idleTimer?.cancel();
@@ -1658,35 +1767,43 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                         lang: _lang,
                         onApplyAction: (act) {
                           _changeTarget(act.targetTemp, suppressAiCall: true);
-                          setState(() {
-                            _settings = _settings.copyWith(
-                              aiCallHistory: AiCallService.updateCallHistoryAction(
-                                _settings.aiCallHistory,
-                                entry.id,
-                                actionTr: act.logActionTr,
-                                actionEn: act.logActionEn,
-                              ),
-                            );
-                            _pendingMissedCallAlert = null;
-                          });
-                          _persist();
+                          if (!entry.isSystemAlert) {
+                            setState(() {
+                              _settings = _settings.copyWith(
+                                aiCallHistory: AiCallService.updateCallHistoryAction(
+                                  _settings.aiCallHistory,
+                                  entry.id,
+                                  actionTr: act.logActionTr,
+                                  actionEn: act.logActionEn,
+                                ),
+                              );
+                            });
+                          }
+                          _markAlertRead(entry.id);
                         },
                         onDismissWithoutAction: () {
-                          if (mounted) {
-                            setState(() => _pendingMissedCallAlert = null);
-                          }
+                          _markAlertRead(entry.id);
                         },
                       ).whenComplete(() {
                         _modalSheetOpen = false;
                         if (mounted) _resetIdleTimer();
                       });
                     },
-                    onDismiss: () {
-                      _triggerHaptic();
-                      setState(() => _pendingMissedCallAlert = null);
-                    },
-                  ),
-                ),
+                  );
+
+                  if (isExpanded) {
+                    return Positioned.fill(child: stackWidget);
+                  }
+                  return Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: SafeArea(
+                      bottom: false,
+                      child: stackWidget,
+                    ),
+                  );
+                },
               ),
 
             // Interactive Multi-Stage Boot Calibration Ceremony

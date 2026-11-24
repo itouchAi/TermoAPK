@@ -999,6 +999,7 @@ enum AiCallTriggerMode {
 
 enum AiCallReason {
   ignition,
+  boilerLowered,
   boilerOff,
   coldRoom,
   hotRoom,
@@ -1027,6 +1028,11 @@ class AiCallLogEntry {
   final double targetTemp;
   final bool boilerHeating;
   final bool urgent;
+  final bool isSystemAlert;
+  final String badgeLabelTr;
+  final String badgeLabelEn;
+  final String scheduleInfoTr;
+  final String scheduleInfoEn;
 
   const AiCallLogEntry({
     required this.id,
@@ -1043,6 +1049,11 @@ class AiCallLogEntry {
     required this.targetTemp,
     required this.boilerHeating,
     this.urgent = false,
+    this.isSystemAlert = false,
+    this.badgeLabelTr = '',
+    this.badgeLabelEn = '',
+    this.scheduleInfoTr = '',
+    this.scheduleInfoEn = '',
   });
 
   AiCallLogEntry copyWith({
@@ -1066,6 +1077,11 @@ class AiCallLogEntry {
       targetTemp: targetTemp,
       boilerHeating: boilerHeating,
       urgent: urgent,
+      isSystemAlert: isSystemAlert,
+      badgeLabelTr: badgeLabelTr,
+      badgeLabelEn: badgeLabelEn,
+      scheduleInfoTr: scheduleInfoTr,
+      scheduleInfoEn: scheduleInfoEn,
     );
   }
 
@@ -1078,6 +1094,14 @@ class AiCallLogEntry {
 
   String statusLabel(LangCode lang) {
     final tr = lang == LangCode.tr;
+    if (isSystemAlert) {
+      final customBadge = tr ? badgeLabelTr : badgeLabelEn;
+      if (customBadge.isNotEmpty) return customBadge;
+      if ((tr ? scheduleInfoTr : scheduleInfoEn).isNotEmpty) {
+        return tr ? 'Takvim İşlemi' : 'Schedule Action';
+      }
+      return tr ? 'Asistan Bildirimi' : 'Assistant Alert';
+    }
     switch (status) {
       case AiCallStatus.answered:
         return tr ? 'Cevaplandı · ${formattedDuration()}' : 'Answered · ${formattedDuration()}';
@@ -1103,6 +1127,11 @@ class AiCallLogEntry {
         'targetTemp': targetTemp,
         'boilerHeating': boilerHeating,
         'urgent': urgent,
+        'isSystemAlert': isSystemAlert,
+        'badgeLabelTr': badgeLabelTr,
+        'badgeLabelEn': badgeLabelEn,
+        'scheduleInfoTr': scheduleInfoTr,
+        'scheduleInfoEn': scheduleInfoEn,
       };
 
   static T _parseEnum<T extends Enum>(String? raw, List<T> values, T fallback) {
@@ -1128,6 +1157,11 @@ class AiCallLogEntry {
       targetTemp: (map['targetTemp'] as num?)?.toDouble() ?? 22.5,
       boilerHeating: (map['boilerHeating'] as bool?) ?? false,
       urgent: (map['urgent'] as bool?) ?? false,
+      isSystemAlert: (map['isSystemAlert'] as bool?) ?? false,
+      badgeLabelTr: (map['badgeLabelTr'] as String?) ?? '',
+      badgeLabelEn: (map['badgeLabelEn'] as String?) ?? '',
+      scheduleInfoTr: (map['scheduleInfoTr'] as String?) ?? '',
+      scheduleInfoEn: (map['scheduleInfoEn'] as String?) ?? '',
     );
   }
 }

@@ -14,6 +14,7 @@ import 'package:termostat_flow/services/schedule_engine.dart';
 import 'package:termostat_flow/services/vault_crypto_service.dart';
 import 'package:termostat_flow/services/voice_gender_classifier.dart';
 import 'package:termostat_flow/services/voice_speech_service.dart';
+import 'package:termostat_flow/widgets/missed_call_alert.dart';
 import 'package:termostat_flow/widgets/smart_display_overlay.dart';
 import 'package:termostat_flow/widgets/termo_bot.dart';
 
@@ -1280,5 +1281,147 @@ void main() {
       isUserChange: true,
     );
     expect(evDisabled.shouldNotify, isFalse);
+
+    // Interactive assistant-question phrasing & schedule provenance
+    expect(evOn.bodyTr, contains('mı?'));
+    expect(evLower.bodyTr, contains('mı?'));
+    expect(evOff.bodyTr, contains('mı?'));
+    expect(evMax.bodyTr, contains('mı?'));
+    expect(evCold.bodyTr, contains('mı?'));
+
+    final evSched = AiCallService.evaluateBoilerEventNotification(
+      enabled: true,
+      wasHeating: false,
+      nextBoiler: heating,
+      safety: safeGuard,
+      locationName: 'Ev · İstanbul',
+      roomTemp: 21.0,
+      targetTemp: 23.0,
+      prevTargetTemp: 18.0,
+      isUserChange: true,
+      scheduleTitleTr: 'Sabah Modu (06:30)',
+      scheduleTitleEn: 'Morning Mode (06:30)',
+    );
+    expect(evSched.shouldNotify, isTrue);
+    expect(evSched.scheduleInfoTr, contains('Sabah Modu (06:30)'));
+    expect(evSched.bodyTr, contains('Takvim ayarına (Sabah Modu (06:30)) göre'));
+    expect(evSched.bodyTr, contains('mı?'));
+
+    final schedEntry = evSched.toAlertEntry(
+      id: 'sched_alert_1',
+      character: MascotCharacter.ela,
+      roomTemp: 21.0,
+      targetTemp: 23.0,
+      boilerHeating: true,
+      timestamp: '06:30',
+    );
+    final restoredAlert = AiCallLogEntry.fromJson(schedEntry.toJson());
+    expect(restoredAlert.isSystemAlert, isTrue);
+    expect(restoredAlert.badgeLabelTr, contains('Takvim'));
+    expect(restoredAlert.scheduleInfoTr, contains('Sabah Modu (06:30)'));
+    expect(restoredAlert.reason, AiCallReason.ignition);
+
+    // boilerLowered context actions adapt cleanly
+    final loweredEntry = evLower.toAlertEntry(
+      id: 'lowered_1',
+      character: MascotCharacter.ela,
+      roomTemp: 21.0,
+      targetTemp: 21.5,
+      boilerHeating: true,
+      timestamp: '15:10',
+    );
+    expect(loweredEntry.reason, AiCallReason.boilerLowered);
+    final loweredActions = AiCallService.suggestedActionsForEntry(loweredEntry);
+    expect(loweredActions.length, 3);
+    expect(loweredActions.first.targetTemp, 22.5);
+    expect(loweredActions.last.targetTemp, ThermostatMath.minTemp);
+  });
+
+  testWidgets('TopAlertStack renders stepped pile and expands into Telegram-style capsules opening action dialog', (tester) async {
+    final alerts = [
+      AiCallLogEntry(
+        id: 'a1',
+        timestamp: '15:09',
+        character: MascotCharacter.ela,
+        reason: AiCallReason.hotRoom,
+        status: AiCallStatus.missed,
+        durationSeconds: 0,
+        summaryTr: 'Hedef sıcaklık 30°C ile maksimum seviyeye alındı. Kapatalım mı?',
+        summaryEn: 'High temp',
+        actionTakenTr: '',
+        actionTakenEn: '',
+        roomTemp: 20.8,
+        targetTemp: 30.0,
+        boilerHeating: true,
+        urgent: true,
+        isSystemAlert: true,
+        badgeLabelTr: 'Yüksek Hedef',
+        badgeLabelEn: 'High Target',
+      ),
+      AiCallLogEntry(
+        id: 'a2',
+        timestamp: '15:05',
+        character: MascotCharacter.ela,
+        reason: AiCallReason.ignition,
+        status: AiCallStatus.missed,
+        durationSeconds: 0,
+        summaryTr: 'Takvim ayarına (Sabah Modu) göre: Kombi açıldı (23°C). Kısalım mı?',
+        summaryEn: 'Schedule on',
+        actionTakenTr: '',
+        actionTakenEn: '',
+        roomTemp: 20.5,
+        targetTemp: 23.0,
+        boilerHeating: true,
+        isSystemAlert: true,
+        badgeLabelTr: 'Takvim · Isıtma Aktif',
+        badgeLabelEn: 'Schedule · Heating On',
+        scheduleInfoTr: 'Takvim ayarına (Sabah Modu) göre işlem yapıldı.',
+        scheduleInfoEn: 'Executed per calendar schedule (Morning Mode).',
+      ),
+    ];
+
+    bool expanded = false;
+    AiCallLogEntry? opened;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) {
+              return Stack(
+                children: [
+                  Positioned.fill(
+                    child: TopAlertStack(
+                      alerts: alerts,
+                      expanded: expanded,
+                      lang: LangCode.tr,
+                      onToggleExpand: () => setState(() => expanded = !expanded),
+                      onTapAlert: (item) => opened = item,
+                      onDismissAlert: (_) {},
+                      onDismissAll: () {},
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    // Collapsed stepped stack shows +1 pill and expandable prompt
+    expect(find.text('+1'), findsOneWidget);
+    expect(find.textContaining('2 okunmamış mesajı'), findsOneWidget);
+
+    // Tapping stepped stack expands into Telegram-style individual capsules
+    await tester.tap(find.text('+1'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Okunmamış Mesajlar (2)'), findsOneWidget);
+    expect(find.textContaining('Takvim ayarına (Sabah Modu)'), findsOneWidget);
+
+    // Tapping second capsule selects that specific entry
+    await tester.tap(find.text('Takvim · Isıtma Aktif'));
+    await tester.pump();
+    expect(opened?.id, 'a2');
   });
 }

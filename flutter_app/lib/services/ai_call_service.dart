@@ -26,21 +26,64 @@ enum BoilerEventAlertKind {
 class BoilerEventAlertDecision {
   final bool shouldNotify;
   final BoilerEventAlertKind? kind;
+  final AiCallReason callReason;
   final AlertSeverity severity;
   final String titleTr;
   final String titleEn;
   final String bodyTr;
   final String bodyEn;
+  final String badgeTr;
+  final String badgeEn;
+  final String scheduleInfoTr;
+  final String scheduleInfoEn;
 
   const BoilerEventAlertDecision({
     required this.shouldNotify,
     this.kind,
+    this.callReason = AiCallReason.manualTest,
     this.severity = AlertSeverity.info,
     this.titleTr = '',
     this.titleEn = '',
     this.bodyTr = '',
     this.bodyEn = '',
+    this.badgeTr = '',
+    this.badgeEn = '',
+    this.scheduleInfoTr = '',
+    this.scheduleInfoEn = '',
   });
+
+  AiCallLogEntry toAlertEntry({
+    required String id,
+    required MascotCharacter character,
+    required double roomTemp,
+    required double targetTemp,
+    required bool boilerHeating,
+    required String timestamp,
+  }) {
+    final isUrgent = severity == AlertSeverity.critical ||
+        kind == BoilerEventAlertKind.highTarget;
+    return AiCallLogEntry(
+      id: id,
+      timestamp: timestamp,
+      character: character,
+      reason: callReason,
+      status: AiCallStatus.missed,
+      durationSeconds: 0,
+      summaryTr: bodyTr,
+      summaryEn: bodyEn,
+      actionTakenTr: '',
+      actionTakenEn: '',
+      roomTemp: roomTemp,
+      targetTemp: targetTemp,
+      boilerHeating: boilerHeating,
+      urgent: isUrgent,
+      isSystemAlert: true,
+      badgeLabelTr: badgeTr,
+      badgeLabelEn: badgeEn,
+      scheduleInfoTr: scheduleInfoTr,
+      scheduleInfoEn: scheduleInfoEn,
+    );
+  }
 }
 
 class AiCallQuickAction {
@@ -242,6 +285,8 @@ class AiCallService {
     switch (reason) {
       case AiCallReason.ignition:
         return tr ? '🔥 Kombi Ateşlendi' : '🔥 Boiler Ignited';
+      case AiCallReason.boilerLowered:
+        return tr ? '📉 Kombi Kısıldı' : '📉 Boiler Lowered';
       case AiCallReason.boilerOff:
         return tr ? '⏸ Kombi Kapatıldı' : '⏸ Boiler Turned Off';
       case AiCallReason.coldRoom:
@@ -278,12 +323,16 @@ class AiCallService {
     switch (reason) {
       case AiCallReason.ignition:
         return tr
-            ? 'Merhaba, ben $assistantName. Kombi ateşlendi ve sıcaklık $target dereceye ayarlandı.'
-            : 'Hello, this is $assistantName. The boiler has ignited and target temperature is set to $target degrees.';
+            ? 'Merhaba, ben $assistantName. Kombi ateşlendi ve sıcaklık $target dereceye ayarlandı. İsterseniz Eko moduna düşürebilir ya da kapatabilirim.'
+            : 'Hello, this is $assistantName. The boiler has ignited and target temperature is set to $target degrees. Would you like Eco mode or shutoff?';
+      case AiCallReason.boilerLowered:
+        return tr
+            ? 'Merhaba, ben $assistantName. Kombi hedef sıcaklığı $target dereceye kısıldı, oda $room derece. Konfor seviyesine yükseltelim mi?'
+            : 'Hello, this is $assistantName. Boiler target was lowered to $target degrees while the room is $room degrees. Should I raise it to Comfort?';
       case AiCallReason.boilerOff:
         return tr
-            ? 'Merhaba, ben $assistantName. Kombi kapatıldı, ev sıcaklığı $room derece.'
-            : 'Hello, this is $assistantName. The boiler has been turned off; room temperature is $room degrees.';
+            ? 'Merhaba, ben $assistantName. Kombi kapatıldı, ev sıcaklığı $room derece. Tekrar açalım mı?'
+            : 'Hello, this is $assistantName. The boiler has been turned off; room temperature is $room degrees. Should I turn it back on?';
       case AiCallReason.coldRoom:
         return tr
             ? 'Merhaba, ben $assistantName. Ev sıcaklığı $room derece, ortam soğuk. Kombiyi açalım mı?'
@@ -299,8 +348,8 @@ class AiCallService {
             : 'Hello, this is $assistantName. Room temperature rose to $room degrees. Should I turn off the boiler?';
       case AiCallReason.safetyAlert:
         return tr
-            ? 'Dikkat, ben $assistantName. Kombi su basıncı kritik seviyeye düştü, lütfen kontrol edin.'
-            : 'Attention, this is $assistantName. Boiler water pressure dropped critically, please inspect the system.';
+            ? 'Dikkat, ben $assistantName. Kombi su basıncı kritik seviyeye düştü, güvenli kapatma yapalım mı?'
+            : 'Attention, this is $assistantName. Boiler water pressure dropped critically, should I turn it off safely?';
       case AiCallReason.manualTest:
         if (boiler.isHeating) {
           return tr
@@ -467,48 +516,63 @@ class AiCallService {
     required double targetTemp,
     required bool boilerHeating,
     required LangCode lang,
+    String? scheduleTitleTr,
+    String? scheduleTitleEn,
   }) {
     final tr = lang == LangCode.tr;
     final room = formatSpokenNumber(roomTemp);
     final target = formatSpokenNumber(targetTemp);
+    final hasSchedule = tr
+        ? (scheduleTitleTr != null && scheduleTitleTr.trim().isNotEmpty)
+        : (scheduleTitleEn != null && scheduleTitleEn.trim().isNotEmpty);
+    final schedPrefix = hasSchedule
+        ? (tr
+            ? 'Takvim ayarına (${scheduleTitleTr!.trim()}) göre işlem yapıldı: '
+            : 'Executed per schedule (${scheduleTitleEn!.trim()}): ')
+        : '';
+
     switch (reason) {
       case AiCallReason.ignition:
         return tr
-            ? 'Kombi açıldı / ateşlendi. Hedef sıcaklık $target°C (Oda $room°C).'
-            : 'Boiler turned on / ignited. Target set to $target°C (Room $room°C).';
+            ? '${schedPrefix}Kombi açıldı, hedef sıcaklık $target°C (Oda $room°C). Eko 20°C\'ye kısalım mı yoksa kapatalım mı?'
+            : '${schedPrefix}Boiler turned on at $target°C (Room $room°C). Should I lower to Eco 20°C or turn it off?';
+      case AiCallReason.boilerLowered:
+        return tr
+            ? '${schedPrefix}Kombi hedef sıcaklığı $target°C\'ye kısıldı (Oda $room°C). Konfora yükseltelim mi yoksa kapatalım mı?'
+            : '${schedPrefix}Boiler target lowered to $target°C (Room $room°C). Raise to Comfort or turn off?';
       case AiCallReason.boilerOff:
         return tr
-            ? 'Kombi kapatıldı ve ısıtma durduruldu (Oda $room°C, Hedef $target°C).'
-            : 'Boiler turned off and heating paused (Room $room°C, Target $target°C).';
+            ? '${schedPrefix}Kombi kapatıldı ve ısıtma durduruldu (Oda $room°C). Tekrar açalım mı?'
+            : '${schedPrefix}Boiler turned off and heating paused (Room $room°C). Should I turn it back on?';
       case AiCallReason.coldRoom:
         return tr
-            ? 'Ev sıcaklığı $room°C ile düşük seviyeye indi; kombi şu an kapalı.'
-            : 'Room temperature dropped to $room°C while the boiler is off.';
+            ? '${schedPrefix}Ev sıcaklığı $room°C ile düşük seviyeye indi; kombi şu an kapalı. Kombiyi açalım mı?'
+            : '${schedPrefix}Room temperature dropped to $room°C while boiler is off. Should I turn it on?';
       case AiCallReason.hotRoom:
         if (targetTemp >= highTargetTempThresholdC) {
           return tr
-              ? 'Hedef sıcaklık $target°C ile maksimum seviyeye alındı (Oda $room°C).'
-              : 'Target temperature was raised to maximum ($target°C) while room is $room°C.';
+              ? '${schedPrefix}Hedef sıcaklık $target°C ile maksimum seviyeye alındı (Oda $room°C). Kısalım mı yoksa kapatalım mı?'
+              : '${schedPrefix}Target temperature raised to maximum ($target°C) while room is $room°C. Lower or turn off?';
         }
         return tr
-            ? 'Ev sıcaklığı $room°C ile yüksek seviyeye ulaştı (Hedef $target°C).'
-            : 'Room temperature reached $room°C (Target $target°C).';
+            ? '${schedPrefix}Ev sıcaklığı $room°C ile yüksek seviyeye ulaştı (Hedef $target°C). Kombiyi kapatalım mı?'
+            : '${schedPrefix}Room temperature reached $room°C (Target $target°C). Should I turn off the boiler?';
       case AiCallReason.safetyAlert:
         return tr
-            ? 'Kritik kombi emniyet uyarısı algılandı! Lütfen cihazı ve basıncı kontrol edin.'
-            : 'Critical boiler safety alert detected! Please inspect pressure and status.';
+            ? 'Kritik kombi emniyet uyarısı algılandı! Güvenlik için kombiyi kapatalım mı?'
+            : 'Critical boiler safety alert detected! Should I shut off the boiler safely?';
       case AiCallReason.manualTest:
         return boilerHeating
             ? (tr
-                ? 'Asistan araması: Kombi aktif çalışıyor (Hedef $target°C, Oda $room°C).'
-                : 'Assistant call: Boiler active (Target $target°C, Room $room°C).')
+                ? 'Kombi aktif çalışıyor (Hedef $target°C, Oda $room°C). Ayarı değiştirelim mi?'
+                : 'Boiler active (Target $target°C, Room $room°C). Would you like to adjust it?')
             : (tr
-                ? 'Asistan araması: Kombi şu an kapalı (Oda $room°C, Hedef $target°C).'
-                : 'Assistant call: Boiler idle (Room $room°C, Target $target°C).');
+                ? 'Kombi şu an kapalı (Oda $room°C). Kombiyi açalım mı?'
+                : 'Boiler idle (Room $room°C). Should I turn it on?');
     }
   }
 
-  /// Context-specific actions presented when tapping a missed/declined call banner or history item.
+  /// Context-specific actions presented when tapping a notification capsule, missed call banner, or history item.
   static List<AiCallQuickAction> suggestedActionsForEntry(AiCallLogEntry entry) {
     switch (entry.reason) {
       case AiCallReason.hotRoom:
@@ -556,6 +620,58 @@ class AiCallService {
           ),
         ];
 
+      case AiCallReason.boilerLowered:
+        if (entry.targetTemp <= 20.5) {
+          return const [
+            AiCallQuickAction(
+              labelTr: "22.5°C'ye Yükselt (Konfor)",
+              labelEn: 'Raise to 22.5°C (Comfort)',
+              targetTemp: 22.5,
+              logActionTr: "Bildirimden: 22.5°C Konfor'a yükseltildi",
+              logActionEn: 'From alert: Raised to 22.5°C Comfort',
+            ),
+            AiCallQuickAction(
+              labelTr: 'Hızlı Isıt / Boost (25°C)',
+              labelEn: 'Boost Heat (25°C)',
+              targetTemp: 25.0,
+              logActionTr: 'Bildirimden: Boost (25°C) açıldı',
+              logActionEn: 'From alert: Boost (25°C) activated',
+            ),
+            AiCallQuickAction(
+              labelTr: 'Kombiyi Kapat',
+              labelEn: 'Turn Off Boiler',
+              targetTemp: ThermostatMath.minTemp,
+              logActionTr: 'Bildirimden: Kombi kapatıldı',
+              logActionEn: 'From alert: Boiler turned off',
+              isDanger: true,
+            ),
+          ];
+        }
+        return const [
+          AiCallQuickAction(
+            labelTr: "22.5°C'ye Yükselt (Konfor)",
+            labelEn: 'Raise to 22.5°C (Comfort)',
+            targetTemp: 22.5,
+            logActionTr: "Bildirimden: 22.5°C Konfor'a yükseltildi",
+            logActionEn: 'From alert: Raised to 22.5°C Comfort',
+          ),
+          AiCallQuickAction(
+            labelTr: 'Eko Moduna Al (20°C)',
+            labelEn: 'Set Eco Mode (20°C)',
+            targetTemp: 20.0,
+            logActionTr: "Bildirimden: Eko (20°C)'ya alındı",
+            logActionEn: 'From alert: Set Eco (20°C)',
+          ),
+          AiCallQuickAction(
+            labelTr: 'Kombiyi Kapat',
+            labelEn: 'Turn Off Boiler',
+            targetTemp: ThermostatMath.minTemp,
+            logActionTr: 'Bildirimden: Kombi kapatıldı',
+            logActionEn: 'From alert: Boiler turned off',
+            isDanger: true,
+          ),
+        ];
+
       case AiCallReason.coldRoom:
       case AiCallReason.boilerOff:
         return const [
@@ -583,6 +699,32 @@ class AiCallService {
         ];
 
       case AiCallReason.ignition:
+        if (entry.targetTemp >= 24.5) {
+          return const [
+            AiCallQuickAction(
+              labelTr: "22.5°C'ye Düşür (Konfor)",
+              labelEn: 'Lower to 22.5°C (Comfort)',
+              targetTemp: 22.5,
+              logActionTr: "Bildirimden: 22.5°C Konfor'a düşürüldü",
+              logActionEn: 'From alert: Lowered to 22.5°C Comfort',
+            ),
+            AiCallQuickAction(
+              labelTr: 'Eko Moduna Düşür (20°C)',
+              labelEn: 'Lower to Eco (20°C)',
+              targetTemp: 20.0,
+              logActionTr: "Bildirimden: Eko (20°C)'ya düşürüldü",
+              logActionEn: 'From alert: Lowered to Eco (20°C)',
+            ),
+            AiCallQuickAction(
+              labelTr: 'Kombiyi Kapat',
+              labelEn: 'Turn Off Boiler',
+              targetTemp: ThermostatMath.minTemp,
+              logActionTr: 'Bildirimden: Kombi kapatıldı',
+              logActionEn: 'From alert: Boiler turned off',
+              isDanger: true,
+            ),
+          ];
+        }
         return const [
           AiCallQuickAction(
             labelTr: 'Eko Moduna Düşür (20°C)',
@@ -689,10 +831,10 @@ class AiCallService {
     ];
   }
 
-  /// Evaluates real-time boiler & temperature notification events
-  /// (Kombi açıldı / kısıldı / kapandı, Derece en yüksekte, Ev sıcaklığı düşük, Emniyet)
-  /// so users receive full status alerts even when AI Voice Calls are turned off,
-  /// or in parallel alongside AI Voice Calls.
+  /// Evaluates real-time boiler, schedule & temperature notification events
+  /// (Kombi açıldı / kısıldı / kapandı, Derece en yüksekte, Ev sıcaklığı düşük, Takvim planı)
+  /// with voice-assistant-style actionable question phrasing so users receive full interactive
+  /// alerts even when AI Voice Calls are turned off, or in parallel alongside AI Voice Calls.
   static BoilerEventAlertDecision evaluateBoilerEventNotification({
     required bool enabled,
     required bool wasHeating,
@@ -709,19 +851,25 @@ class AiCallService {
     DateTime? now,
     Duration passiveCooldown = const Duration(minutes: 5),
   }) {
-    if (!enabled) {
+    final schedTr = (scheduleTitleTr ?? '').trim();
+    final schedEn = (scheduleTitleEn ?? '').trim();
+    final hasSchedule = schedTr.isNotEmpty;
+
+    if (!enabled && !hasSchedule) {
       return const BoilerEventAlertDecision(shouldNotify: false);
     }
 
     final checkNow = now ?? DateTime.now();
     final room = formatSpokenNumber(roomTemp);
     final target = formatSpokenNumber(targetTemp);
-    final schedulePrefixTr = (scheduleTitleTr != null && scheduleTitleTr.isNotEmpty)
-        ? '[$scheduleTitleTr] '
+    final scheduleInfoTr = hasSchedule
+        ? 'Takvim ayarına ($schedTr) göre işlem yapıldı.'
         : '';
-    final schedulePrefixEn = (scheduleTitleEn != null && scheduleTitleEn.isNotEmpty)
-        ? '[$scheduleTitleEn] '
+    final scheduleInfoEn = schedEn.isNotEmpty
+        ? 'Executed per calendar schedule ($schedEn).'
         : '';
+    final scheduleIntroTr = hasSchedule ? 'Takvim ayarına ($schedTr) göre: ' : '';
+    final scheduleIntroEn = schedEn.isNotEmpty ? 'Per schedule ($schedEn): ' : '';
 
     final ignitionDetected = !wasHeating && nextBoiler.isHeating;
     final shutdownDetected = wasHeating && !nextBoiler.isHeating;
@@ -729,7 +877,13 @@ class AiCallService {
         wasHeating &&
         nextBoiler.isHeating &&
         prevTargetTemp != null &&
-        targetTemp <= prevTargetTemp - 1.5;
+        (targetTemp <= prevTargetTemp - 1.5 ||
+            (hasSchedule && targetTemp < prevTargetTemp - 0.05));
+    final scheduleRaisedWhileHeating = hasSchedule &&
+        wasHeating &&
+        nextBoiler.isHeating &&
+        prevTargetTemp != null &&
+        targetTemp > prevTargetTemp + 0.05;
     final isHighTargetPush = isUserChange &&
         nextBoiler.isHeating &&
         targetTemp >= highTargetTempThresholdC &&
@@ -739,20 +893,27 @@ class AiCallService {
 
     if (safety.lowPressure) {
       if (!isUserChange &&
+          !hasSchedule &&
           lastPassiveNotifyAt != null &&
           checkNow.difference(lastPassiveNotifyAt) < passiveCooldown) {
         return const BoilerEventAlertDecision(shouldNotify: false);
       }
+      final pressureStr = nextBoiler.waterPressureBar.toStringAsFixed(1);
       return BoilerEventAlertDecision(
         shouldNotify: true,
         kind: BoilerEventAlertKind.safetyAlert,
+        callReason: AiCallReason.safetyAlert,
         severity: AlertSeverity.critical,
-        titleTr: '🚨 Kritik Kombi Basınç Uyarısı',
-        titleEn: '🚨 Critical Boiler Pressure Alert',
+        titleTr: '🚨 Kritik Basınç · Kapatalım mı?',
+        titleEn: '🚨 Critical Pressure · Turn Off?',
+        badgeTr: 'Emniyet Uyarısı',
+        badgeEn: 'Safety Alert',
         bodyTr:
-            '$locationName · Su basıncı ${nextBoiler.waterPressureBar.toStringAsFixed(1)} Bar seviyesine düştü! Oda $room°C.',
+            'Kombi su basıncı $pressureStr Bar seviyesine düştü (Oda $room°C). Güvenlik için kombiyi kapatalım mı?',
         bodyEn:
-            '$locationName · Water pressure dropped to ${nextBoiler.waterPressureBar.toStringAsFixed(1)} Bar! Room $room°C.',
+            'Boiler water pressure dropped to $pressureStr Bar (Room $room°C). Should I shut off the boiler safely?',
+        scheduleInfoTr: scheduleInfoTr,
+        scheduleInfoEn: scheduleInfoEn,
       );
     }
 
@@ -760,27 +921,37 @@ class AiCallService {
       return BoilerEventAlertDecision(
         shouldNotify: true,
         kind: BoilerEventAlertKind.highTarget,
+        callReason: AiCallReason.hotRoom,
         severity: AlertSeverity.warning,
-        titleTr: '⚠️ Derece En Yüksekte ($target°C)',
-        titleEn: '⚠️ Target Temp at Maximum ($target°C)',
+        titleTr: '⚠️ Derece En Yüksekte · Kısalım mı?',
+        titleEn: '⚠️ High Target Temp · Lower It?',
+        badgeTr: hasSchedule ? 'Takvim · Yüksek Hedef' : 'Yüksek Hedef',
+        badgeEn: hasSchedule ? 'Schedule · High Target' : 'High Target',
         bodyTr:
-            '$schedulePrefixTr$locationName · Kombi $target°C maksimum hedefe alındı. Oda şu an $room°C (${nextBoiler.statusTextTr}).',
+            '${scheduleIntroTr}Hedef sıcaklık $target°C ile maksimum seviyeye alındı (Oda $room°C). Kombiyi kapatalım mı yoksa 22.5°C\'ye düşürelim mi?',
         bodyEn:
-            '$schedulePrefixEn$locationName · Target raised to $target°C. Room is $room°C (${nextBoiler.statusTextEn}).',
+            '${scheduleIntroEn}Target temperature raised to maximum ($target°C) while room is $room°C. Lower to 22.5°C or turn off?',
+        scheduleInfoTr: scheduleInfoTr,
+        scheduleInfoEn: scheduleInfoEn,
       );
     }
 
-    if (ignitionDetected) {
+    if (ignitionDetected || scheduleRaisedWhileHeating) {
       return BoilerEventAlertDecision(
         shouldNotify: true,
         kind: BoilerEventAlertKind.ignition,
+        callReason: AiCallReason.ignition,
         severity: AlertSeverity.info,
-        titleTr: '🔥 Kombi Açıldı',
-        titleEn: '🔥 Boiler Turned On',
+        titleTr: hasSchedule ? '📅 Takvim · Kombi Açıldı' : '🔥 Kombi Açıldı',
+        titleEn: hasSchedule ? '📅 Schedule · Boiler On' : '🔥 Boiler Turned On',
+        badgeTr: hasSchedule ? 'Takvim · Isıtma Aktif' : 'Kombi Açıldı',
+        badgeEn: hasSchedule ? 'Schedule · Heating On' : 'Boiler On',
         bodyTr:
-            '$schedulePrefixTr$locationName · Kombi ateşlendi, hedef $target°C (Oda $room°C · %${nextBoiler.flamePercent} alev).',
+            '${scheduleIntroTr}Kombi ateşlendi ve hedef sıcaklık $target°C\'ye ayarlandı (Oda $room°C). Eko 20°C\'ye düşürelim mi veya kapatalım mı?',
         bodyEn:
-            '$schedulePrefixEn$locationName · Boiler ignited, target $target°C (Room $room°C · ${nextBoiler.flamePercent}% flame).',
+            '${scheduleIntroEn}Boiler ignited and target set to $target°C (Room $room°C). Lower to Eco 20°C or turn off?',
+        scheduleInfoTr: scheduleInfoTr,
+        scheduleInfoEn: scheduleInfoEn,
       );
     }
 
@@ -788,13 +959,18 @@ class AiCallService {
       return BoilerEventAlertDecision(
         shouldNotify: true,
         kind: BoilerEventAlertKind.boilerOff,
+        callReason: AiCallReason.boilerOff,
         severity: AlertSeverity.info,
-        titleTr: '⏸ Kombi Kapandı',
-        titleEn: '⏸ Boiler Turned Off',
+        titleTr: hasSchedule ? '📅 Takvim · Kombi Kapandı' : '⏸ Kombi Kapandı',
+        titleEn: hasSchedule ? '📅 Schedule · Boiler Off' : '⏸ Boiler Turned Off',
+        badgeTr: hasSchedule ? 'Takvim · Kapatma' : 'Kombi Kapandı',
+        badgeEn: hasSchedule ? 'Schedule · Shutoff' : 'Boiler Off',
         bodyTr:
-            '$schedulePrefixTr$locationName · Kombi durduruldu (Oda $room°C, Hedef $target°C).',
+            '${scheduleIntroTr}Kombi kapatıldı ve ısıtma durduruldu (Oda $room°C). İsterseniz tekrar 22.5°C ile açalım mı?',
         bodyEn:
-            '$schedulePrefixEn$locationName · Boiler shut down (Room $room°C, Target $target°C).',
+            '${scheduleIntroEn}Boiler turned off and heating paused (Room $room°C). Should I turn it back on at 22.5°C?',
+        scheduleInfoTr: scheduleInfoTr,
+        scheduleInfoEn: scheduleInfoEn,
       );
     }
 
@@ -803,13 +979,41 @@ class AiCallService {
       return BoilerEventAlertDecision(
         shouldNotify: true,
         kind: BoilerEventAlertKind.boilerLowered,
+        callReason: AiCallReason.boilerLowered,
         severity: AlertSeverity.info,
-        titleTr: '📉 Kombi Kısıldı ($target°C)',
-        titleEn: '📉 Boiler Lowered ($target°C)',
+        titleTr: hasSchedule ? '📅 Takvim · Kombi Kısıldı' : '📉 Kombi Kısıldı ($target°C)',
+        titleEn: hasSchedule ? '📅 Schedule · Boiler Lowered' : '📉 Boiler Lowered ($target°C)',
+        badgeTr: hasSchedule ? 'Takvim · Sıcaklık Kısıldı' : 'Kombi Kısıldı',
+        badgeEn: hasSchedule ? 'Schedule · Lowered' : 'Boiler Lowered',
         bodyTr:
-            '$schedulePrefixTr$locationName · Hedef sıcaklık $prevStr°C → $target°C seviyesine düşürüldü (Oda $room°C).',
+            '${scheduleIntroTr}Kombi sıcaklığı $prevStr°C\'den $target°C\'ye kısıldı (Oda $room°C). Konfora yükseltelim mi yoksa kapatalım mı?',
         bodyEn:
-            '$schedulePrefixEn$locationName · Target lowered $prevStr°C → $target°C (Room $room°C).',
+            '${scheduleIntroEn}Boiler target lowered from $prevStr°C to $target°C (Room $room°C). Raise to Comfort or turn off?',
+        scheduleInfoTr: scheduleInfoTr,
+        scheduleInfoEn: scheduleInfoEn,
+      );
+    }
+
+    // If a schedule ran and target remained effectively unchanged (e.g. already at that target)
+    if (hasSchedule) {
+      final isOff = !nextBoiler.isHeating && targetTemp <= ThermostatMath.minTemp + 0.05;
+      return BoilerEventAlertDecision(
+        shouldNotify: true,
+        kind: isOff ? BoilerEventAlertKind.boilerOff : BoilerEventAlertKind.ignition,
+        callReason: isOff ? AiCallReason.boilerOff : AiCallReason.ignition,
+        severity: AlertSeverity.info,
+        titleTr: '📅 Takvim Planı Uygulandı',
+        titleEn: '📅 Schedule Plan Applied',
+        badgeTr: 'Takvim Planı',
+        badgeEn: 'Schedule Plan',
+        bodyTr: isOff
+            ? '${scheduleIntroTr}Kombi kapalı konuma alındı (Oda $room°C). Tekrar 22.5°C açalım mı?'
+            : '${scheduleIntroTr}Hedef sıcaklık $target°C olarak doğrulandı (Oda $room°C). Kısma veya kapatma yapalım mı?',
+        bodyEn: isOff
+            ? '${scheduleIntroEn}Boiler kept off (Room $room°C). Turn on at 22.5°C?'
+            : '${scheduleIntroEn}Target temperature confirmed at $target°C (Room $room°C). Lower or turn off?',
+        scheduleInfoTr: scheduleInfoTr,
+        scheduleInfoEn: scheduleInfoEn,
       );
     }
 
@@ -823,13 +1027,16 @@ class AiCallService {
       return BoilerEventAlertDecision(
         shouldNotify: true,
         kind: BoilerEventAlertKind.coldRoom,
+        callReason: AiCallReason.coldRoom,
         severity: safety.freezeRisk ? AlertSeverity.critical : AlertSeverity.warning,
-        titleTr: '❄️ Ev Sıcaklığı Düşük ($room°C)',
-        titleEn: '❄️ Low Room Temperature ($room°C)',
+        titleTr: '❄️ Ev Sıcaklığı Düşük · Açalım mı?',
+        titleEn: '❄️ Low Room Temp · Turn On?',
+        badgeTr: 'Düşük Sıcaklık',
+        badgeEn: 'Low Room Temp',
         bodyTr:
-            '$locationName · Ev sıcaklığı $room°C seviyesine düştü ve kombi şu an kapalı (Hedef $target°C).',
+            'Ev sıcaklığı $room°C ile düşük seviyeye indi ve kombi şu an kapalı. Kombiyi 22.5°C ile açalım mı?',
         bodyEn:
-            '$locationName · Room temperature dropped to $room°C while boiler is off (Target $target°C).',
+            'Room temperature dropped to $room°C while the boiler is off. Should I turn on the boiler at 22.5°C?',
       );
     }
 
@@ -837,13 +1044,16 @@ class AiCallService {
       return BoilerEventAlertDecision(
         shouldNotify: true,
         kind: BoilerEventAlertKind.hotRoom,
+        callReason: AiCallReason.hotRoom,
         severity: AlertSeverity.warning,
-        titleTr: '☀️ Ev Sıcaklığı Yükseldi ($room°C)',
-        titleEn: '☀️ Room Temperature High ($room°C)',
+        titleTr: '☀️ Ev Sıcaklığı Yükseldi · Kapatalım mı?',
+        titleEn: '☀️ Room Temp High · Turn Off?',
+        badgeTr: 'Yüksek Oda Sıcaklığı',
+        badgeEn: 'High Room Temp',
         bodyTr:
-            '$locationName · Oda $room°C oldu ve kombi hâlâ aktif (Hedef $target°C).',
+            'Ev sıcaklığı $room°C\'ye yükseldi ve kombi hâlâ aktif (Hedef $target°C). Kombiyi kapatalım mı yoksa 20°C Eko\'ya düşürelim mi?',
         bodyEn:
-            '$locationName · Room reached $room°C while boiler is still active (Target $target°C).',
+            'Room temperature reached $room°C while the boiler is still active (Target $target°C). Turn off or lower to Eco 20°C?',
       );
     }
 

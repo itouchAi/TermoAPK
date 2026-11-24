@@ -35,6 +35,8 @@ class AiPhoneCallOverlay extends StatefulWidget {
   final VoidCallback onMissedCallNotify;
   final ValueChanged<String> onCloseWithOutcome;
   final ValueChanged<AiCallLogEntry>? onFinishCall;
+  final String? scheduleTitleTr;
+  final String? scheduleTitleEn;
 
   const AiPhoneCallOverlay({
     super.key,
@@ -57,6 +59,8 @@ class AiPhoneCallOverlay extends StatefulWidget {
     required this.onMissedCallNotify,
     required this.onCloseWithOutcome,
     this.onFinishCall,
+    this.scheduleTitleTr,
+    this.scheduleTitleEn,
   });
 
   @override
@@ -220,12 +224,16 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
     _emittedFinish = true;
 
     final effectiveTarget = _updatedTargetTemp ?? widget.targetTemp;
+    final schedTr = (widget.scheduleTitleTr ?? '').trim();
+    final schedEn = (widget.scheduleTitleEn ?? '').trim();
     final summaryTr = AiCallService.buildAlertHeadline(
       widget.reason,
       roomTemp: widget.roomTemp,
       targetTemp: widget.targetTemp,
       boilerHeating: widget.boiler.isHeating,
       lang: LangCode.tr,
+      scheduleTitleTr: schedTr,
+      scheduleTitleEn: schedEn,
     );
     final summaryEn = AiCallService.buildAlertHeadline(
       widget.reason,
@@ -233,6 +241,8 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
       targetTemp: widget.targetTemp,
       boilerHeating: widget.boiler.isHeating,
       lang: LangCode.en,
+      scheduleTitleTr: schedTr,
+      scheduleTitleEn: schedEn,
     );
 
     final String actionTr;
@@ -263,6 +273,12 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
       targetTemp: effectiveTarget,
       boilerHeating: widget.boiler.isHeating,
       urgent: widget.urgent,
+      scheduleInfoTr: schedTr.isNotEmpty
+          ? 'Takvim ayarına ($schedTr) göre işlem yapıldı.'
+          : '',
+      scheduleInfoEn: schedEn.isNotEmpty
+          ? 'Executed per calendar schedule ($schedEn).'
+          : '',
     );
 
     widget.onFinishCall?.call(entry);

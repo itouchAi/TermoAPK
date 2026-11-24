@@ -118,6 +118,7 @@ class NotificationService {
     String? customBody,
     AlertSeverity? severityOverride,
     bool suppressChime = false,
+    bool showOverlayBanner = true,
   }) async {
     final tr = lang == LangCode.tr;
     final guard = evaluateSafetyThresholds(
@@ -151,7 +152,7 @@ class NotificationService {
       AmbientAudioService.playNotificationChime(urgent: isCritical);
     }
 
-    if (context != null && context.mounted) {
+    if (showOverlayBanner && context != null && context.mounted) {
       showFloatingBanner(
         context: context,
         title: title,
