@@ -426,7 +426,7 @@ class WeatherScreen extends StatefulWidget {
     this.targetTemp = 22.5,
     this.boiler,
     this.settings,
-    this.performanceMode = PerformanceMode.balanced,
+    this.performanceMode = PerformanceMode.ultra60fps,
     this.onToggleWeatherAlerts,
     this.onChangeLocation,
   });
@@ -1041,7 +1041,7 @@ class ReportScreen extends StatefulWidget {
     required this.boiler,
     required this.subTabOrder,
     required this.palette,
-    this.performanceMode = PerformanceMode.balanced,
+    this.performanceMode = PerformanceMode.ultra60fps,
     this.onBoundaryPrevMainTab,
     this.onBoundaryNextMainTab,
   });
@@ -1839,7 +1839,7 @@ class ScheduleScreen extends StatefulWidget {
     required this.subTabOrder,
     required this.palette,
     this.boiler,
-    this.performanceMode = PerformanceMode.balanced,
+    this.performanceMode = PerformanceMode.ultra60fps,
     required this.onUpdateSlot,
     required this.onSaveSchedule,
     required this.savedNotice,
