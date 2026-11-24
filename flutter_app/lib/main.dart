@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -16,6 +17,7 @@ import 'services/ambient_audio_service.dart';
 import 'services/esp_log_service.dart';
 import 'services/firebase_sync_service.dart';
 import 'services/hardware_service.dart';
+import 'services/media_storage_service.dart';
 import 'services/notification_service.dart';
 import 'services/voice_speech_service.dart';
 import 'widgets/ai_phone_call_overlay.dart';
@@ -66,8 +68,13 @@ class TermostatHomeShell extends StatefulWidget {
 
 class _TermostatHomeShellState extends State<TermostatHomeShell> {
   static const _storageKey = 'termostat_flow_flutter_v2';
+  static const int _virtualCenterBase = 4000;
 
-  final PageController _pageController = PageController(viewportFraction: 1.0);
+  final PageController _pageController = PageController(
+    initialPage: _virtualCenterBase,
+    viewportFraction: 1.0,
+  );
+  int _virtualPageIndex = _virtualCenterBase;
   TabId _activeTab = TabId.termo;
   double _roomTemp = 21.8;
   double _targetTemp = 22.5;
@@ -287,6 +294,11 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
         }
         _syncPageIndexToActiveTab(jump: true);
         _resetIdleTimer();
+        unawaited(
+          MediaStorageService.hydrateSettingsMedia(loadedSettings).then((_) {
+            if (mounted) setState(() {});
+          }),
+        );
       } catch (_) {
         // Ignore malformed stored state
       }
@@ -326,11 +338,19 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     final ordered = _visual.orderedTabs;
     final idx = ordered.indexWhere((t) => t.id == _activeTab);
     if (idx < 0 || !_pageController.hasClients) return;
+    final targetVirtual = jump
+        ? (_virtualCenterBase - (_virtualCenterBase % ordered.length) + idx)
+        : ThermostatMath.nearestCircularVirtualIndex(
+            currentVirtualIndex: _virtualPageIndex,
+            targetRealIndex: idx,
+            length: ordered.length,
+          );
+    _virtualPageIndex = targetVirtual;
     if (jump) {
-      _pageController.jumpToPage(idx);
+      _pageController.jumpToPage(targetVirtual);
     } else {
       _pageController.animateToPage(
-        idx,
+        targetVirtual,
         duration: const Duration(milliseconds: 380),
         curve: Curves.easeOutCubic,
       );
@@ -633,26 +653,58 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     super.dispose();
   }
 
+  void _stepTab(int dir) {
+    if (dir == 0) return;
+    final ordered = _visual.orderedTabs;
+    if (ordered.isEmpty) return;
+    _triggerHaptic();
+    _resetIdleTimer();
+    final nextVirtual = _virtualPageIndex + dir;
+    final nextReal = ThermostatMath.wrapRealIndex(nextVirtual, ordered.length);
+    setState(() {
+      _virtualPageIndex = nextVirtual;
+      _activeTab = ordered[nextReal].id;
+      _activeTabCanVertScroll = false;
+    });
+    if (_pageController.hasClients) {
+      _pageController.animateToPage(
+        nextVirtual,
+        duration: const Duration(milliseconds: 380),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
+
   void _selectTab(TabId tab) {
     final ordered = _visual.orderedTabs;
     final idx = ordered.indexWhere((t) => t.id == tab);
     if (idx < 0) return;
     _triggerHaptic();
     _resetIdleTimer();
+    final targetVirtual = ThermostatMath.nearestCircularVirtualIndex(
+      currentVirtualIndex: _virtualPageIndex,
+      targetRealIndex: idx,
+      length: ordered.length,
+    );
     setState(() {
+      _virtualPageIndex = targetVirtual;
       _activeTab = tab;
       _activeTabCanVertScroll = false;
     });
-    _pageController.animateToPage(
-      idx,
-      duration: const Duration(milliseconds: 380),
-      curve: Curves.easeOutCubic,
-    );
+    if (_pageController.hasClients) {
+      _pageController.animateToPage(
+        targetVirtual,
+        duration: const Duration(milliseconds: 380),
+        curve: Curves.easeOutCubic,
+      );
+    }
   }
 
   void _handlePagePointerSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
     if (_ambientMode || _screensaverPreview || _showBootCeremony || _voiceOpen) return;
+    // ReportScreen & ScheduleScreen manage sub-tab wheeling first and invoke boundary callbacks.
+    if (_activeTab == TabId.rapor || _activeTab == TabId.prog) return;
     final now = DateTime.now();
     if (_lastWheelNavAt != null && now.difference(_lastWheelNavAt!).inMilliseconds < 240) {
       return;
@@ -666,13 +718,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       dir = dy > 0 ? 1 : -1;
     }
     if (dir == 0) return;
-    final ordered = _visual.orderedTabs;
-    final cur = ordered.indexWhere((t) => t.id == _activeTab);
-    final nextIdx = cur + dir;
-    if (nextIdx >= 0 && nextIdx < ordered.length) {
-      _lastWheelNavAt = now;
-      _selectTab(ordered[nextIdx].id);
-    }
+    _lastWheelNavAt = now;
+    _stepTab(dir);
   }
 
   void _launchAiCall({
@@ -836,6 +883,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             targetTemp: _targetTemp,
             boiler: boiler,
             settings: _settings,
+            performanceMode: _visual.performanceMode,
             onToggleWeatherAlerts: (v) {
               _triggerHaptic();
               setState(() => _settings = _settings.copyWith(weatherAlertsEnabled: v));
@@ -859,6 +907,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             boiler: boiler,
             subTabOrder: _visual.reportSubTabOrder,
             palette: palette,
+            performanceMode: _visual.performanceMode,
+            onBoundaryPrevMainTab: () => _stepTab(-1),
+            onBoundaryNextMainTab: () => _stepTab(1),
           ),
         );
       case TabId.prog:
@@ -869,7 +920,11 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             slots: _schedule,
             subTabOrder: _visual.scheduleSubTabOrder,
             palette: palette,
+            boiler: boiler,
+            performanceMode: _visual.performanceMode,
             savedNotice: _savedNotice,
+            onBoundaryPrevMainTab: () => _stepTab(-1),
+            onBoundaryNextMainTab: () => _stepTab(1),
             onUpdateSlot: (slotId, {enabled, targetTemp}) {
               _triggerHaptic();
               setState(() {
@@ -931,6 +986,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
               activeTab: _activeTab,
               orderedTabs: orderedTabs,
               onSelectTab: _selectTab,
+              onStepTab: _stepTab,
               activeAccent: activeAccent,
               lang: _lang,
               isLandscape: isLandscape,
@@ -1187,58 +1243,83 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                  },
                                  child: ScrollConfiguration(
                                    behavior: const _UniversalFlowScrollBehavior(),
-                                   child: PageView.builder(
-                                     controller: _pageController,
-                                     physics: const BouncingScrollPhysics(
-                                       parent: AlwaysScrollableScrollPhysics(),
-                                     ),
-                                     itemCount: orderedTabs.length,
-                                     onPageChanged: (idx) {
-                                       if (idx >= 0 && idx < orderedTabs.length) {
-                                         setState(() {
-                                           _activeTab = orderedTabs[idx].id;
-                                           _activeTabCanVertScroll = false;
-                                         });
-                                       }
-                                     },
-                                     itemBuilder: (context, idx) {
-                                       final meta = orderedTabs[idx];
-                                       return AnimatedBuilder(
-                                         animation: _pageController,
-                                         builder: (context, child) {
-                                           double currentPage = orderedTabs.indexWhere((t) => t.id == _activeTab).toDouble();
-                                           if (_pageController.hasClients && _pageController.position.haveDimensions) {
-                                             currentPage = _pageController.page ?? currentPage;
-                                           }
-                                           final signedDelta = currentPage - idx;
-                                           final absDelta = signedDelta.abs().clamp(0.0, 1.0);
-                                           if (absDelta < 0.004) {
-                                             return child!;
-                                           }
-                                           final opacity = (1.0 - absDelta * 0.48).clamp(0.32, 1.0);
-                                           final scale = (1.0 - absDelta * 0.07).clamp(0.92, 1.0);
-                                           final wheelArcY = absDelta * absDelta * 22.0;
-                                           final tiltY = (signedDelta * 0.24).clamp(-0.35, 0.35);
-                                           final perspective = Matrix4.identity()
-                                             ..setEntry(3, 2, 0.0011)
-                                             ..rotateY(tiltY);
+                                   child: LayoutBuilder(
+                                     builder: (context, viewportConstraints) {
+                                       final viewportWidth = viewportConstraints.maxWidth;
+                                       return PageView.builder(
+                                         controller: _pageController,
+                                         physics: const BouncingScrollPhysics(
+                                           parent: AlwaysScrollableScrollPhysics(),
+                                         ),
+                                         onPageChanged: (virtualIdx) {
+                                           final realIdx = ThermostatMath.wrapRealIndex(
+                                             virtualIdx,
+                                             orderedTabs.length,
+                                           );
+                                           setState(() {
+                                             _virtualPageIndex = virtualIdx;
+                                             _activeTab = orderedTabs[realIdx].id;
+                                             _activeTabCanVertScroll = false;
+                                           });
+                                         },
+                                         itemBuilder: (context, virtualIdx) {
+                                           final realIdx = ThermostatMath.wrapRealIndex(
+                                             virtualIdx,
+                                             orderedTabs.length,
+                                           );
+                                           final meta = orderedTabs[realIdx];
+                                           return AnimatedBuilder(
+                                             animation: _pageController,
+                                             builder: (context, child) {
+                                               double currentPage = _virtualPageIndex.toDouble();
+                                               if (_pageController.hasClients &&
+                                                   _pageController.position.haveDimensions) {
+                                                 currentPage = _pageController.page ?? currentPage;
+                                               }
+                                               final signedDelta = currentPage - virtualIdx;
+                                               final absDelta = signedDelta.abs();
+                                               if (absDelta < 0.004 || absDelta > 1.25) {
+                                                 return child!;
+                                               }
+                                               // Flat directional depth+blur transition (zero rotateY tilt):
+                                               // - signedDelta <= 0: incoming right page glides cleanly & flat.
+                                               // - signedDelta > 0: left page softly recedes backward, fades & blurs.
+                                               if (signedDelta <= 0.0) {
+                                                 return child!;
+                                               }
+                                               final p = signedDelta.clamp(0.0, 1.0);
+                                               final scale = (1.0 - p * 0.075).clamp(0.90, 1.0);
+                                               final opacity = (1.0 - p * 0.90).clamp(0.0, 1.0);
+                                               final driftX = signedDelta * viewportWidth * 0.65;
 
-                                           return Opacity(
-                                             opacity: opacity,
-                                             child: Transform.translate(
-                                               offset: Offset(0, wheelArcY),
-                                               child: Transform(
-                                                 alignment: signedDelta > 0 ? Alignment.centerRight : Alignment.centerLeft,
-                                                 transform: perspective,
-                                                 child: Transform.scale(
-                                                   scale: scale,
-                                                   child: child,
+                                               Widget content = Opacity(
+                                                 opacity: opacity,
+                                                 child: Transform.translate(
+                                                   offset: Offset(driftX, 0.0),
+                                                   child: Transform.scale(
+                                                     scale: scale,
+                                                     alignment: Alignment.center,
+                                                     child: child,
+                                                   ),
                                                  ),
-                                               ),
-                                             ),
+                                               );
+                                               if (!isEco) {
+                                                 final sigma = (p * 6.5).clamp(0.0, 7.0);
+                                                 if (sigma >= 0.25) {
+                                                   content = ImageFiltered(
+                                                     imageFilter: ui.ImageFilter.blur(
+                                                       sigmaX: sigma,
+                                                       sigmaY: sigma,
+                                                     ),
+                                                     child: content,
+                                                   );
+                                                 }
+                                               }
+                                               return content;
+                                             },
+                                             child: _buildTabPage(meta.id, boiler, activeColor, palette),
                                            );
                                          },
-                                         child: _buildTabPage(meta.id, boiler, activeColor, palette),
                                        );
                                      },
                                    ),

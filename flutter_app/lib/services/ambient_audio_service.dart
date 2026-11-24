@@ -4,6 +4,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
 import '../models/thermostat_state.dart';
 import 'audio_tempo_analyzer.dart';
+import 'media_storage_service.dart';
 import 'web_audio_decode_bridge.dart';
 
 class AmbientAudioService {
@@ -276,6 +277,9 @@ class AmbientAudioService {
   static bool canPlayCustomAudio(String customSource) {
     final trimmed = customSource.trim();
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return true;
+    if (MediaStorageService.isPersistedKey(trimmed)) {
+      return _customAudioBytes != null || MediaStorageService.getCachedBytes(trimmed) != null;
+    }
     if (kIsWeb) return _customAudioBytes != null;
     return trimmed.isNotEmpty;
   }
@@ -335,8 +339,21 @@ class AmbientAudioService {
 
       final trimmed = customSource.trim();
       final isHttpUrl = trimmed.startsWith('http://') || trimmed.startsWith('https://');
+      if (!isHttpUrl && _customAudioBytes == null && MediaStorageService.isPersistedKey(trimmed)) {
+        final loaded = await MediaStorageService.loadBytes(trimmed);
+        if (loaded != null && loaded.isNotEmpty) {
+          _customAudioBytes = loaded;
+        }
+      } else if (!isHttpUrl && !kIsWeb && _customAudioBytes == null && trimmed.isNotEmpty) {
+        final loaded = MediaStorageService.getCachedBytes(trimmed);
+        if (loaded != null && loaded.isNotEmpty) {
+          _customAudioBytes = loaded;
+        }
+      }
+      if (_sessionToken != token) return;
+
       final hasWebBytes = kIsWeb && _customAudioBytes != null;
-      final hasNativeFile = !kIsWeb && trimmed.isNotEmpty;
+      final hasNativeFile = !kIsWeb && trimmed.isNotEmpty && !MediaStorageService.isPersistedKey(trimmed);
 
       if (!isHttpUrl && !hasWebBytes && !hasNativeFile) {
         _playing = false;

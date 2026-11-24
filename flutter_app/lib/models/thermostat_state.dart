@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 enum PresetId { eko, konfor, gece, boost }
@@ -626,6 +627,27 @@ abstract final class ThermostatMath {
       replyEn: 'Not recognized. Try "Turn off boiler", "Raise 5 degrees", "Eco mode", or "Set 24°".',
     );
   }
+
+  static int wrapRealIndex(int virtualIndex, int length) {
+    if (length <= 0) return 0;
+    return ((virtualIndex % length) + length) % length;
+  }
+
+  static int nearestCircularVirtualIndex({
+    required int currentVirtualIndex,
+    required int targetRealIndex,
+    required int length,
+  }) {
+    if (length <= 0) return currentVirtualIndex;
+    final currentReal = wrapRealIndex(currentVirtualIndex, length);
+    var delta = wrapRealIndex(targetRealIndex, length) - currentReal;
+    if (delta > length / 2) {
+      delta -= length;
+    } else if (delta < -length / 2) {
+      delta += length;
+    }
+    return currentVirtualIndex + delta;
+  }
 }
 
 enum SettingsItemId {
@@ -1029,12 +1051,12 @@ class DailyWeatherForecast {
       highTemp: 20,
       lowTemp: 17,
       rainChance: '%38',
-      icon: Icons.umbrella_outlined,
+      icon: Icons.water_drop_outlined,
       hourly: [
-        HourlyWeatherSlot(hour: '09:00', temp: 17, conditionTr: 'Hafif Yağmur', conditionEn: 'Light Rain', rainChance: '%30', windKmh: '12 km/s', icon: Icons.umbrella_outlined),
-        HourlyWeatherSlot(hour: '12:00', temp: 19, conditionTr: 'Yağmurlu', conditionEn: 'Rainy', rainChance: '%38', windKmh: '15 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '09:00', temp: 17, conditionTr: 'Hafif Yağmur', conditionEn: 'Light Rain', rainChance: '%30', windKmh: '12 km/s', icon: Icons.water_drop_outlined),
+        HourlyWeatherSlot(hour: '12:00', temp: 19, conditionTr: 'Yağmurlu', conditionEn: 'Rainy', rainChance: '%38', windKmh: '15 km/s', icon: Icons.water_drop_outlined),
         HourlyWeatherSlot(hour: '15:00', temp: 20, conditionTr: 'Parçalı Bulutlu', conditionEn: 'Partly Cloudy', rainChance: '%25', windKmh: '14 km/s', icon: Icons.wb_cloudy_outlined),
-        HourlyWeatherSlot(hour: '18:00', temp: 18, conditionTr: 'Çisenti', conditionEn: 'Drizzle', rainChance: '%45', windKmh: '16 km/s', icon: Icons.grain_rounded),
+        HourlyWeatherSlot(hour: '18:00', temp: 18, conditionTr: 'Çisenti', conditionEn: 'Drizzle', rainChance: '%45', windKmh: '16 km/s', icon: Icons.water_drop_outlined),
         HourlyWeatherSlot(hour: '21:00', temp: 17, conditionTr: 'Bulutlu', conditionEn: 'Cloudy', rainChance: '%20', windKmh: '11 km/s', icon: Icons.cloud_outlined),
         HourlyWeatherSlot(hour: '00:00', temp: 16, conditionTr: 'Serin', conditionEn: 'Cool', rainChance: '%15', windKmh: '10 km/s', icon: Icons.nights_stay_outlined),
       ],
@@ -1050,12 +1072,12 @@ class DailyWeatherForecast {
       rainChance: '%90',
       icon: Icons.thunderstorm_outlined,
       hourly: [
-        HourlyWeatherSlot(hour: '09:00', temp: 16, conditionTr: 'Sağanak', conditionEn: 'Showers', rainChance: '%75', windKmh: '19 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '09:00', temp: 16, conditionTr: 'Sağanak', conditionEn: 'Showers', rainChance: '%75', windKmh: '19 km/s', icon: Icons.water_drop_outlined),
         HourlyWeatherSlot(hour: '12:00', temp: 19, conditionTr: 'Gök Gürültülü', conditionEn: 'Thunderstorm', rainChance: '%90', windKmh: '24 km/s', icon: Icons.thunderstorm_outlined),
         HourlyWeatherSlot(hour: '15:00', temp: 21, conditionTr: 'Kuvvetli Sağanak', conditionEn: 'Heavy Rain', rainChance: '%85', windKmh: '22 km/s', icon: Icons.thunderstorm_outlined),
-        HourlyWeatherSlot(hour: '18:00', temp: 18, conditionTr: 'Yağmurlu', conditionEn: 'Rainy', rainChance: '%65', windKmh: '18 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '18:00', temp: 18, conditionTr: 'Yağmurlu', conditionEn: 'Rainy', rainChance: '%65', windKmh: '18 km/s', icon: Icons.water_drop_outlined),
         HourlyWeatherSlot(hour: '21:00', temp: 16, conditionTr: 'Bulutlu', conditionEn: 'Cloudy', rainChance: '%40', windKmh: '14 km/s', icon: Icons.cloud_outlined),
-        HourlyWeatherSlot(hour: '00:00', temp: 15, conditionTr: 'Hafif Yağmur', conditionEn: 'Light Rain', rainChance: '%35', windKmh: '12 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '00:00', temp: 15, conditionTr: 'Hafif Yağmur', conditionEn: 'Light Rain', rainChance: '%35', windKmh: '12 km/s', icon: Icons.water_drop_outlined),
       ],
     ),
     DailyWeatherForecast(
@@ -1071,7 +1093,7 @@ class DailyWeatherForecast {
       hourly: [
         HourlyWeatherSlot(hour: '09:00', temp: 14, conditionTr: 'Çok Bulutlu', conditionEn: 'Overcast', rainChance: '%30', windKmh: '15 km/s', icon: Icons.cloud_outlined),
         HourlyWeatherSlot(hour: '12:00', temp: 18, conditionTr: 'Gök Gürültülü', conditionEn: 'Storms', rainChance: '%38', windKmh: '20 km/s', icon: Icons.thunderstorm_outlined),
-        HourlyWeatherSlot(hour: '15:00', temp: 19, conditionTr: 'Sağanak', conditionEn: 'Showers', rainChance: '%42', windKmh: '18 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '15:00', temp: 19, conditionTr: 'Sağanak', conditionEn: 'Showers', rainChance: '%42', windKmh: '18 km/s', icon: Icons.water_drop_outlined),
         HourlyWeatherSlot(hour: '18:00', temp: 16, conditionTr: 'Parçalı Bulutlu', conditionEn: 'Partly Cloudy', rainChance: '%22', windKmh: '13 km/s', icon: Icons.wb_cloudy_outlined),
         HourlyWeatherSlot(hour: '21:00', temp: 14, conditionTr: 'Açık & Serin', conditionEn: 'Clear', rainChance: '%12', windKmh: '10 km/s', icon: Icons.nights_stay_outlined),
         HourlyWeatherSlot(hour: '00:00', temp: 13, conditionTr: 'Serin', conditionEn: 'Chilly', rainChance: '%10', windKmh: '9 km/s', icon: Icons.nights_stay_outlined),
@@ -1107,11 +1129,11 @@ class DailyWeatherForecast {
       rainChance: '%93',
       icon: Icons.thunderstorm_outlined,
       hourly: [
-        HourlyWeatherSlot(hour: '09:00', temp: 14, conditionTr: 'Yağmurlu', conditionEn: 'Rainy', rainChance: '%78', windKmh: '18 km/s', icon: Icons.umbrella_outlined),
+        HourlyWeatherSlot(hour: '09:00', temp: 14, conditionTr: 'Yağmurlu', conditionEn: 'Rainy', rainChance: '%78', windKmh: '18 km/s', icon: Icons.water_drop_outlined),
         HourlyWeatherSlot(hour: '12:00', temp: 18, conditionTr: 'Gök Gürültülü', conditionEn: 'Storms', rainChance: '%93', windKmh: '26 km/s', icon: Icons.thunderstorm_outlined),
-        HourlyWeatherSlot(hour: '15:00', temp: 20, conditionTr: 'Sağanak Yağış', conditionEn: 'Heavy Rain', rainChance: '%88', windKmh: '24 km/s', icon: Icons.umbrella_outlined),
-        HourlyWeatherSlot(hour: '18:00', temp: 17, conditionTr: 'Yağmurlu', conditionEn: 'Rainy', rainChance: '%72', windKmh: '19 km/s', icon: Icons.umbrella_outlined),
-        HourlyWeatherSlot(hour: '21:00', temp: 15, conditionTr: 'Hafif Yağmur', conditionEn: 'Light Rain', rainChance: '%50', windKmh: '15 km/s', icon: Icons.grain_rounded),
+        HourlyWeatherSlot(hour: '15:00', temp: 20, conditionTr: 'Sağanak Yağış', conditionEn: 'Heavy Rain', rainChance: '%88', windKmh: '24 km/s', icon: Icons.water_drop_outlined),
+        HourlyWeatherSlot(hour: '18:00', temp: 17, conditionTr: 'Yağmurlu', conditionEn: 'Rainy', rainChance: '%72', windKmh: '19 km/s', icon: Icons.water_drop_outlined),
+        HourlyWeatherSlot(hour: '21:00', temp: 15, conditionTr: 'Karlı / Karla Karışık', conditionEn: 'Sleet & Snow', rainChance: '%50', windKmh: '15 km/s', icon: Icons.ac_unit_rounded),
         HourlyWeatherSlot(hour: '00:00', temp: 13, conditionTr: 'Bulutlu', conditionEn: 'Cloudy', rainChance: '%30', windKmh: '12 km/s', icon: Icons.cloud_outlined),
       ],
     ),

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:termostat_flow/models/thermostat_state.dart';
 import 'package:termostat_flow/services/ai_call_service.dart';
@@ -7,6 +8,7 @@ import 'package:termostat_flow/services/audio_tempo_analyzer.dart';
 import 'package:termostat_flow/services/esp_log_service.dart';
 import 'package:termostat_flow/services/firebase_sync_service.dart';
 import 'package:termostat_flow/services/hardware_service.dart';
+import 'package:termostat_flow/services/media_storage_service.dart';
 import 'package:termostat_flow/services/notification_service.dart';
 import 'package:termostat_flow/services/vault_crypto_service.dart';
 import 'package:termostat_flow/services/voice_gender_classifier.dart';
@@ -1016,5 +1018,60 @@ void main() {
     );
     expect(shuffled, isNot(AmbientSoundtrack.silent));
     expect(shuffled, isNot(AmbientSoundtrack.relaxPiano));
+  });
+
+  test('ThermostatMath circular tab wrapping loops infinitely across Termo and Prog', () {
+    expect(ThermostatMath.wrapRealIndex(4000, 4), 0);
+    expect(ThermostatMath.wrapRealIndex(4001, 4), 1);
+    expect(ThermostatMath.wrapRealIndex(4003, 4), 3);
+    expect(ThermostatMath.wrapRealIndex(4004, 4), 0);
+    expect(ThermostatMath.wrapRealIndex(3999, 4), 3);
+    expect(ThermostatMath.wrapRealIndex(-1, 4), 3);
+
+    // Nearest virtual target wraps smoothly across 3 <-> 0 boundary
+    expect(
+      ThermostatMath.nearestCircularVirtualIndex(
+        currentVirtualIndex: 4003,
+        targetRealIndex: 0,
+        length: 4,
+      ),
+      4004,
+    );
+    expect(
+      ThermostatMath.nearestCircularVirtualIndex(
+        currentVirtualIndex: 4000,
+        targetRealIndex: 3,
+        length: 4,
+      ),
+      3999,
+    );
+  });
+
+  test('MediaStorageService keys persist cleanly and strip heavy base64 when persisted by key', () {
+    expect(MediaStorageService.isPersistedKey(MediaStorageService.customVideoKey), isTrue);
+    expect(MediaStorageService.isPersistedKey(MediaStorageService.customAudioKey), isTrue);
+    expect(MediaStorageService.isPersistedKey(MediaStorageService.screensaverBgKey), isTrue);
+    expect(MediaStorageService.isPersistedKey(MediaStorageService.slideImageKey('abc')), isTrue);
+    expect(MediaStorageService.isPersistedKey('https://example.com/clip.mp4'), isFalse);
+
+    final persistedSlide = SmartDisplaySlideImage(
+      id: 's1',
+      name: 'photo.jpg',
+      dataBase64: 'AAAA',
+      filePath: MediaStorageService.slideImageKey('s1'),
+    );
+    final json = persistedSlide.toJson();
+    expect(json['filePath'], MediaStorageService.slideImageKey('s1'));
+    expect(json['dataBase64'], '');
+
+    // Verify DailyWeatherForecast replaces umbrella icon with water_drop_outlined
+    final rainyToday = DailyWeatherForecast.sample5Days.first;
+    expect(rainyToday.icon, Icons.water_drop_outlined);
+    expect(rainyToday.icon, isNot(Icons.umbrella_outlined));
+    for (final d in DailyWeatherForecast.sample5Days) {
+      for (final h in d.hourly) {
+        expect(h.icon, isNot(Icons.umbrella_outlined));
+      }
+    }
   });
 }

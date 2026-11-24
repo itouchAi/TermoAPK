@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 import '../models/thermostat_state.dart';
 import '../services/ambient_audio_service.dart';
 import '../services/hardware_service.dart';
+import '../services/media_storage_service.dart';
 import '../services/video_source_bridge.dart';
 import 'rotary_dial.dart';
 
@@ -356,7 +357,13 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
     }
 
     try {
-      final ctrl = VideoSourceBridge.createController(wanted);
+      var playable = MediaStorageService.getPlayableVideoUrl(wanted);
+      if (playable.isEmpty && MediaStorageService.isPersistedKey(wanted)) {
+        playable = await MediaStorageService.resolveVideoPlayableUrl(wanted);
+      }
+      if (!mounted || _activeVideoSource != wanted || playable.isEmpty) return;
+
+      final ctrl = VideoSourceBridge.createController(playable);
       if (ctrl == null) return;
       _videoCtrl = ctrl;
       await ctrl.initialize();
@@ -391,9 +398,29 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
   }
 
   Uint8List? _bytesForImage(SmartDisplaySlideImage img) {
-    final key = '${img.id}_${img.dataBase64.length}';
+    final key = '${img.id}_${img.filePath}_${img.dataBase64.length}';
     final cached = _decodedImageCache[key];
     if (cached != null) return cached;
+
+    if (img.filePath.isNotEmpty) {
+      final stored = MediaStorageService.getCachedBytes(img.filePath);
+      if (stored != null && stored.isNotEmpty) {
+        _decodedImageCache[key] = stored;
+        return stored;
+      }
+      if (MediaStorageService.isPersistedKey(img.filePath)) {
+        unawaited(
+          MediaStorageService.loadBytes(img.filePath).then((loaded) {
+            if (loaded != null && loaded.isNotEmpty && mounted) {
+              setState(() {
+                _decodedImageCache[key] = loaded;
+              });
+            }
+          }),
+        );
+      }
+    }
+
     final decoded = img.decodeBytes();
     if (decoded != null) {
       _decodedImageCache[key] = decoded;

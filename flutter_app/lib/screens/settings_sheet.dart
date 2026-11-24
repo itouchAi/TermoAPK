@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
@@ -10,6 +11,7 @@ import '../services/ambient_audio_service.dart';
 import '../services/esp_log_service.dart';
 import '../services/firebase_sync_service.dart';
 import '../services/hardware_service.dart';
+import '../services/media_storage_service.dart';
 import '../services/notification_service.dart';
 import '../services/video_source_bridge.dart';
 import '../services/voice_gender_classifier.dart';
@@ -354,12 +356,22 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.audio,
-        withData: kIsWeb,
+        withData: true,
       );
       if (result == null || result.files.isEmpty) return;
       final picked = result.files.first;
-      AmbientAudioService.setCustomAudioBytes(picked.bytes);
-      final source = kIsWeb ? picked.name : (picked.path ?? picked.name);
+      final bytes = picked.bytes;
+      if (bytes != null && bytes.isNotEmpty) {
+        AmbientAudioService.setCustomAudioBytes(bytes);
+      }
+      final persisted = await MediaStorageService.persistPickedFile(
+        key: MediaStorageService.customAudioKey,
+        sourcePath: kIsWeb ? null : picked.path,
+        bytes: bytes,
+        mimeType: 'audio/mpeg',
+        fileName: picked.name,
+      );
+      final source = persisted.isNotEmpty ? persisted : (kIsWeb ? MediaStorageService.customAudioKey : (picked.path ?? picked.name));
       if (!mounted) return;
       setState(() {
         _customAudioCtrl.text = picked.name;
@@ -369,6 +381,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           customAudioSource: source,
         );
       });
+      widget.onSaveSettings(_draft);
       if (_audioPreviewPlaying) {
         await AmbientAudioService.start(
           track: AmbientSoundtrack.customMp3,
@@ -418,14 +431,20 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
       }
       return;
     }
+    if (MediaStorageService.isPersistedKey(source) && !AmbientAudioService.canPlayCustomAudio(source)) {
+      final restored = await MediaStorageService.loadBytes(source);
+      if (restored != null && restored.isNotEmpty) {
+        AmbientAudioService.setCustomAudioBytes(restored);
+      }
+    }
     if (!AmbientAudioService.canPlayCustomAudio(source)) {
       await AmbientAudioService.stop();
       if (mounted) {
         setState(() {
           _audioPreviewPlaying = false;
           _statusBanner = _lang == LangCode.tr
-              ? 'Tarayıcı yenilendiği için yerel MP3 dosyasını tekrar seçin veya URL girin.'
-              : 'Re-select your local MP3 file or enter an MP3 URL after browser reload.';
+              ? 'Ses dosyası bulunamadı. Yeni MP3 seçin veya URL girin.'
+              : 'Audio file missing. Pick an MP3 file or enter a URL.';
         });
       }
       return;
@@ -443,6 +462,23 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
     if (mounted) setState(() => _audioPreviewPlaying = AmbientAudioService.isPlaying);
   }
 
+  Uint8List? _resolveSlideBytes(SmartDisplaySlideImage item) {
+    if (item.filePath.isNotEmpty) {
+      final cached = MediaStorageService.getCachedBytes(item.filePath);
+      if (cached != null && cached.isNotEmpty) return cached;
+      if (MediaStorageService.isPersistedKey(item.filePath)) {
+        unawaited(
+          MediaStorageService.loadBytes(item.filePath).then((loaded) {
+            if (loaded != null && loaded.isNotEmpty && mounted) {
+              setState(() {});
+            }
+          }),
+        );
+      }
+    }
+    return item.decodeBytes();
+  }
+
   Future<void> _pickMultipleSlideImages() async {
     _hapticTap();
     try {
@@ -458,17 +494,30 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
         if (nextList.length >= 12) break;
         final bytes = file.bytes;
         if (bytes == null || bytes.isEmpty) continue;
+        final id = '${DateTime.now().microsecondsSinceEpoch}_${seq++}';
+        final ext = (file.extension ?? 'jpg').toLowerCase();
+        final mime = ext == 'png'
+            ? 'image/png'
+            : (ext == 'webp' ? 'image/webp' : 'image/jpeg');
+        final persistedRef = await MediaStorageService.persistPickedFile(
+          key: MediaStorageService.slideImageKey(id),
+          sourcePath: kIsWeb ? null : file.path,
+          bytes: bytes,
+          mimeType: mime,
+          fileName: file.name,
+        );
         nextList.add(
           SmartDisplaySlideImage(
-            id: '${DateTime.now().microsecondsSinceEpoch}_${seq++}',
+            id: id,
             name: file.name,
-            dataBase64: base64Encode(bytes),
-            filePath: kIsWeb ? '' : (file.path ?? ''),
+            dataBase64: persistedRef.isEmpty ? base64Encode(bytes) : '',
+            filePath: persistedRef,
           ),
         );
       }
       if (!mounted) return;
       setState(() => _draft = _draft.copyWith(slideImages: nextList));
+      widget.onSaveSettings(_draft);
     } catch (_) {}
   }
 
@@ -511,10 +560,18 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
         final mime = ext == 'webm'
             ? 'video/webm'
             : (ext == 'mov' ? 'video/quicktime' : 'video/mp4');
-        VideoSourceBridge.revokeObjectUrl(_draft.customVideoSource);
-        source = VideoSourceBridge.createObjectUrlFromBytes(bytes, mimeType: mime);
+        source = await MediaStorageService.persistPickedFile(
+          key: MediaStorageService.customVideoKey,
+          bytes: bytes,
+          mimeType: mime,
+          fileName: picked.name,
+        );
       } else {
-        source = picked.path ?? '';
+        source = await MediaStorageService.persistPickedFile(
+          key: MediaStorageService.customVideoKey,
+          sourcePath: picked.path,
+          fileName: picked.name,
+        );
       }
       if (source.isEmpty || !mounted) return;
       setState(() {
@@ -525,9 +582,10 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           customVideoSource: source,
         );
         _statusBanner = tr
-            ? 'Sessiz video yüklendi: ${picked.name}'
-            : 'Muted video loaded: ${picked.name}';
+            ? 'Sessiz video kalıcı olarak kaydedildi: ${picked.name}'
+            : 'Muted video saved persistently: ${picked.name}';
       });
+      widget.onSaveSettings(_draft);
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -539,7 +597,9 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
 
   void _clearCustomVideo() {
     _hapticTap();
-    VideoSourceBridge.revokeObjectUrl(_draft.customVideoSource);
+    final prev = _draft.customVideoSource;
+    VideoSourceBridge.revokeObjectUrl(prev);
+    unawaited(MediaStorageService.deleteMedia(prev));
     _customVideoUrlCtrl.clear();
     setState(() {
       _draft = _draft.copyWith(
@@ -547,6 +607,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
         customVideoSource: '',
       );
     });
+    widget.onSaveSettings(_draft);
   }
 
   void _showSlidePhotoPreviewDialog({
@@ -582,7 +643,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             currentIdx = currentList.length - 1;
           }
           final item = currentList[currentIdx];
-          final bytes = item.decodeBytes();
+          final bytes = _resolveSlideBytes(item);
 
           return Dialog(
             backgroundColor: const Color(0xFF12121A),
@@ -672,9 +733,11 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                             TextButton.icon(
                               onPressed: () {
                                 _hapticTap();
-                                final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages)
-                                  ..removeAt(currentIdx);
+                                final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages);
+                                final removed = updated.removeAt(currentIdx);
+                                unawaited(MediaStorageService.deleteMedia(removed.filePath));
                                 setState(() => _draft = _draft.copyWith(slideImages: updated));
+                                widget.onSaveSettings(_draft);
                                 if (updated.isEmpty) {
                                   Navigator.of(dCtx).pop();
                                 } else {
@@ -1984,6 +2047,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                         _hapticTap();
                         AmbientAudioService.stop();
                         AmbientAudioService.setCustomAudioBytes(null);
+                        unawaited(MediaStorageService.deleteMedia(_draft.customAudioSource));
                         _customAudioCtrl.clear();
                         setState(() {
                           _audioPreviewPlaying = false;
@@ -1993,6 +2057,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                             customAudioSource: '',
                           );
                         });
+                        widget.onSaveSettings(_draft);
                       },
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
@@ -2648,7 +2713,11 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                           OutlinedButton.icon(
                             onPressed: () {
                               _hapticTap();
+                              for (final s in _draft.slideImages) {
+                                unawaited(MediaStorageService.deleteMedia(s.filePath));
+                              }
                               setState(() => _draft = _draft.copyWith(slideImages: const []));
+                              widget.onSaveSettings(_draft);
                             },
                             style: OutlinedButton.styleFrom(
                               foregroundColor: const Color(0xFFFCA5A5),
@@ -2673,7 +2742,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                           separatorBuilder: (_, __) => const SizedBox(width: 8),
                           itemBuilder: (_, idx) {
                             final item = _draft.slideImages[idx];
-                            final bytes = item.decodeBytes();
+                            final bytes = _resolveSlideBytes(item);
                             return Stack(
                               children: [
                                 GestureDetector(
@@ -2703,9 +2772,11 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                                   child: GestureDetector(
                                     onTap: () {
                                       _hapticTap();
-                                      final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages)
-                                        ..removeAt(idx);
+                                      final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages);
+                                      final removed = updated.removeAt(idx);
+                                      unawaited(MediaStorageService.deleteMedia(removed.filePath));
                                       setState(() => _draft = _draft.copyWith(slideImages: updated));
+                                      widget.onSaveSettings(_draft);
                                     },
                                     child: Container(
                                       width: 20,
@@ -2827,7 +2898,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                   (18.0, tr ? 'Yoğun (18px)' : 'Heavy (18px)'),
                 ];
                 final firstSlideBytes = _draft.slideImages.isNotEmpty
-                    ? _draft.slideImages.first.decodeBytes()
+                    ? _resolveSlideBytes(_draft.slideImages.first)
                     : null;
 
                 Widget buildBlurSampleBackdrop() {
@@ -4210,17 +4281,27 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                             final mime = ext == 'png'
                                 ? 'image/png'
                                 : (ext == 'webp' ? 'image/webp' : 'image/jpeg');
-                            final dataUri = 'data:$mime;base64,${base64Encode(file.bytes!)}';
+                            final persistedBg = await MediaStorageService.persistPickedFile(
+                              key: MediaStorageService.screensaverBgKey,
+                              sourcePath: kIsWeb ? null : file.path,
+                              bytes: file.bytes!,
+                              mimeType: mime,
+                              fileName: file.name,
+                            );
+                            final source = persistedBg.isNotEmpty
+                                ? persistedBg
+                                : 'data:$mime;base64,${base64Encode(file.bytes!)}';
                             if (!mounted) return;
                             setState(() {
                               _screensaverBgUrlCtrl.clear();
                               _draft = _draft.copyWith(
                                 screensaverBackdrop: ScreensaverBackdrop.custom,
-                                screensaverCustomBgSource: dataUri,
+                                screensaverCustomBgSource: source,
                                 screensaverCustomBgLabel: file.name,
                               );
-                              _statusBanner = tr ? 'Duvar kağıdı seçildi: ${file.name}' : 'Wallpaper selected: ${file.name}';
+                              _statusBanner = tr ? 'Duvar kağıdı kalıcı kaydedildi: ${file.name}' : 'Wallpaper saved: ${file.name}';
                             });
+                            widget.onSaveSettings(_draft);
                           }
                         }
                       } catch (_) {
@@ -4327,6 +4408,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                   GestureDetector(
                     onTap: () {
                       _hapticTap();
+                      unawaited(MediaStorageService.deleteMedia(_draft.screensaverCustomBgSource));
                       _screensaverBgUrlCtrl.clear();
                       setState(() {
                         _draft = _draft.copyWith(
@@ -4334,6 +4416,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                           screensaverCustomBgLabel: '',
                         );
                       });
+                      widget.onSaveSettings(_draft);
                     },
                     child: Text(
                       tr ? 'Kaldır' : 'Clear',

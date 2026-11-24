@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../models/thermostat_state.dart';
 import '../services/ambient_audio_service.dart';
 import '../services/hardware_service.dart';
+import '../services/media_storage_service.dart';
 
 class MascotMeta {
   final String name;
@@ -128,6 +129,32 @@ class ScreensaverCustomWallpaper extends StatelessWidget {
         fit: fit,
         gaplessPlayback: true,
         errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      );
+    }
+
+    final syncBytes = MediaStorageService.getCachedBytes(trimmed);
+    if (syncBytes != null) {
+      return Image.memory(
+        syncBytes,
+        fit: fit,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      );
+    }
+
+    if (MediaStorageService.isPersistedKey(trimmed)) {
+      return FutureBuilder<Uint8List?>(
+        future: MediaStorageService.loadBytes(trimmed),
+        builder: (context, snap) {
+          final data = snap.data;
+          if (data == null || data.isEmpty) return const SizedBox.shrink();
+          return Image.memory(
+            data,
+            fit: fit,
+            gaplessPlayback: true,
+            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+          );
+        },
       );
     }
 

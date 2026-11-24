@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import '../models/thermostat_state.dart';
@@ -8,6 +9,7 @@ class FlowTabBarShell extends StatefulWidget {
   final TabId activeTab;
   final List<TabMeta> orderedTabs;
   final ValueChanged<TabId> onSelectTab;
+  final ValueChanged<int>? onStepTab;
   final RgbAccent activeAccent;
   final LangCode lang;
   final bool isLandscape;
@@ -22,6 +24,7 @@ class FlowTabBarShell extends StatefulWidget {
     required this.activeTab,
     required this.orderedTabs,
     required this.onSelectTab,
+    this.onStepTab,
     required this.activeAccent,
     required this.lang,
     required this.isLandscape,
@@ -44,6 +47,28 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
   int _curIndex = 0;
   FlowMove? _activeMove;
   RgbAccent _smoothAccent = const RgbAccent(1.0, 0.48, 0.14);
+  DateTime? _lastDockWheelAt;
+
+  void _handleDockWheel(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent || widget.orderedTabs.isEmpty) return;
+    final now = DateTime.now();
+    if (_lastDockWheelAt != null && now.difference(_lastDockWheelAt!).inMilliseconds < 170) {
+      return;
+    }
+    final dx = event.scrollDelta.dx;
+    final dy = event.scrollDelta.dy;
+    final primary = dx.abs() > dy.abs() ? dx : dy;
+    if (primary.abs() < 4.0) return;
+    _lastDockWheelAt = now;
+    final dir = primary > 0 ? 1 : -1;
+    if (widget.onStepTab != null) {
+      widget.onStepTab!(dir);
+    } else {
+      final len = widget.orderedTabs.length;
+      final nextIdx = ((_curIndex + dir) % len + len) % len;
+      _handleTapTab(nextIdx, widget.orderedTabs[nextIdx]);
+    }
+  }
 
   int _indexOfTab(TabId id) {
     final idx = widget.orderedTabs.indexWhere((t) => t.id == id);
@@ -199,16 +224,20 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
                     top: 538.0,
                     width: 180.0,
                     height: 124.0,
-                    child: Semantics(
-                      button: true,
-                      selected: i == _curIndex,
-                      label: widget.lang == LangCode.tr
-                          ? widget.orderedTabs[i].labelTr
-                          : widget.orderedTabs[i].labelEn,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => _handleTapTab(i, widget.orderedTabs[i]),
-                        child: const SizedBox.expand(),
+                    child: Listener(
+                      behavior: HitTestBehavior.translucent,
+                      onPointerSignal: _handleDockWheel,
+                      child: Semantics(
+                        button: true,
+                        selected: i == _curIndex,
+                        label: widget.lang == LangCode.tr
+                            ? widget.orderedTabs[i].labelTr
+                            : widget.orderedTabs[i].labelEn,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => _handleTapTab(i, widget.orderedTabs[i]),
+                          child: const SizedBox.expand(),
+                        ),
                       ),
                     ),
                   ),
