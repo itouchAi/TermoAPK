@@ -1729,9 +1729,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
               ),
 
             // Persistent Top Notification Queue: Single, Stepped Stack, or Telegram-style Capsules
+            // Shown both on normal screens and on top of active Smart Display.
             if (_unreadAlerts.isNotEmpty &&
                 !_aiCallOpen &&
-                !_ambientMode &&
                 !_screensaverPreview &&
                 !_showBootCeremony)
               Builder(
