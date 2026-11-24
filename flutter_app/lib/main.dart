@@ -19,6 +19,7 @@ import 'services/firebase_sync_service.dart';
 import 'services/hardware_service.dart';
 import 'services/media_storage_service.dart';
 import 'services/notification_service.dart';
+import 'services/schedule_engine.dart';
 import 'services/voice_speech_service.dart';
 import 'widgets/ai_phone_call_overlay.dart';
 import 'widgets/boot_ceremony_overlay.dart';
@@ -82,6 +83,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   LangCode _lang = LangCode.tr;
   String _locationName = 'Ev · İstanbul';
   List<ScheduleSlot> _schedule = ThermostatMath.defaultSchedule;
+  List<CustomScheduleRule> _customScheduleRules = const [];
   SystemSettingsState _settings = SystemSettingsState.defaults();
   VisualCustomizationState _visual = VisualCustomizationState.defaults();
   bool _savedNotice = false;
@@ -92,11 +94,13 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   AiCallReason _aiCallReason = AiCallReason.ignition;
   bool _aiCallUrgent = false;
   DateTime? _lastAiCallAt;
+  DateTime? _lastPassiveEventNotifyAt;
   AiCallLogEntry? _pendingMissedCallAlert;
   bool _voiceOpen = false;
   bool _modalSheetOpen = false;
   bool _reopenSettingsToSmartDisplay = false;
   bool _showBootCeremony = false;
+  bool _persistedLoaded = false;
   DateTime _now = DateTime.now();
   int _slideIndex = 0;
   int _slideTicks = 0;
@@ -109,6 +113,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   Timer? _aiCallDebounceTimer;
   bool? _pendingCallBaselineHeating;
   double? _pendingCallBaselineTarget;
+  String? _pendingScheduleTitleTr;
+  String? _pendingScheduleTitleEn;
+  String _lastScheduleMinuteKey = '';
   DateTime? _heatingCycleStartedAt;
   DateTime? _lastWheelNavAt;
   bool _activeTabCanVertScroll = false;
@@ -172,11 +179,20 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
       if (driftedRoom != null && _thermalTicks % 60 == 0) {
         final curHeating = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating;
-        _evaluateBoilerAiCallTrigger(
+        _evaluateBoilerAlertsAndCalls(
           wasHeating: curHeating,
           nextTargetTemp: _targetTemp,
           isUserChange: false,
         );
+      }
+
+      if (_persistedLoaded) {
+        final tickNow = DateTime.now();
+        final minuteKey = ScheduleEngine.minuteKey(tickNow);
+        if (minuteKey != _lastScheduleMinuteKey) {
+          _lastScheduleMinuteKey = minuteKey;
+          _evaluateScheduledActions(tickNow);
+        }
       }
 
       final syncInterval = _settings.cloudSyncIntervalSeconds;
@@ -277,6 +293,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
               for (final s in ThermostatMath.defaultSchedule)
                 if (byId.containsKey(s.id))
                   s.copyWith(
+                    time: byId[s.id]!['time'] as String? ?? s.time,
                     enabled: byId[s.id]!['enabled'] as bool? ?? s.enabled,
                     targetTemp: (byId[s.id]!['targetTemp'] as num?)?.toDouble() != null
                         ? ThermostatMath.snapTemperature((byId[s.id]!['targetTemp'] as num).toDouble())
@@ -284,6 +301,13 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                   )
                 else
                   s,
+            ];
+          }
+          final rawCustom = map['customScheduleRules'];
+          if (rawCustom is List) {
+            _customScheduleRules = [
+              for (final item in rawCustom)
+                if (item is Map<String, dynamic>) CustomScheduleRule.fromJson(item),
             ];
           }
         });
@@ -304,6 +328,11 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       }
     }
 
+    _persistedLoaded = true;
+    final nowTick = DateTime.now();
+    _lastScheduleMinuteKey = ScheduleEngine.minuteKey(nowTick);
+    _evaluateScheduledActions(nowTick);
+
     if (bootOn && mounted) {
       setState(() => _showBootCeremony = true);
     }
@@ -319,6 +348,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
         'lang': _lang == LangCode.en ? 'en' : 'tr',
         'locationName': _locationName,
         'schedule': _schedule.map((s) => s.toJson()).toList(),
+        'customScheduleRules': _customScheduleRules.map((r) => r.toJson()).toList(),
         'settings': _settings.toJson(),
         'visual': _visual.toJson(),
       }),
@@ -468,6 +498,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       onResetTelemetryHistory: () {
         setState(() {
           _schedule = ThermostatMath.defaultSchedule;
+          _customScheduleRules = const [];
           _targetTemp = 22.5;
           _activePreset = PresetId.konfor;
           _settings = _settings.copyWith(
@@ -743,33 +774,110 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     });
   }
 
-  void _evaluateBoilerAiCallTrigger({
+  void _evaluateScheduledActions(DateTime tickNow) {
+    if (!mounted) return;
+    final eval = ScheduleEngine.evaluateAtMinute(
+      now: tickNow,
+      slots: _schedule,
+      customRules: _customScheduleRules,
+    );
+    if (eval.completedOnceRuleIds.isNotEmpty) {
+      setState(() {
+        _customScheduleRules = [
+          for (final r in _customScheduleRules)
+            if (eval.completedOnceRuleIds.contains(r.id))
+              r.copyWith(enabled: false)
+            else
+              r,
+        ];
+      });
+      _persist();
+    }
+    if (eval.hasTriggered && eval.nextTargetTemp != null) {
+      _changeTarget(
+        eval.nextTargetTemp!,
+        scheduleTitleTr: eval.triggeredTitleTr,
+        scheduleTitleEn: eval.triggeredTitleEn,
+      );
+    }
+  }
+
+  void _evaluateBoilerAlertsAndCalls({
     required bool wasHeating,
     required double nextTargetTemp,
     double? prevTargetTemp,
     bool isUserChange = false,
+    String? scheduleTitleTr,
+    String? scheduleTitleEn,
   }) {
-    if (_aiCallOpen || _modalSheetOpen || _showBootCeremony) return;
     final nextBoiler = ThermostatMath.computeBoilerTelemetry(_roomTemp, nextTargetTemp);
     final safety = NotificationService.evaluateSafetyThresholds(
       roomTemp: _roomTemp,
       outsideTemp: 17.7,
       boiler: nextBoiler,
     );
-    final decision = AiCallService.evaluateTrigger(
-      enabled: _settings.aiPhoneCallEnabled,
-      triggerMode: _settings.aiCallTriggerMode,
+
+    bool callLaunched = false;
+    if (!_aiCallOpen && !_modalSheetOpen && !_showBootCeremony) {
+      final decision = AiCallService.evaluateTrigger(
+        enabled: _settings.aiPhoneCallEnabled,
+        triggerMode: _settings.aiCallTriggerMode,
+        wasHeating: wasHeating,
+        nextBoiler: nextBoiler,
+        safety: safety,
+        roomTemp: _roomTemp,
+        targetTemp: nextTargetTemp,
+        prevTargetTemp: prevTargetTemp,
+        isUserChange: isUserChange,
+        lastCallAt: _lastAiCallAt,
+      );
+      if (decision.shouldCall && decision.reason != null) {
+        callLaunched = true;
+        _launchAiCall(reason: decision.reason!, urgent: decision.urgent);
+      }
+    }
+
+    final eventDecision = AiCallService.evaluateBoilerEventNotification(
+      enabled: _settings.boilerEventNotificationsEnabled,
       wasHeating: wasHeating,
       nextBoiler: nextBoiler,
       safety: safety,
+      locationName: _locationName,
       roomTemp: _roomTemp,
       targetTemp: nextTargetTemp,
       prevTargetTemp: prevTargetTemp,
       isUserChange: isUserChange,
-      lastCallAt: _lastAiCallAt,
+      scheduleTitleTr: scheduleTitleTr,
+      scheduleTitleEn: scheduleTitleEn,
+      lastPassiveNotifyAt: _lastPassiveEventNotifyAt,
     );
-    if (decision.shouldCall && decision.reason != null) {
-      _launchAiCall(reason: decision.reason!, urgent: decision.urgent);
+    if (eventDecision.shouldNotify) {
+      final isPassiveEvent = eventDecision.kind == BoilerEventAlertKind.coldRoom ||
+          eventDecision.kind == BoilerEventAlertKind.hotRoom ||
+          (eventDecision.kind == BoilerEventAlertKind.safetyAlert && !isUserChange);
+      if (isPassiveEvent) {
+        _lastPassiveEventNotifyAt = DateTime.now();
+      }
+      final tr = _lang == LangCode.tr;
+      unawaited(
+        NotificationService.dispatchNotification(
+          context: context,
+          lang: _lang,
+          locationName: _locationName,
+          roomTemp: _roomTemp,
+          targetTemp: nextTargetTemp,
+          boiler: nextBoiler,
+          settings: _settings,
+          severityOverride: eventDecision.severity,
+          customTitle: tr ? eventDecision.titleTr : eventDecision.titleEn,
+          customBody: tr ? eventDecision.bodyTr : eventDecision.bodyEn,
+          suppressChime: callLaunched,
+        ).then((res) {
+          if (!mounted) return;
+          setState(() => _settings = _settings.copyWith(lastNotificationAt: res.timestampLabel));
+          _persist();
+        }),
+      );
     }
   }
 
@@ -777,26 +885,41 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     required bool prevHeating,
     required double prevTarget,
     Duration delay = const Duration(milliseconds: 900),
+    String? scheduleTitleTr,
+    String? scheduleTitleEn,
   }) {
     _pendingCallBaselineHeating ??= prevHeating;
     _pendingCallBaselineTarget ??= prevTarget;
+    if (scheduleTitleTr != null) _pendingScheduleTitleTr = scheduleTitleTr;
+    if (scheduleTitleEn != null) _pendingScheduleTitleEn = scheduleTitleEn;
     _aiCallDebounceTimer?.cancel();
     _aiCallDebounceTimer = Timer(delay, () {
       final baselineHeating = _pendingCallBaselineHeating ?? prevHeating;
       final baselineTarget = _pendingCallBaselineTarget ?? prevTarget;
+      final schedTr = _pendingScheduleTitleTr;
+      final schedEn = _pendingScheduleTitleEn;
       _pendingCallBaselineHeating = null;
       _pendingCallBaselineTarget = null;
+      _pendingScheduleTitleTr = null;
+      _pendingScheduleTitleEn = null;
       if (!mounted) return;
-      _evaluateBoilerAiCallTrigger(
+      _evaluateBoilerAlertsAndCalls(
         wasHeating: baselineHeating,
         nextTargetTemp: _targetTemp,
         prevTargetTemp: baselineTarget,
         isUserChange: true,
+        scheduleTitleTr: schedTr,
+        scheduleTitleEn: schedEn,
       );
     });
   }
 
-  void _changeTarget(double next, {bool suppressAiCall = false}) {
+  void _changeTarget(
+    double next, {
+    bool suppressAiCall = false,
+    String? scheduleTitleTr,
+    String? scheduleTitleEn,
+  }) {
     final prevHeating = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating;
     final prevTarget = _targetTemp;
     final snapped = ThermostatMath.snapTemperature(next);
@@ -812,7 +935,12 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     _recordBoilerTransitionEspLog(prevHeating: prevHeating, nextTargetTemp: snapped);
     _syncFirebaseBackground(snapped);
     if (!suppressAiCall && (snapped - prevTarget).abs() >= 0.05) {
-      _scheduleSettledAiCallEvaluation(prevHeating: prevHeating, prevTarget: prevTarget);
+      _scheduleSettledAiCallEvaluation(
+        prevHeating: prevHeating,
+        prevTarget: prevTarget,
+        scheduleTitleTr: scheduleTitleTr,
+        scheduleTitleEn: scheduleTitleEn,
+      );
     }
   }
 
@@ -918,6 +1046,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           child: ScheduleScreen(
             lang: _lang,
             slots: _schedule,
+            customRules: _customScheduleRules,
             subTabOrder: _visual.scheduleSubTabOrder,
             palette: palette,
             boiler: boiler,
@@ -925,16 +1054,38 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             savedNotice: _savedNotice,
             onBoundaryPrevMainTab: () => _stepTab(-1),
             onBoundaryNextMainTab: () => _stepTab(1),
-            onUpdateSlot: (slotId, {enabled, targetTemp}) {
+            onUpdateSlot: (slotId, {time, enabled, targetTemp}) {
               _triggerHaptic();
               setState(() {
                 _schedule = [
                   for (final s in _schedule)
                     if (s.id == slotId)
-                      s.copyWith(enabled: enabled, targetTemp: targetTemp)
+                      s.copyWith(time: time, enabled: enabled, targetTemp: targetTemp)
                     else
                       s,
                 ];
+              });
+              _persist();
+            },
+            onAddCustomRule: (rule) {
+              _triggerHaptic();
+              setState(() => _customScheduleRules = [..._customScheduleRules, rule]);
+              _persist();
+            },
+            onUpdateCustomRule: (rule) {
+              _triggerHaptic();
+              setState(() {
+                _customScheduleRules = [
+                  for (final r in _customScheduleRules)
+                    if (r.id == rule.id) rule else r,
+                ];
+              });
+              _persist();
+            },
+            onDeleteCustomRule: (ruleId) {
+              _triggerHaptic();
+              setState(() {
+                _customScheduleRules = _customScheduleRules.where((r) => r.id != ruleId).toList();
               });
               _persist();
             },

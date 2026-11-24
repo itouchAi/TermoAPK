@@ -10,6 +10,7 @@ import 'package:termostat_flow/services/firebase_sync_service.dart';
 import 'package:termostat_flow/services/hardware_service.dart';
 import 'package:termostat_flow/services/media_storage_service.dart';
 import 'package:termostat_flow/services/notification_service.dart';
+import 'package:termostat_flow/services/schedule_engine.dart';
 import 'package:termostat_flow/services/vault_crypto_service.dart';
 import 'package:termostat_flow/services/voice_gender_classifier.dart';
 import 'package:termostat_flow/services/voice_speech_service.dart';
@@ -1073,5 +1074,211 @@ void main() {
         expect(h.icon, isNot(Icons.umbrella_outlined));
       }
     }
+  });
+
+  test('CustomScheduleRule & ScheduleEngine execute default slots and independent Open/Close/Both plans', () {
+    final baseRule = CustomScheduleRule(
+      id: 'rule_open_only',
+      title: 'Sabah Isıt',
+      actionType: ScheduleActionType.openOnly,
+      openTime: '07:15',
+      openTargetTemp: 23.5,
+      repeatMode: ScheduleRepeatMode.specificDate,
+      specificDateIso: '2026-11-24',
+    );
+    final restoredRule = CustomScheduleRule.fromJson(baseRule.toJson());
+    expect(restoredRule.id, 'rule_open_only');
+    expect(restoredRule.actionType, ScheduleActionType.openOnly);
+    expect(restoredRule.hasOpenAction, isTrue);
+    expect(restoredRule.hasCloseAction, isFalse);
+    expect(restoredRule.openTargetTemp, 23.5);
+    expect(restoredRule.specificDateIso, '2026-11-24');
+
+    // Default morning slot triggers at 06:30
+    final defaultEval = ScheduleEngine.evaluateAtMinute(
+      now: DateTime(2026, 11, 24, 6, 30),
+      slots: ThermostatMath.defaultSchedule,
+      customRules: const [],
+    );
+    expect(defaultEval.hasTriggered, isTrue);
+    expect(defaultEval.nextTargetTemp, 23.0);
+    expect(defaultEval.isCloseAction, isFalse);
+
+    // Independent Open Only triggers on specific date and marks itself complete
+    final openOnlyEval = ScheduleEngine.evaluateAtMinute(
+      now: DateTime(2026, 11, 24, 7, 15),
+      slots: ThermostatMath.defaultSchedule,
+      customRules: [restoredRule],
+    );
+    expect(openOnlyEval.hasTriggered, isTrue);
+    expect(openOnlyEval.nextTargetTemp, 23.5);
+    expect(openOnlyEval.isCloseAction, isFalse);
+    expect(openOnlyEval.completedOnceRuleIds, contains('rule_open_only'));
+
+    // Independent Close Only on custom days (Tue/Thu) triggers standby minTemp
+    final closeOnlyRule = CustomScheduleRule(
+      id: 'rule_close_only',
+      title: 'İş Çıkışı Kapat',
+      actionType: ScheduleActionType.closeOnly,
+      closeTime: '09:00',
+      repeatMode: ScheduleRepeatMode.customDays,
+      specificDateIso: '2026-11-24',
+      repeatWeekdays: const [2, 4], // Tue, Thu
+    );
+    expect(closeOnlyRule.hasOpenAction, isFalse);
+    expect(closeOnlyRule.hasCloseAction, isTrue);
+
+    // Tuesday 2026-11-24 09:00 matches
+    final closeTue = ScheduleEngine.evaluateAtMinute(
+      now: DateTime(2026, 11, 24, 9, 0),
+      slots: const [],
+      customRules: [closeOnlyRule],
+    );
+    expect(closeTue.hasTriggered, isTrue);
+    expect(closeTue.nextTargetTemp, ThermostatMath.minTemp);
+    expect(closeTue.isCloseAction, isTrue);
+    expect(closeTue.completedOnceRuleIds, isEmpty); // periodic stays enabled
+
+    // Wednesday 2026-11-25 09:00 does NOT match
+    final closeWed = ScheduleEngine.evaluateAtMinute(
+      now: DateTime(2026, 11, 25, 9, 0),
+      slots: const [],
+      customRules: [closeOnlyRule],
+    );
+    expect(closeWed.hasTriggered, isFalse);
+
+    // Overnight Open & Close (22:30 -> 06:45 next morning) on specificDate
+    final overnightRule = CustomScheduleRule(
+      id: 'rule_overnight',
+      title: 'Gece Konfor',
+      actionType: ScheduleActionType.openAndClose,
+      openTime: '22:30',
+      openTargetTemp: 21.5,
+      closeTime: '06:45',
+      repeatMode: ScheduleRepeatMode.specificDate,
+      specificDateIso: '2026-11-24',
+    );
+    final nightOpen = ScheduleEngine.evaluateAtMinute(
+      now: DateTime(2026, 11, 24, 22, 30),
+      slots: const [],
+      customRules: [overnightRule],
+    );
+    expect(nightOpen.nextTargetTemp, 21.5);
+    expect(nightOpen.completedOnceRuleIds, isEmpty);
+
+    final nextMorningClose = ScheduleEngine.evaluateAtMinute(
+      now: DateTime(2026, 11, 25, 6, 45),
+      slots: const [],
+      customRules: [overnightRule],
+    );
+    expect(nextMorningClose.nextTargetTemp, ThermostatMath.minTemp);
+    expect(nextMorningClose.isCloseAction, isTrue);
+    expect(nextMorningClose.completedOnceRuleIds, contains('rule_overnight'));
+  });
+
+  test('SystemSettingsState.boilerEventNotificationsEnabled & evaluateBoilerEventNotification work independently of AI calls', () {
+    final s = SystemSettingsState.defaults().copyWith(
+      aiPhoneCallEnabled: false,
+      boilerEventNotificationsEnabled: true,
+    );
+    final restored = SystemSettingsState.fromJson(s.toJson());
+    expect(restored.aiPhoneCallEnabled, isFalse);
+    expect(restored.boilerEventNotificationsEnabled, isTrue);
+
+    final heating = ThermostatMath.computeBoilerTelemetry(21.0, 23.0);
+    final lowered = ThermostatMath.computeBoilerTelemetry(21.0, 21.5);
+    final standby = ThermostatMath.computeBoilerTelemetry(21.0, 10.0);
+    final maxBoiler = ThermostatMath.computeBoilerTelemetry(21.0, 29.0);
+    final safeGuard = NotificationService.evaluateSafetyThresholds(
+      roomTemp: 21.0,
+      outsideTemp: 15.0,
+      boiler: heating,
+    );
+
+    final evOn = AiCallService.evaluateBoilerEventNotification(
+      enabled: restored.boilerEventNotificationsEnabled,
+      wasHeating: false,
+      nextBoiler: heating,
+      safety: safeGuard,
+      locationName: 'Ev · İstanbul',
+      roomTemp: 21.0,
+      targetTemp: 23.0,
+      prevTargetTemp: 18.0,
+      isUserChange: true,
+    );
+    expect(evOn.shouldNotify, isTrue);
+    expect(evOn.kind, BoilerEventAlertKind.ignition);
+    expect(evOn.titleTr, contains('Açıldı'));
+
+    final evLower = AiCallService.evaluateBoilerEventNotification(
+      enabled: restored.boilerEventNotificationsEnabled,
+      wasHeating: true,
+      nextBoiler: lowered,
+      safety: safeGuard,
+      locationName: 'Ev · İstanbul',
+      roomTemp: 21.0,
+      targetTemp: 21.5,
+      prevTargetTemp: 24.0,
+      isUserChange: true,
+    );
+    expect(evLower.shouldNotify, isTrue);
+    expect(evLower.kind, BoilerEventAlertKind.boilerLowered);
+    expect(evLower.titleTr, contains('Kısıldı'));
+
+    final evOff = AiCallService.evaluateBoilerEventNotification(
+      enabled: restored.boilerEventNotificationsEnabled,
+      wasHeating: true,
+      nextBoiler: standby,
+      safety: safeGuard,
+      locationName: 'Ev · İstanbul',
+      roomTemp: 21.0,
+      targetTemp: 10.0,
+      prevTargetTemp: 23.0,
+      isUserChange: true,
+    );
+    expect(evOff.shouldNotify, isTrue);
+    expect(evOff.kind, BoilerEventAlertKind.boilerOff);
+    expect(evOff.titleTr, contains('Kapandı'));
+
+    final evMax = AiCallService.evaluateBoilerEventNotification(
+      enabled: restored.boilerEventNotificationsEnabled,
+      wasHeating: true,
+      nextBoiler: maxBoiler,
+      safety: safeGuard,
+      locationName: 'Ev · İstanbul',
+      roomTemp: 21.0,
+      targetTemp: 29.0,
+      prevTargetTemp: 23.0,
+      isUserChange: true,
+    );
+    expect(evMax.shouldNotify, isTrue);
+    expect(evMax.kind, BoilerEventAlertKind.highTarget);
+    expect(evMax.titleTr, contains('En Yüksekte'));
+
+    final evCold = AiCallService.evaluateBoilerEventNotification(
+      enabled: restored.boilerEventNotificationsEnabled,
+      wasHeating: false,
+      nextBoiler: standby,
+      safety: safeGuard,
+      locationName: 'Ev · İstanbul',
+      roomTemp: 16.5,
+      targetTemp: 15.0,
+      isUserChange: false,
+    );
+    expect(evCold.shouldNotify, isTrue);
+    expect(evCold.kind, BoilerEventAlertKind.coldRoom);
+    expect(evCold.titleTr, contains('Düşük'));
+
+    final evDisabled = AiCallService.evaluateBoilerEventNotification(
+      enabled: false,
+      wasHeating: false,
+      nextBoiler: heating,
+      safety: safeGuard,
+      locationName: 'Ev · İstanbul',
+      roomTemp: 21.0,
+      targetTemp: 23.0,
+      isUserChange: true,
+    );
+    expect(evDisabled.shouldNotify, isFalse);
   });
 }

@@ -1456,15 +1456,18 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           ),
         );
       case SettingsItemId.notifications:
+        final anyNotifyOn = _draft.notifications3hEnabled || _draft.boilerEventNotificationsEnabled;
         return _CardMeta(
           icon: Icons.notifications_none_rounded,
           iconColor: const Color(0xFFFBBF24),
           title: tr ? 'Bildirim Ayarları & Otomasyon' : 'Notifications & Automation',
-          tag: tr ? '3 Saatlik & Acil' : '3h & Critical',
-          subtitle: tr ? '3 saatlik durum özeti ve kritik kombi emniyet uyarıları' : '3-hour summary and critical safety alerts',
+          tag: tr ? '3 Saatlik & Olay' : '3h & Events',
+          subtitle: tr
+              ? '3 saatlik özet, kombi durum mesajları ve acil emniyet uyarıları'
+              : '3-hour summary, boiler status messages, and safety alerts',
           trailingAction: _ActionPill(
-            label: _draft.notifications3hEnabled ? (tr ? 'Devrede' : 'Active') : (tr ? 'Kapalı' : 'Off'),
-            active: _draft.notifications3hEnabled,
+            label: anyNotifyOn ? (tr ? 'Devrede' : 'Active') : (tr ? 'Kapalı' : 'Off'),
+            active: anyNotifyOn,
             color: const Color(0xFFF59E0B),
             onTap: () {
               _hapticTap();
@@ -3553,7 +3556,7 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             ),
             const SizedBox(height: 10),
 
-            // 4 Interactive Automation Switches
+            // Interactive Automation Switches
             _MiniToggleTile(
               label: tr ? '📊 3 Saatlik Tüketim & Durum Özeti' : '📊 3-Hour Usage & Status Summary',
               value: _draft.notifications3hEnabled,
@@ -3563,6 +3566,43 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 setState(() => _draft = _draft.copyWith(notifications3hEnabled: !_draft.notifications3hEnabled));
               },
             ),
+            const SizedBox(height: 6),
+            _MiniToggleTile(
+              label: tr
+                  ? '🔥 Kombi & Sıcaklık Olay Bildirimleri (Açıldı / Kısıldı / Kapandı)'
+                  : '🔥 Boiler & Temp Event Alerts (On / Lowered / Off / High / Cold)',
+              value: _draft.boilerEventNotificationsEnabled,
+              activeColor: const Color(0xFFFB923C),
+              onTap: () {
+                _hapticTap();
+                setState(
+                  () => _draft = _draft.copyWith(
+                    boilerEventNotificationsEnabled: !_draft.boilerEventNotificationsEnabled,
+                  ),
+                );
+              },
+            ),
+            if (_draft.boilerEventNotificationsEnabled) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFB923C).withValues(alpha: 0.09),
+                  borderRadius: BorderRadius.circular(11),
+                  border: Border.all(color: const Color(0xFFFB923C).withValues(alpha: 0.30)),
+                ),
+                child: Text(
+                  tr
+                      ? '• Sesli asistan aramasını kapatsanız bile veya aramayla paralel olarak şu mesajlar gönderilir: Kombi açıldı, Kombi kısıldı, Kombi kapandı, Derece en yüksekte, Ev sıcaklığı düşük.'
+                      : '• Works without Voice Assistant calls or in parallel alongside calls: Boiler turned on, Boiler lowered, Boiler turned off, Target temp at max, Low room temperature.',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.white.withValues(alpha: 0.78),
+                    height: 1.38,
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 6),
             _MiniToggleTile(
               label: tr ? '🚨 Kritik Basınç (<1.0 Bar) & Alev Kesintisi' : '🚨 Critical Pressure (<1.0 Bar) & Flame Loss',
@@ -4576,8 +4616,8 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           children: [
             Text(
               tr
-                  ? 'Kombi ateşlendiğinde veya kritik güvenlik eşiği aşıldığında asistan tam ekran telefon araması başlatır; cevaplarsanız sesli özet sunar ve arama ekranından sıcaklığı anında değiştirebilirsiniz.'
-                  : 'Starts a fullscreen assistant phone call when boiler ignition or a critical safety alert triggers; answer for a voice summary and quick thermostat controls.',
+                  ? 'Kombi ateşlendiğinde veya kritik güvenlik eşiği aşıldığında asistan tam ekran telefon araması başlatır; cevaplarsanız sesli özet sunar ve arama ekranından sıcaklığı anında değiştirebilirsiniz. İsterseniz aramayı kapatıp aynı görevleri Bildirim Ayarları üzerinden yalnızca yazılı bildirim olarak da alabilirsiniz.'
+                  : 'Starts a fullscreen assistant phone call when boiler ignition or a critical safety alert triggers; answer for a voice summary and quick thermostat controls. You can also turn calls off and keep receiving these events via Notifications & Automation.',
               style: TextStyle(fontSize: 11.5, color: Colors.white.withValues(alpha: 0.72), height: 1.4),
             ),
             const SizedBox(height: 12),

@@ -13,6 +13,36 @@ class AiCallTriggerDecision {
   });
 }
 
+enum BoilerEventAlertKind {
+  ignition,
+  boilerLowered,
+  boilerOff,
+  highTarget,
+  coldRoom,
+  hotRoom,
+  safetyAlert,
+}
+
+class BoilerEventAlertDecision {
+  final bool shouldNotify;
+  final BoilerEventAlertKind? kind;
+  final AlertSeverity severity;
+  final String titleTr;
+  final String titleEn;
+  final String bodyTr;
+  final String bodyEn;
+
+  const BoilerEventAlertDecision({
+    required this.shouldNotify,
+    this.kind,
+    this.severity = AlertSeverity.info,
+    this.titleTr = '',
+    this.titleEn = '',
+    this.bodyTr = '',
+    this.bodyEn = '',
+  });
+}
+
 class AiCallQuickAction {
   final String labelTr;
   final String labelEn;
@@ -657,5 +687,166 @@ class AiCallService {
         else
           item,
     ];
+  }
+
+  /// Evaluates real-time boiler & temperature notification events
+  /// (Kombi açıldı / kısıldı / kapandı, Derece en yüksekte, Ev sıcaklığı düşük, Emniyet)
+  /// so users receive full status alerts even when AI Voice Calls are turned off,
+  /// or in parallel alongside AI Voice Calls.
+  static BoilerEventAlertDecision evaluateBoilerEventNotification({
+    required bool enabled,
+    required bool wasHeating,
+    required BoilerTelemetry nextBoiler,
+    required SafetyGuardStatus safety,
+    required String locationName,
+    double roomTemp = 21.8,
+    double targetTemp = 22.5,
+    double? prevTargetTemp,
+    bool isUserChange = false,
+    String? scheduleTitleTr,
+    String? scheduleTitleEn,
+    DateTime? lastPassiveNotifyAt,
+    DateTime? now,
+    Duration passiveCooldown = const Duration(minutes: 5),
+  }) {
+    if (!enabled) {
+      return const BoilerEventAlertDecision(shouldNotify: false);
+    }
+
+    final checkNow = now ?? DateTime.now();
+    final room = formatSpokenNumber(roomTemp);
+    final target = formatSpokenNumber(targetTemp);
+    final schedulePrefixTr = (scheduleTitleTr != null && scheduleTitleTr.isNotEmpty)
+        ? '[$scheduleTitleTr] '
+        : '';
+    final schedulePrefixEn = (scheduleTitleEn != null && scheduleTitleEn.isNotEmpty)
+        ? '[$scheduleTitleEn] '
+        : '';
+
+    final ignitionDetected = !wasHeating && nextBoiler.isHeating;
+    final shutdownDetected = wasHeating && !nextBoiler.isHeating;
+    final loweredDetected = isUserChange &&
+        wasHeating &&
+        nextBoiler.isHeating &&
+        prevTargetTemp != null &&
+        targetTemp <= prevTargetTemp - 1.5;
+    final isHighTargetPush = isUserChange &&
+        nextBoiler.isHeating &&
+        targetTemp >= highTargetTempThresholdC &&
+        (prevTargetTemp == null || prevTargetTemp < highTargetTempThresholdC || ignitionDetected);
+    final isColdRoom = safety.freezeRisk || roomTemp <= coldRoomThresholdC;
+    final isHotRoom = safety.overheat || roomTemp >= hotRoomThresholdC;
+
+    if (safety.lowPressure) {
+      if (!isUserChange &&
+          lastPassiveNotifyAt != null &&
+          checkNow.difference(lastPassiveNotifyAt) < passiveCooldown) {
+        return const BoilerEventAlertDecision(shouldNotify: false);
+      }
+      return BoilerEventAlertDecision(
+        shouldNotify: true,
+        kind: BoilerEventAlertKind.safetyAlert,
+        severity: AlertSeverity.critical,
+        titleTr: '🚨 Kritik Kombi Basınç Uyarısı',
+        titleEn: '🚨 Critical Boiler Pressure Alert',
+        bodyTr:
+            '$locationName · Su basıncı ${nextBoiler.waterPressureBar.toStringAsFixed(1)} Bar seviyesine düştü! Oda $room°C.',
+        bodyEn:
+            '$locationName · Water pressure dropped to ${nextBoiler.waterPressureBar.toStringAsFixed(1)} Bar! Room $room°C.',
+      );
+    }
+
+    if (isHighTargetPush) {
+      return BoilerEventAlertDecision(
+        shouldNotify: true,
+        kind: BoilerEventAlertKind.highTarget,
+        severity: AlertSeverity.warning,
+        titleTr: '⚠️ Derece En Yüksekte ($target°C)',
+        titleEn: '⚠️ Target Temp at Maximum ($target°C)',
+        bodyTr:
+            '$schedulePrefixTr$locationName · Kombi $target°C maksimum hedefe alındı. Oda şu an $room°C (${nextBoiler.statusTextTr}).',
+        bodyEn:
+            '$schedulePrefixEn$locationName · Target raised to $target°C. Room is $room°C (${nextBoiler.statusTextEn}).',
+      );
+    }
+
+    if (ignitionDetected) {
+      return BoilerEventAlertDecision(
+        shouldNotify: true,
+        kind: BoilerEventAlertKind.ignition,
+        severity: AlertSeverity.info,
+        titleTr: '🔥 Kombi Açıldı',
+        titleEn: '🔥 Boiler Turned On',
+        bodyTr:
+            '$schedulePrefixTr$locationName · Kombi ateşlendi, hedef $target°C (Oda $room°C · %${nextBoiler.flamePercent} alev).',
+        bodyEn:
+            '$schedulePrefixEn$locationName · Boiler ignited, target $target°C (Room $room°C · ${nextBoiler.flamePercent}% flame).',
+      );
+    }
+
+    if (shutdownDetected) {
+      return BoilerEventAlertDecision(
+        shouldNotify: true,
+        kind: BoilerEventAlertKind.boilerOff,
+        severity: AlertSeverity.info,
+        titleTr: '⏸ Kombi Kapandı',
+        titleEn: '⏸ Boiler Turned Off',
+        bodyTr:
+            '$schedulePrefixTr$locationName · Kombi durduruldu (Oda $room°C, Hedef $target°C).',
+        bodyEn:
+            '$schedulePrefixEn$locationName · Boiler shut down (Room $room°C, Target $target°C).',
+      );
+    }
+
+    if (loweredDetected) {
+      final prevStr = formatSpokenNumber(prevTargetTemp);
+      return BoilerEventAlertDecision(
+        shouldNotify: true,
+        kind: BoilerEventAlertKind.boilerLowered,
+        severity: AlertSeverity.info,
+        titleTr: '📉 Kombi Kısıldı ($target°C)',
+        titleEn: '📉 Boiler Lowered ($target°C)',
+        bodyTr:
+            '$schedulePrefixTr$locationName · Hedef sıcaklık $prevStr°C → $target°C seviyesine düşürüldü (Oda $room°C).',
+        bodyEn:
+            '$schedulePrefixEn$locationName · Target lowered $prevStr°C → $target°C (Room $room°C).',
+      );
+    }
+
+    // Passive thermal drift / threshold notifications (cooldown guarded)
+    if (lastPassiveNotifyAt != null &&
+        checkNow.difference(lastPassiveNotifyAt) < passiveCooldown) {
+      return const BoilerEventAlertDecision(shouldNotify: false);
+    }
+
+    if (isColdRoom && !nextBoiler.isHeating) {
+      return BoilerEventAlertDecision(
+        shouldNotify: true,
+        kind: BoilerEventAlertKind.coldRoom,
+        severity: safety.freezeRisk ? AlertSeverity.critical : AlertSeverity.warning,
+        titleTr: '❄️ Ev Sıcaklığı Düşük ($room°C)',
+        titleEn: '❄️ Low Room Temperature ($room°C)',
+        bodyTr:
+            '$locationName · Ev sıcaklığı $room°C seviyesine düştü ve kombi şu an kapalı (Hedef $target°C).',
+        bodyEn:
+            '$locationName · Room temperature dropped to $room°C while boiler is off (Target $target°C).',
+      );
+    }
+
+    if (isHotRoom && nextBoiler.isHeating) {
+      return BoilerEventAlertDecision(
+        shouldNotify: true,
+        kind: BoilerEventAlertKind.hotRoom,
+        severity: AlertSeverity.warning,
+        titleTr: '☀️ Ev Sıcaklığı Yükseldi ($room°C)',
+        titleEn: '☀️ Room Temperature High ($room°C)',
+        bodyTr:
+            '$locationName · Oda $room°C oldu ve kombi hâlâ aktif (Hedef $target°C).',
+        bodyEn:
+            '$locationName · Room reached $room°C while boiler is still active (Target $target°C).',
+      );
+    }
+
+    return const BoilerEventAlertDecision(shouldNotify: false);
   }
 }

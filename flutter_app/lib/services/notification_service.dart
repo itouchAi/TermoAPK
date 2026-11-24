@@ -117,6 +117,7 @@ class NotificationService {
     String? customTitle,
     String? customBody,
     AlertSeverity? severityOverride,
+    bool suppressChime = false,
   }) async {
     final tr = lang == LangCode.tr;
     final guard = evaluateSafetyThresholds(
@@ -137,7 +138,7 @@ class NotificationService {
             ? '$locationName · Oda ${roomTemp.toStringAsFixed(1)}°C / Hedef ${targetTemp.toStringAsFixed(1)}°C · ${boiler.waterPressureBar.toStringAsFixed(1)} Bar · ${boiler.statusTextTr}'
             : '$locationName · Room ${roomTemp.toStringAsFixed(1)}°C / Target ${targetTemp.toStringAsFixed(1)}°C · ${boiler.waterPressureBar.toStringAsFixed(1)} Bar · ${boiler.statusTextEn}');
 
-    if (settings.hapticEnabled) {
+    if (settings.hapticEnabled && !suppressChime) {
       HardwareService.vibrateMs(isCritical ? 140 : 55, amplitude: isCritical ? 230 : 150);
       if (isCritical) {
         Future.delayed(const Duration(milliseconds: 180), () {
@@ -146,7 +147,7 @@ class NotificationService {
       }
     }
 
-    if (settings.notifyChimeEnabled) {
+    if (settings.notifyChimeEnabled && !suppressChime) {
       AmbientAudioService.playNotificationChime(urgent: isCritical);
     }
 

@@ -131,6 +131,142 @@ class ScheduleSlot {
       };
 }
 
+enum ScheduleActionType {
+  openOnly,
+  closeOnly,
+  openAndClose,
+}
+
+enum ScheduleRepeatMode {
+  specificDate,
+  daily,
+  weekdays,
+  weekends,
+  customDays,
+}
+
+class CustomScheduleRule {
+  final String id;
+  final String title;
+  final bool enabled;
+  final ScheduleActionType actionType;
+  final String openTime;
+  final double openTargetTemp;
+  final String closeTime;
+  final ScheduleRepeatMode repeatMode;
+  final String specificDateIso;
+  final List<int> repeatWeekdays; // 1=Mon .. 7=Sun (DateTime.weekday)
+
+  const CustomScheduleRule({
+    required this.id,
+    required this.title,
+    this.enabled = true,
+    required this.actionType,
+    this.openTime = '07:30',
+    this.openTargetTemp = 22.5,
+    this.closeTime = '23:00',
+    this.repeatMode = ScheduleRepeatMode.specificDate,
+    required this.specificDateIso,
+    this.repeatWeekdays = const [1, 2, 3, 4, 5],
+  });
+
+  bool get hasOpenAction =>
+      actionType == ScheduleActionType.openOnly || actionType == ScheduleActionType.openAndClose;
+
+  bool get hasCloseAction =>
+      actionType == ScheduleActionType.closeOnly || actionType == ScheduleActionType.openAndClose;
+
+  CustomScheduleRule copyWith({
+    String? id,
+    String? title,
+    bool? enabled,
+    ScheduleActionType? actionType,
+    String? openTime,
+    double? openTargetTemp,
+    String? closeTime,
+    ScheduleRepeatMode? repeatMode,
+    String? specificDateIso,
+    List<int>? repeatWeekdays,
+  }) {
+    final normalizedDays = (repeatWeekdays ?? this.repeatWeekdays)
+        .where((d) => d >= 1 && d <= 7)
+        .toSet()
+        .toList()
+      ..sort();
+    return CustomScheduleRule(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      enabled: enabled ?? this.enabled,
+      actionType: actionType ?? this.actionType,
+      openTime: openTime ?? this.openTime,
+      openTargetTemp: ThermostatMath.snapTemperature(openTargetTemp ?? this.openTargetTemp),
+      closeTime: closeTime ?? this.closeTime,
+      repeatMode: repeatMode ?? this.repeatMode,
+      specificDateIso: specificDateIso ?? this.specificDateIso,
+      repeatWeekdays: normalizedDays,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'enabled': enabled,
+        'actionType': actionType.name,
+        'openTime': openTime,
+        'openTargetTemp': openTargetTemp,
+        'closeTime': closeTime,
+        'repeatMode': repeatMode.name,
+        'specificDateIso': specificDateIso,
+        'repeatWeekdays': repeatWeekdays,
+      };
+
+  static T _parseEnum<T extends Enum>(String? raw, List<T> values, T fallback) {
+    for (final v in values) {
+      if (v.name == raw) return v;
+    }
+    return fallback;
+  }
+
+  factory CustomScheduleRule.fromJson(Map<String, dynamic> map) {
+    final rawDays = map['repeatWeekdays'];
+    final days = <int>[];
+    if (rawDays is List) {
+      for (final d in rawDays) {
+        final v = (d as num?)?.toInt();
+        if (v != null && v >= 1 && v <= 7 && !days.contains(v)) {
+          days.add(v);
+        }
+      }
+      days.sort();
+    }
+    final now = DateTime.now();
+    final fallbackIso =
+        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    return CustomScheduleRule(
+      id: (map['id'] as String?) ?? 'rule_${now.microsecondsSinceEpoch}',
+      title: (map['title'] as String?) ?? 'Özel Plan',
+      enabled: (map['enabled'] as bool?) ?? true,
+      actionType: _parseEnum(
+        map['actionType'] as String?,
+        ScheduleActionType.values,
+        ScheduleActionType.openAndClose,
+      ),
+      openTime: (map['openTime'] as String?) ?? '07:30',
+      openTargetTemp: ThermostatMath.snapTemperature(
+        (map['openTargetTemp'] as num?)?.toDouble() ?? 22.5,
+      ),
+      closeTime: (map['closeTime'] as String?) ?? '23:00',
+      repeatMode: _parseEnum(
+        map['repeatMode'] as String?,
+        ScheduleRepeatMode.values,
+        ScheduleRepeatMode.specificDate,
+      ),
+      specificDateIso: (map['specificDateIso'] as String?) ?? fallbackIso,
+      repeatWeekdays: days.isEmpty ? const [1, 2, 3, 4, 5] : days,
+    );
+  }
+}
+
 class FlowMove {
   final double ts;
   final int a;
@@ -1171,6 +1307,7 @@ class SystemSettingsState {
   final int displaySleepMinutes;
   final bool oledPixelShiftEnabled;
   final bool notifications3hEnabled;
+  final bool boilerEventNotificationsEnabled;
   final bool emergencyBoilerAlerts;
   final bool weatherAlertsEnabled;
   final bool notifyChimeEnabled;
@@ -1248,6 +1385,7 @@ class SystemSettingsState {
     required this.displaySleepMinutes,
     required this.oledPixelShiftEnabled,
     required this.notifications3hEnabled,
+    this.boilerEventNotificationsEnabled = true,
     required this.emergencyBoilerAlerts,
     required this.weatherAlertsEnabled,
     required this.notifyChimeEnabled,
@@ -1340,6 +1478,7 @@ class SystemSettingsState {
         displaySleepMinutes: 15,
         oledPixelShiftEnabled: true,
         notifications3hEnabled: true,
+        boilerEventNotificationsEnabled: true,
         emergencyBoilerAlerts: true,
         weatherAlertsEnabled: true,
         notifyChimeEnabled: true,
@@ -1481,6 +1620,7 @@ class SystemSettingsState {
     int? displaySleepMinutes,
     bool? oledPixelShiftEnabled,
     bool? notifications3hEnabled,
+    bool? boilerEventNotificationsEnabled,
     bool? emergencyBoilerAlerts,
     bool? weatherAlertsEnabled,
     bool? notifyChimeEnabled,
@@ -1558,6 +1698,8 @@ class SystemSettingsState {
       displaySleepMinutes: (displaySleepMinutes ?? this.displaySleepMinutes).clamp(0, 120),
       oledPixelShiftEnabled: oledPixelShiftEnabled ?? this.oledPixelShiftEnabled,
       notifications3hEnabled: notifications3hEnabled ?? this.notifications3hEnabled,
+      boilerEventNotificationsEnabled:
+          boilerEventNotificationsEnabled ?? this.boilerEventNotificationsEnabled,
       emergencyBoilerAlerts: emergencyBoilerAlerts ?? this.emergencyBoilerAlerts,
       weatherAlertsEnabled: weatherAlertsEnabled ?? this.weatherAlertsEnabled,
       notifyChimeEnabled: notifyChimeEnabled ?? this.notifyChimeEnabled,
@@ -1636,6 +1778,7 @@ class SystemSettingsState {
         'displaySleepMinutes': displaySleepMinutes,
         'oledPixelShiftEnabled': oledPixelShiftEnabled,
         'notifications3hEnabled': notifications3hEnabled,
+        'boilerEventNotificationsEnabled': boilerEventNotificationsEnabled,
         'emergencyBoilerAlerts': emergencyBoilerAlerts,
         'weatherAlertsEnabled': weatherAlertsEnabled,
         'notifyChimeEnabled': notifyChimeEnabled,
@@ -1808,6 +1951,8 @@ class SystemSettingsState {
       displaySleepMinutes: (map['displaySleepMinutes'] as int?) ?? defaults.displaySleepMinutes,
       oledPixelShiftEnabled: (map['oledPixelShiftEnabled'] as bool?) ?? defaults.oledPixelShiftEnabled,
       notifications3hEnabled: (map['notifications3hEnabled'] as bool?) ?? defaults.notifications3hEnabled,
+      boilerEventNotificationsEnabled:
+          (map['boilerEventNotificationsEnabled'] as bool?) ?? defaults.boilerEventNotificationsEnabled,
       emergencyBoilerAlerts: (map['emergencyBoilerAlerts'] as bool?) ?? defaults.emergencyBoilerAlerts,
       weatherAlertsEnabled: (map['weatherAlertsEnabled'] as bool?) ?? defaults.weatherAlertsEnabled,
       notifyChimeEnabled: (map['notifyChimeEnabled'] as bool?) ?? defaults.notifyChimeEnabled,
