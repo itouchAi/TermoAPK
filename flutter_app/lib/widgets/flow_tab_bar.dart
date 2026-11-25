@@ -52,6 +52,7 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
   int? _hoveredTab;
   int? _pressedTab;
   Offset? _pressOrigin;
+  final Object _tabFocusToken = Object();
 
   void _handleDockWheel(PointerSignalEvent event) {
     if (_pressedTab != null) {
@@ -139,6 +140,7 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
 
   @override
   void dispose() {
+    TactileMotionScope.endFocus(_tabFocusToken);
     _ticker.dispose();
     super.dispose();
   }
@@ -234,66 +236,81 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
                     top: 538.0,
                     width: 180.0,
                     height: 124.0,
-                    child: MouseRegion(
-                      onEnter: (_) {
-                        if (_hoveredTab != i) setState(() => _hoveredTab = i);
-                      },
-                      onExit: (_) {
-                        if (_hoveredTab == i || _pressedTab == i) {
-                          setState(() {
-                            if (_hoveredTab == i) _hoveredTab = null;
+                    child: Builder(
+                      builder: (tabCtx) => MouseRegion(
+                        onEnter: (_) {
+                          if (_hoveredTab != i) setState(() => _hoveredTab = i);
+                        },
+                        onExit: (_) {
+                          if (_hoveredTab == i || _pressedTab == i) {
                             if (_pressedTab == i) {
-                              _pressedTab = null;
-                              _pressOrigin = null;
+                              TactileMotionScope.endFocus(_tabFocusToken);
                             }
-                          });
-                        }
-                      },
-                      child: Listener(
-                        behavior: HitTestBehavior.translucent,
-                        onPointerSignal: _handleDockWheel,
-                        onPointerDown: (ev) {
-                          setState(() {
-                            _pressedTab = i;
-                            _pressOrigin = ev.position;
-                          });
-                        },
-                        onPointerMove: (ev) {
-                          if (_pressedTab == i &&
-                              _pressOrigin != null &&
-                              (ev.position - _pressOrigin!).distance > 14.0) {
                             setState(() {
-                              _pressedTab = null;
-                              _pressOrigin = null;
+                              if (_hoveredTab == i) _hoveredTab = null;
+                              if (_pressedTab == i) {
+                                _pressedTab = null;
+                                _pressOrigin = null;
+                              }
                             });
                           }
                         },
-                        onPointerUp: (_) {
-                          if (_pressedTab == i) {
+                        child: Listener(
+                          behavior: HitTestBehavior.translucent,
+                          onPointerSignal: _handleDockWheel,
+                          onPointerDown: (ev) {
+                            if (TactileMotionScope.isEnabled(tabCtx)) {
+                              TactileMotionScope.beginFocus(
+                                tabCtx,
+                                token: _tabFocusToken,
+                                borderRadius: 24.0,
+                              );
+                            }
                             setState(() {
-                              _pressedTab = null;
-                              _pressOrigin = null;
+                              _pressedTab = i;
+                              _pressOrigin = ev.position;
                             });
-                          }
-                        },
-                        onPointerCancel: (_) {
-                          if (_pressedTab == i) {
-                            setState(() {
-                              _pressedTab = null;
-                              _pressOrigin = null;
-                            });
-                          }
-                        },
-                        child: Semantics(
-                          button: true,
-                          selected: i == _curIndex,
-                          label: widget.lang == LangCode.tr
-                              ? widget.orderedTabs[i].labelTr
-                              : widget.orderedTabs[i].labelEn,
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () => _handleTapTab(i, widget.orderedTabs[i]),
-                            child: const SizedBox.expand(),
+                          },
+                          onPointerMove: (ev) {
+                            if (_pressedTab == i &&
+                                _pressOrigin != null &&
+                                (ev.position - _pressOrigin!).distance > 14.0) {
+                              TactileMotionScope.endFocus(_tabFocusToken);
+                              setState(() {
+                                _pressedTab = null;
+                                _pressOrigin = null;
+                              });
+                            }
+                          },
+                          onPointerUp: (_) {
+                            if (_pressedTab == i) {
+                              TactileMotionScope.endFocus(_tabFocusToken);
+                              setState(() {
+                                _pressedTab = null;
+                                _pressOrigin = null;
+                              });
+                            }
+                          },
+                          onPointerCancel: (_) {
+                            if (_pressedTab == i) {
+                              TactileMotionScope.endFocus(_tabFocusToken);
+                              setState(() {
+                                _pressedTab = null;
+                                _pressOrigin = null;
+                              });
+                            }
+                          },
+                          child: Semantics(
+                            button: true,
+                            selected: i == _curIndex,
+                            label: widget.lang == LangCode.tr
+                                ? widget.orderedTabs[i].labelTr
+                                : widget.orderedTabs[i].labelEn,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () => _handleTapTab(i, widget.orderedTabs[i]),
+                              child: const SizedBox.expand(),
+                            ),
                           ),
                         ),
                       ),
@@ -311,6 +328,7 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
           width: voiceSize,
           height: voiceSize,
           child: TactilePress(
+            focusCircle: true,
             child: Semantics(
               button: true,
               label: widget.lang == LangCode.tr ? 'Sesli Komut Asistanı' : 'Voice Command Assistant',

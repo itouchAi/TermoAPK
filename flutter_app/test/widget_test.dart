@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:termostat_flow/models/thermostat_state.dart';
@@ -15,6 +16,7 @@ import 'package:termostat_flow/services/vault_crypto_service.dart';
 import 'package:termostat_flow/services/voice_gender_classifier.dart';
 import 'package:termostat_flow/services/voice_speech_service.dart';
 import 'package:termostat_flow/widgets/missed_call_alert.dart';
+import 'package:termostat_flow/widgets/rotary_dial.dart';
 import 'package:termostat_flow/widgets/smart_display_overlay.dart';
 import 'package:termostat_flow/widgets/tactile_button.dart';
 import 'package:termostat_flow/widgets/termo_bot.dart';
@@ -1501,5 +1503,125 @@ void main() {
     TactileMotionScope.globalEnabled.value = false;
     await tester.pumpAndSettle();
     expect(currentScale(), 1.0);
+  });
+
+  testWidgets('RotaryDial enforces circular tick-tip touch/wheel boundary, adjusts temp via mouse wheel, and triggers tactile focus blur', (tester) async {
+    TactileMotionScope.globalEnabled.value = true;
+    TactileMotionScope.activeFocus.value = null;
+    addTearDown(() {
+      TactileMotionScope.globalEnabled.value = true;
+      TactileMotionScope.activeFocus.value = null;
+    });
+
+    double targetTemp = 22.5;
+    int outerWheelCount = 0;
+    const dialSize = 220.0;
+    final outerTickRadius = RotaryDial.outerTickRadiusForSize(dialSize);
+    final palette = VisualCustomizationState.defaults().resolvePalette();
+    final boiler = ThermostatMath.computeBoilerTelemetry(21.0, 22.5);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => TactileMotionScope(
+          notifier: TactileMotionScope.globalEnabled,
+          child: TactileFocusBlurHost(
+            child: child ?? const SizedBox.shrink(),
+          ),
+        ),
+        home: Scaffold(
+          body: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerSignal: (event) {
+              if (event is PointerScrollEvent &&
+                  !TactileMotionScope.wasScrollEventConsumed(event)) {
+                outerWheelCount++;
+              }
+            },
+            child: StatefulBuilder(
+              builder: (context, setState) {
+                return Center(
+                  child: RotaryDial(
+                    targetTemp: targetTemp,
+                    onChangeTarget: (next) => setState(() => targetTemp = next),
+                    modeName: 'KONFOR MODU',
+                    accentColor: const Color(0xFFFF7A24),
+                    boiler: boiler,
+                    lang: LangCode.tr,
+                    palette: palette,
+                    sizePx: dialSize,
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final dialBoxRect = tester.getRect(find.byType(RotaryDial));
+    // Center of the SizedBox(dialSize, dialSize) at the top of RotaryDial's Column
+    final dialCenter = Offset(
+      dialBoxRect.center.dx,
+      dialBoxRect.top + dialSize / 2.0,
+    );
+
+    // 1. Touch inside outer tick tips (tick tip radius - 3px) updates targetTemp and activates circular focus blur
+    final insideTickPoint = dialCenter + Offset(outerTickRadius - 3.0, 0.0);
+    final insideTouch = await tester.startGesture(insideTickPoint);
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(targetTemp, isNot(22.5));
+    expect(TactileMotionScope.activeFocus.value, isNotNull);
+    expect(TactileMotionScope.activeFocus.value!.isCircle, isTrue);
+    expect(find.byType(BackdropFilter), findsOneWidget);
+
+    await insideTouch.up();
+    await tester.pumpAndSettle();
+    expect(TactileMotionScope.activeFocus.value, isNull);
+    expect(find.byType(BackdropFilter), findsNothing);
+
+    // Reset temperature to 22.5
+    final prevTemp = targetTemp;
+
+    // 2. Touch inside the square corner OUTSIDE outerTickRadius does NOT hit RotaryDial
+    final cornerOutsideTick = dialCenter + Offset(dialSize * 0.48, -dialSize * 0.48);
+    expect((cornerOutsideTick - dialCenter).distance, greaterThan(outerTickRadius));
+    final outsideTouch = await tester.startGesture(cornerOutsideTick);
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(targetTemp, prevTemp);
+    expect(TactileMotionScope.activeFocus.value, isNull);
+    await outsideTouch.up();
+    await tester.pumpAndSettle();
+
+    // 3. Mouse wheel inside the dial circle raises/lowers temp and suppresses outer page wheel handler
+    final mouse = TestPointer(7, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(mouse.hover(dialCenter));
+    await tester.pump();
+    await tester.sendEventToBinding(mouse.scroll(const Offset(0, -100)));
+    await tester.pump();
+    expect(targetTemp, ThermostatMath.snapTemperature(prevTemp + 0.5));
+    expect(outerWheelCount, 0);
+
+    await tester.sendEventToBinding(mouse.scroll(const Offset(0, 100)));
+    await tester.pump();
+    expect(targetTemp, prevTemp);
+    expect(outerWheelCount, 0);
+
+    // 4. Mouse wheel outside outerTickRadius passes to outer wheel listener without changing temp
+    await tester.sendEventToBinding(mouse.hover(cornerOutsideTick));
+    await tester.pump();
+    await tester.sendEventToBinding(mouse.scroll(const Offset(0, -100)));
+    await tester.pump();
+    expect(targetTemp, prevTemp);
+    expect(outerWheelCount, 1);
+
+    // 5. Tactile disabled -> pressing inside dial keeps focus blur off
+    TactileMotionScope.globalEnabled.value = false;
+    await tester.pumpAndSettle();
+    final offTouch = await tester.startGesture(insideTickPoint);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(TactileMotionScope.activeFocus.value, isNull);
+    expect(find.byType(BackdropFilter), findsNothing);
+    await offTouch.up();
+    await tester.pumpAndSettle();
   });
 }

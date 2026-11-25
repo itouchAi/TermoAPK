@@ -465,7 +465,7 @@ class _ThemeEffectsModalState extends State<_ThemeEffectsModal> {
                                       children: [
                                         Flexible(
                                           child: Text(
-                                            tr ? 'Buton Kabarma & Basma Hissi' : 'Tactile Button Hover & Press',
+                                            tr ? 'Kabarma & Odak Blur Hissi' : 'Tactile Swell & Focus Blur',
                                             style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textMain),
                                             overflow: TextOverflow.ellipsis,
                                           ),
@@ -491,8 +491,8 @@ class _ThemeEffectsModalState extends State<_ThemeEffectsModal> {
                                     const SizedBox(height: 3),
                                     Text(
                                       tr
-                                          ? 'Üzerine gelince hafif kabarma, basınca içeri çöküp yaylanma efekti.'
-                                          : 'Subtle hover swell and mechanical press-in spring across all buttons.',
+                                          ? 'Butonlar ile termostat çemberi/ibrelerinde kabarma ve basınca çevreye hafif blur.'
+                                          : 'Swell & press animation across buttons and thermostat dial/ticks with focus blur.',
                                       style: TextStyle(fontSize: 11, color: textSub),
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,

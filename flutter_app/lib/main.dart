@@ -58,7 +58,9 @@ class TermostatFlowApp extends StatelessWidget {
       ),
       builder: (context, child) => TactileMotionScope(
         notifier: TactileMotionScope.globalEnabled,
-        child: child ?? const SizedBox.shrink(),
+        child: TactileFocusBlurHost(
+          child: child ?? const SizedBox.shrink(),
+        ),
       ),
       home: const TermostatHomeShell(),
     );
@@ -806,6 +808,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
   void _handlePagePointerSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
+    if (TactileMotionScope.wasScrollEventConsumed(event)) return;
     if (_ambientMode || _screensaverPreview || _showBootCeremony || _voiceOpen) return;
     // ReportScreen & ScheduleScreen manage sub-tab wheeling first and invoke boundary callbacks.
     if (_activeTab == TabId.rapor || _activeTab == TabId.prog) return;
