@@ -332,7 +332,6 @@ class TactilePress extends StatefulWidget {
 class _TactilePressState extends State<TactilePress>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
-  final Object _focusToken = Object();
   bool _hovered = false;
   bool _pressed = false;
   Offset? _pointerDownPos;
@@ -351,40 +350,19 @@ class _TactilePressState extends State<TactilePress>
       _pressed = false;
       _pointerDownPos = null;
       _ctrl.value = 1.0;
-      TactileMotionScope.endFocus(_focusToken);
     }
   }
 
   @override
   void dispose() {
-    TactileMotionScope.endFocus(_focusToken);
     _ctrl.dispose();
     super.dispose();
-  }
-
-  void _syncFocusBlur() {
-    if (!mounted || !widget.enabled || !TactileMotionScope.isEnabled(context)) {
-      TactileMotionScope.endFocus(_focusToken);
-      return;
-    }
-    if (!_hovered && !_pressed) {
-      TactileMotionScope.endFocus(_focusToken);
-      return;
-    }
-    TactileMotionScope.beginFocus(
-      context,
-      token: _focusToken,
-      isCircle: widget.focusCircle,
-      isPressed: _pressed,
-      borderRadius: widget.focusBorderRadius,
-    );
   }
 
   void _clearPressed({required bool isRelease}) {
     if (!_pressed) return;
     _pressed = false;
     _pointerDownPos = null;
-    _syncFocusBlur();
     _animateToTarget(isRelease: isRelease);
   }
 
@@ -393,7 +371,6 @@ class _TactilePressState extends State<TactilePress>
     final scopeOn = TactileMotionScope.isEnabled(context);
     if (!scopeOn || !widget.enabled) {
       _ctrl.value = 1.0;
-      TactileMotionScope.endFocus(_focusToken);
       return;
     }
 
@@ -431,7 +408,6 @@ class _TactilePressState extends State<TactilePress>
       }
       _hovered = false;
       _pressed = false;
-      TactileMotionScope.endFocus(_focusToken);
       return widget.child;
     }
 
@@ -439,7 +415,6 @@ class _TactilePressState extends State<TactilePress>
       cursor: widget.cursor ?? SystemMouseCursors.click,
       onEnter: (_) {
         _hovered = true;
-        _syncFocusBlur();
         if (!_pressed) _animateToTarget(isRelease: false);
       },
       onExit: (_) {
@@ -447,7 +422,6 @@ class _TactilePressState extends State<TactilePress>
         _hovered = false;
         _pressed = false;
         _pointerDownPos = null;
-        _syncFocusBlur();
         _animateToTarget(isRelease: wasPressed);
       },
       child: Listener(
@@ -455,7 +429,6 @@ class _TactilePressState extends State<TactilePress>
         onPointerDown: (event) {
           _pointerDownPos = event.position;
           _pressed = true;
-          _syncFocusBlur();
           _animateToTarget(isRelease: false);
         },
         onPointerMove: (event) {

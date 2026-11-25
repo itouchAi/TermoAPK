@@ -491,8 +491,8 @@ class _ThemeEffectsModalState extends State<_ThemeEffectsModal> {
                                     const SizedBox(height: 3),
                                     Text(
                                       tr
-                                          ? 'Butonlar ile termostat çemberi/ibrelerinde kabarma ve basınca çevreye hafif blur.'
-                                          : 'Swell & press animation across buttons and thermostat dial/ticks with focus blur.',
+                                          ? 'Butonlarda kabarma/basma hissi; termostat kadranına gelince veya basınca çevreye hafif blur.'
+                                          : 'Button swell/press feedback plus subtle surrounding blur when hovering or pressing the thermostat dial.',
                                       style: TextStyle(fontSize: 11, color: textSub),
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,

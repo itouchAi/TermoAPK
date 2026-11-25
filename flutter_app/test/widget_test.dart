@@ -1459,17 +1459,21 @@ void main() {
     }
 
     int taps = 0;
+    TactileMotionScope.activeFocus.value = null;
     await tester.pumpWidget(
       MaterialApp(
-        home: TactileMotionScope(
+        builder: (context, child) => TactileMotionScope(
           notifier: TactileMotionScope.globalEnabled,
-          child: Scaffold(
-            body: Center(
-              child: TactilePress(
-                child: ElevatedButton(
-                  onPressed: () => taps++,
-                  child: const Text('Test Butonu'),
-                ),
+          child: TactileFocusBlurHost(
+            child: child ?? const SizedBox.shrink(),
+          ),
+        ),
+        home: Scaffold(
+          body: Center(
+            child: TactilePress(
+              child: ElevatedButton(
+                onPressed: () => taps++,
+                child: const Text('Test Butonu'),
               ),
             ),
           ),
@@ -1479,7 +1483,7 @@ void main() {
 
     expect(currentScale(), 1.0);
 
-    // Hover swell (> 1.0)
+    // Hover swell (> 1.0) without triggering surrounding focus blur
     final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
     await mouse.addPointer(location: Offset.zero);
     addTearDown(mouse.removePointer);
@@ -1487,11 +1491,15 @@ void main() {
     await mouse.moveTo(tester.getCenter(find.text('Test Butonu')));
     await tester.pumpAndSettle();
     expect(currentScale(), greaterThan(1.0));
+    expect(TactileMotionScope.activeFocus.value, isNull);
+    expect(find.byType(BackdropFilter), findsNothing);
 
-    // Press-in (< 1.0)
+    // Press-in (< 1.0) without triggering surrounding focus blur
     final pointer = await tester.startGesture(tester.getCenter(find.text('Test Butonu')));
     await tester.pump(const Duration(milliseconds: 90));
     expect(currentScale(), lessThan(1.0));
+    expect(TactileMotionScope.activeFocus.value, isNull);
+    expect(find.byType(BackdropFilter), findsNothing);
 
     // Release triggers button tap & settles cleanly back to hover scale
     await pointer.up();
