@@ -1519,6 +1519,8 @@ void main() {
     final outerTickRadius = RotaryDial.outerTickRadiusForSize(dialSize);
     final palette = VisualCustomizationState.defaults().resolvePalette();
     final boiler = ThermostatMath.computeBoilerTelemetry(21.0, 22.5);
+    final pageController = PageController();
+    addTearDown(pageController.dispose);
 
     await tester.pumpWidget(
       MaterialApp(
@@ -1529,29 +1531,42 @@ void main() {
           ),
         ),
         home: Scaffold(
-          body: Listener(
-            behavior: HitTestBehavior.translucent,
-            onPointerSignal: (event) {
-              if (event is PointerScrollEvent &&
-                  !TactileMotionScope.wasScrollEventConsumed(event)) {
-                outerWheelCount++;
-              }
-            },
-            child: StatefulBuilder(
-              builder: (context, setState) {
-                return Center(
-                  child: RotaryDial(
-                    targetTemp: targetTemp,
-                    onChangeTarget: (next) => setState(() => targetTemp = next),
-                    modeName: 'KONFOR MODU',
-                    accentColor: const Color(0xFFFF7A24),
-                    boiler: boiler,
-                    lang: LangCode.tr,
-                    palette: palette,
-                    sizePx: dialSize,
-                  ),
-                );
+          body: Padding(
+            padding: const EdgeInsets.only(top: 40),
+            child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerSignal: (event) {
+                if (event is PointerScrollEvent &&
+                    !TactileMotionScope.wasScrollEventConsumed(event)) {
+                  outerWheelCount++;
+                }
               },
+              child: PageView(
+                controller: pageController,
+                children: [
+                  StatefulBuilder(
+                    builder: (context, setState) {
+                      return Center(
+                        child: Transform.translate(
+                          offset: const Offset(12, 24),
+                          child: RotaryDial(
+                            targetTemp: targetTemp,
+                            onChangeTarget: (next) =>
+                                setState(() => targetTemp = next),
+                            modeName: 'KONFOR MODU',
+                            accentColor: const Color(0xFFFF7A24),
+                            boiler: boiler,
+                            lang: LangCode.tr,
+                            palette: palette,
+                            sizePx: dialSize,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  const Center(child: Text('Second Page')),
+                ],
+              ),
             ),
           ),
         ),
@@ -1579,12 +1594,16 @@ void main() {
     expect(TactileMotionScope.activeFocus.value, isNull);
     expect(find.byType(BackdropFilter), findsNothing);
 
-    // Reset temperature to 22.5
+    // Reset temperature baseline
     final prevTemp = targetTemp;
 
     // 2. Touch inside the square corner OUTSIDE outerTickRadius does NOT hit RotaryDial
-    final cornerOutsideTick = dialCenter + Offset(dialSize * 0.48, -dialSize * 0.48);
-    expect((cornerOutsideTick - dialCenter).distance, greaterThan(outerTickRadius));
+    final cornerOutsideTick =
+        dialCenter + Offset(dialSize * 0.48, -dialSize * 0.48);
+    expect(
+      (cornerOutsideTick - dialCenter).distance,
+      greaterThan(outerTickRadius),
+    );
     final outsideTouch = await tester.startGesture(cornerOutsideTick);
     await tester.pump(const Duration(milliseconds: 80));
     expect(targetTemp, prevTemp);
@@ -1592,7 +1611,8 @@ void main() {
     await outsideTouch.up();
     await tester.pumpAndSettle();
 
-    // 3. Mouse wheel inside the dial circle raises/lowers temp and suppresses outer page wheel handler
+    // 3. Mouse wheel (vertical & horizontal) inside the dial circle raises/lowers temp
+    //    and suppresses BOTH outer page wheel listener AND PageView Scrollable.
     final mouse = TestPointer(7, PointerDeviceKind.mouse);
     await tester.sendEventToBinding(mouse.hover(dialCenter));
     await tester.pump();
@@ -1600,18 +1620,27 @@ void main() {
     await tester.pump();
     expect(targetTemp, ThermostatMath.snapTemperature(prevTemp + 0.5));
     expect(outerWheelCount, 0);
+    expect(pageController.page, 0.0);
 
     await tester.sendEventToBinding(mouse.scroll(const Offset(0, 100)));
     await tester.pump();
     expect(targetTemp, prevTemp);
     expect(outerWheelCount, 0);
+    expect(pageController.page, 0.0);
+
+    await tester.sendEventToBinding(mouse.scroll(const Offset(80, 0)));
+    await tester.pumpAndSettle();
+    expect(targetTemp, ThermostatMath.snapTemperature(prevTemp + 0.5));
+    expect(outerWheelCount, 0);
+    expect(pageController.page, 0.0);
 
     // 4. Mouse wheel outside outerTickRadius passes to outer wheel listener without changing temp
+    final afterWheelTemp = targetTemp;
     await tester.sendEventToBinding(mouse.hover(cornerOutsideTick));
     await tester.pump();
     await tester.sendEventToBinding(mouse.scroll(const Offset(0, -100)));
     await tester.pump();
-    expect(targetTemp, prevTemp);
+    expect(targetTemp, afterWheelTemp);
     expect(outerWheelCount, 1);
 
     // 5. Tactile disabled -> pressing inside dial keeps focus blur off

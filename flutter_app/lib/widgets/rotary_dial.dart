@@ -130,8 +130,16 @@ class _RotaryDialState extends State<RotaryDial>
   void _handlePointerSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
     TactileMotionScope.markScrollEventConsumed(event);
-    final dy = event.scrollDelta.dy;
-    final dx = event.scrollDelta.dx;
+    GestureBinding.instance.pointerSignalResolver.register(
+      event,
+      _handleResolvedScrollEvent,
+    );
+  }
+
+  void _handleResolvedScrollEvent(PointerSignalEvent resolved) {
+    if (!mounted || resolved is! PointerScrollEvent) return;
+    final dy = resolved.scrollDelta.dy;
+    final dx = resolved.scrollDelta.dx;
     final raw = dy != 0.0 ? -dy : dx;
     if (raw.abs() < 0.5) return;
 

@@ -33,7 +33,9 @@ class TactileMotionScope extends InheritedNotifier<ValueNotifier<bool>> {
   static final ValueNotifier<TactileFocusTarget?> activeFocus =
       ValueNotifier<TactileFocusTarget?>(null);
 
-  static PointerScrollEvent? _consumedScrollEvent;
+  static PointerEvent? _consumedScrollRoot;
+  static int? _consumedScrollPointer;
+  static Duration? _consumedScrollTimeStamp;
 
   const TactileMotionScope({
     super.key,
@@ -50,12 +52,24 @@ class TactileMotionScope extends InheritedNotifier<ValueNotifier<bool>> {
   /// Marks a [PointerScrollEvent] as handled by an inner tactile widget
   /// (such as [RotaryDial]) so outer page-navigation wheel listeners ignore it.
   static void markScrollEventConsumed(PointerScrollEvent event) {
-    _consumedScrollEvent = event;
+    _consumedScrollRoot = event.original ?? event;
+    _consumedScrollPointer = event.pointer;
+    _consumedScrollTimeStamp = event.timeStamp;
   }
 
-  /// Returns true if [event] was already handled by an inner widget.
+  /// Returns true if [event] (or its pre-transform original) was already
+  /// handled by an inner widget.
   static bool wasScrollEventConsumed(PointerScrollEvent event) {
-    return identical(_consumedScrollEvent, event);
+    final root = event.original ?? event;
+    if (_consumedScrollRoot != null && identical(_consumedScrollRoot, root)) {
+      return true;
+    }
+    if (event.timeStamp != Duration.zero &&
+        _consumedScrollPointer == event.pointer &&
+        _consumedScrollTimeStamp == event.timeStamp) {
+      return true;
+    }
+    return false;
   }
 
   /// Registers a pressed tactile target in global viewport coordinates so
