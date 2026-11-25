@@ -307,7 +307,6 @@ class _BootCeremonyOverlayState extends State<BootCeremonyOverlay> with SingleTi
                             right: 16,
                             bottom: 16,
                             child: TactilePress(
-                              borderRadius: BorderRadius.circular(14),
                               child: GestureDetector(
                                 onTap: _skip,
                                 child: Container(

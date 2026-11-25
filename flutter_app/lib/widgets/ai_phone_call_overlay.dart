@@ -858,7 +858,6 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                             ),
                                           ),
                                           TactilePress(
-                                            borderRadius: BorderRadius.circular(10),
                                             child: GestureDetector(
                                               onTap: () {
                                                 final nextMuted = !_speakerMuted;
@@ -944,7 +943,6 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
 
                                       // Direct Microphone Permission & Voice Command Button
                                       TactilePress.card(
-                                        borderRadius: BorderRadius.circular(12),
                                         child: GestureDetector(
                                           behavior: HitTestBehavior.opaque,
                                           onTap: _toggleCallMic,
@@ -1028,7 +1026,6 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                           ),
                                           const SizedBox(width: 6),
                                           TactilePress(
-                                            borderRadius: BorderRadius.circular(11),
                                             child: FilledButton(
                                               onPressed: () => _executeSpokenOrTypedCommand(_voiceCmdCtrl.text),
                                               style: FilledButton.styleFrom(
@@ -1210,7 +1207,6 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                             : SizedBox(
                                 width: double.infinity,
                                 child: TactilePress.card(
-                                  borderRadius: BorderRadius.circular(24),
                                   child: FilledButton.icon(
                                     onPressed: _declineOrHangup,
                                     style: FilledButton.styleFrom(
@@ -1305,7 +1301,6 @@ class _CircularCallButton extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         TactilePress(
-          borderRadius: BorderRadius.circular(34),
           child: GestureDetector(
             onTap: onTap,
             child: Container(
@@ -1356,7 +1351,6 @@ class _InCallQuickButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return TactilePress(
-      borderRadius: BorderRadius.circular(13),
       child: GestureDetector(
         onTap: onTap,
         child: Container(

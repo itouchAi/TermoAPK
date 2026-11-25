@@ -340,7 +340,6 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                       ),
                     ),
                     TactilePress(
-                      borderRadius: BorderRadius.circular(20),
                       child: IconButton(
                         onPressed: () => Navigator.of(context).pop(),
                         style: IconButton.styleFrom(
@@ -420,7 +419,6 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                                 for (final r in _rooms) ...[
                                   const SizedBox(width: 6),
                                   TactilePress(
-                                    borderRadius: BorderRadius.circular(10),
                                     child: GestureDetector(
                                       onTap: () => _selectRoom(r),
                                       child: Container(
@@ -453,7 +451,6 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                               Expanded(
                                 child: TactilePress.card(
                                   enabled: !_syncing,
-                                  borderRadius: BorderRadius.circular(11),
                                   child: OutlinedButton.icon(
                                     onPressed: _syncing ? null : () => _pushToFirebase(),
                                     icon: Icon(_syncing ? Icons.sync_rounded : Icons.cloud_upload_outlined, size: 15),
@@ -474,7 +471,6 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                               Expanded(
                                 child: TactilePress.card(
                                   enabled: !_syncing,
-                                  borderRadius: BorderRadius.circular(11),
                                   child: OutlinedButton.icon(
                                     onPressed: _syncing ? null : _pullFromFirebase,
                                     icon: const Icon(Icons.cloud_download_outlined, size: 15),
@@ -577,7 +573,6 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                             ),
                             const SizedBox(width: 8),
                             TactilePress(
-                              borderRadius: BorderRadius.circular(10),
                               child: FilledButton(
                                 onPressed: () => _runSimCommand(i),
                                 style: FilledButton.styleFrom(
@@ -663,7 +658,6 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                           style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF7DD3FC)),
                         ),
                         TactilePress(
-                          borderRadius: BorderRadius.circular(14),
                           child: OutlinedButton.icon(
                             onPressed: _copyCode,
                             icon: Icon(_copiedCode ? Icons.check_rounded : Icons.copy_rounded, size: 14),
@@ -710,7 +704,6 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     TactilePress(
-                      borderRadius: BorderRadius.circular(12),
                       child: FilledButton(
                         onPressed: () => Navigator.of(context).pop(),
                         style: FilledButton.styleFrom(

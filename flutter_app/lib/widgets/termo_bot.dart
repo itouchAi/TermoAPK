@@ -1749,7 +1749,6 @@ class _TermoBotOverlayState extends State<TermoBotOverlay> with SingleTickerProv
           left: x,
           bottom: widget.bottomOffset,
           child: TactilePress.card(
-            borderRadius: BorderRadius.circular(24),
             child: GestureDetector(
               onTap: _handleTap,
               onLongPress: widget.onOpenScreensaver,
@@ -2078,7 +2077,6 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
                           Transform.translate(
                             offset: Offset(_patrolDx, 0.0),
                             child: TactilePress.card(
-                              borderRadius: BorderRadius.circular(36),
                               child: GestureDetector(
                                 onTap: _petMascot,
                                 child: Column(

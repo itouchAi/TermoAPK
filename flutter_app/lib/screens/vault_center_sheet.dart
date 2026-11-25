@@ -217,14 +217,12 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
         ),
         actions: [
           TactilePress(
-            borderRadius: BorderRadius.circular(10),
             child: TextButton(
               onPressed: () => Navigator.of(dCtx).pop(),
               child: Text(tr ? 'Vazgeç' : 'Cancel'),
             ),
           ),
           TactilePress(
-            borderRadius: BorderRadius.circular(12),
             child: FilledButton(
               style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
               onPressed: () {
@@ -381,7 +379,6 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
                       ),
                     ),
                     TactilePress(
-                      borderRadius: BorderRadius.circular(20),
                       child: IconButton(
                         onPressed: () => Navigator.of(context).pop(),
                         style: IconButton.styleFrom(
@@ -499,7 +496,6 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
                     ),
                     const SizedBox(width: 10),
                     TactilePress(
-                      borderRadius: BorderRadius.circular(12),
                       child: FilledButton(
                         onPressed: () => Navigator.of(context).pop(),
                         style: FilledButton.styleFrom(
@@ -636,7 +632,6 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
                     ),
                     const SizedBox(width: 8),
                     TactilePress(
-                      borderRadius: BorderRadius.circular(20),
                       child: FilledButton.icon(
                         onPressed: _unlockVault,
                         style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B)),
@@ -664,7 +659,6 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
                     ),
                     const SizedBox(width: 8),
                     TactilePress(
-                      borderRadius: BorderRadius.circular(20),
                       child: FilledButton.icon(
                         onPressed: _createPinAndLock,
                         style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B)),
@@ -685,7 +679,6 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
           children: [
             Expanded(
               child: TactilePress.card(
-                borderRadius: BorderRadius.circular(14),
                 child: FilledButton.tonalIcon(
                   onPressed: _exportBackup,
                   style: FilledButton.styleFrom(
@@ -705,7 +698,6 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
             const SizedBox(width: 8),
             Expanded(
               child: TactilePress.card(
-                borderRadius: BorderRadius.circular(14),
                 child: FilledButton.tonalIcon(
                   onPressed: _importBackup,
                   style: FilledButton.styleFrom(
@@ -726,7 +718,6 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
         ),
         const SizedBox(height: 8),
         TactilePress.card(
-          borderRadius: BorderRadius.circular(14),
           child: OutlinedButton.icon(
             onPressed: _confirmResetVault,
             style: OutlinedButton.styleFrom(
@@ -821,7 +812,6 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
           hint: '1234567890:ABCdefGhIJKlmNoPQRstuVWxYZ...',
           obscure: _obscureToken,
           suffix: TactilePress(
-            borderRadius: BorderRadius.circular(16),
             child: IconButton(
               onPressed: () => setState(() => _obscureToken = !_obscureToken),
               icon: Icon(_obscureToken ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 18, color: Colors.white54),
@@ -846,7 +836,6 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
           children: [
             Expanded(
               child: TactilePress.card(
-                borderRadius: BorderRadius.circular(14),
                 child: FilledButton.icon(
                   onPressed: _saveTelegramEncrypted,
                   style: FilledButton.styleFrom(
@@ -867,7 +856,6 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
             Expanded(
               child: TactilePress.card(
                 enabled: !_sendingTelegram,
-                borderRadius: BorderRadius.circular(14),
                 child: OutlinedButton.icon(
                   onPressed: _sendingTelegram ? null : _sendTelegramTest,
                   style: OutlinedButton.styleFrom(
@@ -911,7 +899,6 @@ class _SegmentTabButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return TactilePress(
-      borderRadius: BorderRadius.circular(11),
       child: GestureDetector(
         onTap: onTap,
         child: AnimatedContainer(

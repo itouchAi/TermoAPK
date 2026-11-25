@@ -935,7 +935,6 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
                                                     ),
                                                     const SizedBox(width: 8),
                                                     TactilePress(
-                                                      borderRadius: BorderRadius.circular(8),
                                                       child: GestureDetector(
                                                         onTap: _openThermostatModal,
                                                         child: Padding(
@@ -1117,7 +1116,6 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
                                             ),
                                             const SizedBox(width: 8),
                                             TactilePress(
-                                              borderRadius: BorderRadius.circular(22),
                                               child: GestureDetector(
                                                 onTap: _toggleHudHidden,
                                                 child: AnimatedContainer(
@@ -1412,7 +1410,6 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
         : (tr ? '❄️ Bekleme' : '❄️ Standby');
 
     final thermoBadge = TactilePress(
-      borderRadius: BorderRadius.circular(999),
       child: GestureDetector(
         onTap: _openThermostatModal,
         child: Container(
@@ -1580,7 +1577,6 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
       List<BoxShadow>? shadows,
     }) {
       return TactilePress(
-        borderRadius: BorderRadius.circular(size / 2),
         child: GestureDetector(
           onTap: onTap,
           child: Container(
@@ -1796,7 +1792,6 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
                               ),
                               const SizedBox(width: 5),
                               TactilePress(
-                                borderRadius: BorderRadius.circular(12),
                                 child: GestureDetector(
                                   onTap: () {
                                     _wakeBottomControls();
@@ -1834,7 +1829,6 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
           const SizedBox(width: 4),
           // Rotating '>' / '<' toggle arrow
           TactilePress(
-            borderRadius: BorderRadius.circular(14),
             child: GestureDetector(
               onTap: () {
                 _haptic();
@@ -1874,7 +1868,6 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
         children: [
           // Rotating '<' (open left) / '>' (collapse right) toggle arrow
           TactilePress(
-            borderRadius: BorderRadius.circular(14),
             child: GestureDetector(
               onTap: () {
                 _haptic();
@@ -1895,7 +1888,6 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
 
           // Identical 34x34 circular Amber Brightness Button (kept constant in both collapsed & expanded states)
           TactilePress(
-            borderRadius: BorderRadius.circular(17),
             child: GestureDetector(
               onTap: () {
                 _haptic();
@@ -1991,7 +1983,6 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
           const SizedBox(width: 6),
           // Red X Button (Completely exits Smart Display)
           TactilePress(
-            borderRadius: BorderRadius.circular(17),
             child: GestureDetector(
               onTap: () {
                 _haptic();
@@ -2051,7 +2042,6 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
                   style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
                 ),
                 TactilePress(
-                  borderRadius: BorderRadius.circular(10),
                   child: GestureDetector(
                     onTap: () => setState(() => _leftDrawerOpen = false),
                     child: const Padding(
@@ -2132,7 +2122,6 @@ class _CircleMiniBtn extends StatelessWidget {
   Widget build(BuildContext context) {
     return TactilePress(
       enabled: enabled,
-      borderRadius: BorderRadius.circular(12),
       child: GestureDetector(
         onTap: enabled ? onTap : null,
         child: Opacity(
@@ -2169,7 +2158,6 @@ class _QuickPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return TactilePress(
-      borderRadius: BorderRadius.circular(10),
       child: GestureDetector(
         onTap: onTap,
         child: Container(
@@ -2428,7 +2416,6 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                         ),
                       ),
                       TactilePress(
-                        borderRadius: BorderRadius.circular(11),
                         child: GestureDetector(
                           onTap: onClose,
                           child: Container(
@@ -2546,7 +2533,6 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                           child: Padding(
                             padding: EdgeInsets.only(right: p.id == PresetId.boost ? 0 : 7),
                             child: TactilePress.card(
-                              borderRadius: BorderRadius.circular(14),
                               child: GestureDetector(
                                 onTap: () => onSelectPreset(p),
                                 child: Container(
@@ -2603,7 +2589,6 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                   SizedBox(
                     width: double.infinity,
                     child: TactilePress.card(
-                      borderRadius: BorderRadius.circular(14),
                       child: OutlinedButton.icon(
                         onPressed: onClose,
                         style: OutlinedButton.styleFrom(
