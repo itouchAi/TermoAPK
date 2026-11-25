@@ -16,6 +16,7 @@ import 'package:termostat_flow/services/voice_gender_classifier.dart';
 import 'package:termostat_flow/services/voice_speech_service.dart';
 import 'package:termostat_flow/widgets/missed_call_alert.dart';
 import 'package:termostat_flow/widgets/smart_display_overlay.dart';
+import 'package:termostat_flow/widgets/tactile_button.dart';
 import 'package:termostat_flow/widgets/termo_bot.dart';
 
 void main() {
@@ -1423,5 +1424,82 @@ void main() {
     await tester.tap(find.text('Takvim · Isıtma Aktif'));
     await tester.pump();
     expect(opened?.id, 'a2');
+  });
+
+  test('VisualCustomizationState.buttonTactileFeedback defaults true and round-trips false', () {
+    final defaults = VisualCustomizationState.defaults();
+    expect(defaults.buttonTactileFeedback, isTrue);
+
+    final disabled = defaults.copyWith(buttonTactileFeedback: false);
+    final restored = VisualCustomizationState.fromJson(disabled.toJson());
+    expect(restored.buttonTactileFeedback, isFalse);
+
+    final reenabled = restored.copyWith(buttonTactileFeedback: true);
+    expect(VisualCustomizationState.fromJson(reenabled.toJson()).buttonTactileFeedback, isTrue);
+  });
+
+  testWidgets('TactilePress swells on hover, depresses on press, springs back, and respects TactileMotionScope toggle', (tester) async {
+    TactileMotionScope.globalEnabled.value = true;
+    addTearDown(() => TactileMotionScope.globalEnabled.value = true);
+
+    double currentScale() {
+      final transforms = tester.widgetList<Transform>(
+        find.descendant(
+          of: find.byType(TactilePress),
+          matching: find.byType(Transform),
+        ),
+      );
+      for (final t in transforms) {
+        final sx = t.transform.getMaxScaleOnAxis();
+        if ((sx - 1.0).abs() > 0.0001) return sx;
+      }
+      return 1.0;
+    }
+
+    int taps = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TactileMotionScope(
+          notifier: TactileMotionScope.globalEnabled,
+          child: Scaffold(
+            body: Center(
+              child: TactilePress(
+                child: ElevatedButton(
+                  onPressed: () => taps++,
+                  child: const Text('Test Butonu'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(currentScale(), 1.0);
+
+    // Hover swell (> 1.0)
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await tester.pump();
+    await mouse.moveTo(tester.getCenter(find.text('Test Butonu')));
+    await tester.pumpAndSettle();
+    expect(currentScale(), greaterThan(1.0));
+
+    // Press-in (< 1.0)
+    final pointer = await tester.startGesture(tester.getCenter(find.text('Test Butonu')));
+    await tester.pump(const Duration(milliseconds: 90));
+    expect(currentScale(), lessThan(1.0));
+
+    // Release triggers button tap & settles cleanly back to hover scale
+    await pointer.up();
+    await tester.pumpAndSettle();
+    expect(taps, 1);
+    expect(currentScale(), greaterThan(1.0));
+
+    // Disabling TactileMotionScope stops transform scaling immediately
+    TactileMotionScope.globalEnabled.value = false;
+    await tester.pumpAndSettle();
+    expect(currentScale(), 1.0);
   });
 }

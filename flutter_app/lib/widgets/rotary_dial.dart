@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../models/thermostat_state.dart';
+import 'tactile_button.dart';
 
 class RotaryDial extends StatefulWidget {
   final double targetTemp;
@@ -305,8 +306,10 @@ class _StepperButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isLight = palette.isLight;
-    return Opacity(
-      opacity: enabled ? 1.0 : 0.35,
+    return TactilePress(
+      enabled: enabled,
+      child: Opacity(
+        opacity: enabled ? 1.0 : 0.35,
       child: Container(
         width: size,
         height: size,
@@ -339,6 +342,7 @@ class _StepperButton extends StatelessWidget {
             ),
           ),
         ),
+      ),
       ),
     );
   }

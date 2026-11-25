@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import '../models/thermostat_state.dart';
+import 'tactile_button.dart';
 
 class FlowTabBarShell extends StatefulWidget {
   final TabId activeTab;
@@ -48,8 +49,17 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
   FlowMove? _activeMove;
   RgbAccent _smoothAccent = const RgbAccent(1.0, 0.48, 0.14);
   DateTime? _lastDockWheelAt;
+  int? _hoveredTab;
+  int? _pressedTab;
+  Offset? _pressOrigin;
 
   void _handleDockWheel(PointerSignalEvent event) {
+    if (_pressedTab != null) {
+      setState(() {
+        _pressedTab = null;
+        _pressOrigin = null;
+      });
+    }
     if (event is! PointerScrollEvent || widget.orderedTabs.isEmpty) return;
     final now = DateTime.now();
     if (_lastDockWheelAt != null && now.difference(_lastDockWheelAt!).inMilliseconds < 170) {
@@ -224,19 +234,67 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
                     top: 538.0,
                     width: 180.0,
                     height: 124.0,
-                    child: Listener(
-                      behavior: HitTestBehavior.translucent,
-                      onPointerSignal: _handleDockWheel,
-                      child: Semantics(
-                        button: true,
-                        selected: i == _curIndex,
-                        label: widget.lang == LangCode.tr
-                            ? widget.orderedTabs[i].labelTr
-                            : widget.orderedTabs[i].labelEn,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => _handleTapTab(i, widget.orderedTabs[i]),
-                          child: const SizedBox.expand(),
+                    child: MouseRegion(
+                      onEnter: (_) {
+                        if (_hoveredTab != i) setState(() => _hoveredTab = i);
+                      },
+                      onExit: (_) {
+                        if (_hoveredTab == i || _pressedTab == i) {
+                          setState(() {
+                            if (_hoveredTab == i) _hoveredTab = null;
+                            if (_pressedTab == i) {
+                              _pressedTab = null;
+                              _pressOrigin = null;
+                            }
+                          });
+                        }
+                      },
+                      child: Listener(
+                        behavior: HitTestBehavior.translucent,
+                        onPointerSignal: _handleDockWheel,
+                        onPointerDown: (ev) {
+                          setState(() {
+                            _pressedTab = i;
+                            _pressOrigin = ev.position;
+                          });
+                        },
+                        onPointerMove: (ev) {
+                          if (_pressedTab == i &&
+                              _pressOrigin != null &&
+                              (ev.position - _pressOrigin!).distance > 14.0) {
+                            setState(() {
+                              _pressedTab = null;
+                              _pressOrigin = null;
+                            });
+                          }
+                        },
+                        onPointerUp: (_) {
+                          if (_pressedTab == i) {
+                            setState(() {
+                              _pressedTab = null;
+                              _pressOrigin = null;
+                            });
+                          }
+                        },
+                        onPointerCancel: (_) {
+                          if (_pressedTab == i) {
+                            setState(() {
+                              _pressedTab = null;
+                              _pressOrigin = null;
+                            });
+                          }
+                        },
+                        child: Semantics(
+                          button: true,
+                          selected: i == _curIndex,
+                          label: widget.lang == LangCode.tr
+                              ? widget.orderedTabs[i].labelTr
+                              : widget.orderedTabs[i].labelEn,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _handleTapTab(i, widget.orderedTabs[i]),
+                            child: const SizedBox.expand(),
+                          ),
                         ),
                       ),
                     ),
@@ -252,34 +310,36 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
           top: barCenterY - voiceSize / 2.0,
           width: voiceSize,
           height: voiceSize,
-          child: Semantics(
-            button: true,
-            label: widget.lang == LangCode.tr ? 'Sesli Komut Asistanı' : 'Voice Command Assistant',
-            child: GestureDetector(
-              onTap: widget.onOpenVoice,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: widget.palette.isLight
-                      ? Colors.white.withValues(alpha: widget.voiceOpen ? 0.85 : 0.65)
-                      : Colors.white.withValues(alpha: widget.voiceOpen ? 0.14 : 0.07),
-                  border: Border.all(
+          child: TactilePress(
+            child: Semantics(
+              button: true,
+              label: widget.lang == LangCode.tr ? 'Sesli Komut Asistanı' : 'Voice Command Assistant',
+              child: GestureDetector(
+                onTap: widget.onOpenVoice,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
                     color: widget.palette.isLight
-                        ? const Color(0xFF0F172A).withValues(alpha: 0.14)
-                        : Colors.white.withValues(alpha: 0.16),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: widget.voiceOpen
-                          ? widget.activeAccent.toColor(0.45)
-                          : Colors.black.withValues(alpha: widget.palette.isLight ? 0.16 : 0.45),
-                      blurRadius: widget.voiceOpen ? 20 : 18,
-                      offset: const Offset(0, 6),
+                        ? Colors.white.withValues(alpha: widget.voiceOpen ? 0.85 : 0.65)
+                        : Colors.white.withValues(alpha: widget.voiceOpen ? 0.14 : 0.07),
+                    border: Border.all(
+                      color: widget.palette.isLight
+                          ? const Color(0xFF0F172A).withValues(alpha: 0.14)
+                          : Colors.white.withValues(alpha: 0.16),
                     ),
-                  ],
+                    boxShadow: [
+                      BoxShadow(
+                        color: widget.voiceOpen
+                            ? widget.activeAccent.toColor(0.45)
+                            : Colors.black.withValues(alpha: widget.palette.isLight ? 0.16 : 0.45),
+                        blurRadius: widget.voiceOpen ? 20 : 18,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Icon(Icons.mic_none_rounded, color: fgColor, size: 21),
                 ),
-                child: Icon(Icons.mic_none_rounded, color: fgColor, size: 21),
               ),
             ),
           ),
@@ -302,6 +362,11 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
     final labelOpacity = ThermostatMath.lerp(0.62, 1.0, la);
     final labelY = by + 14.0 - 16.0 * la;
 
+    final tactileActive = TactileMotionScope.isEnabled(context);
+    final isHovered = tactileActive && _hoveredTab == i;
+    final isPressed = tactileActive && _pressedTab == i;
+    final tactileScale = isPressed ? 0.90 : (isHovered ? 1.055 : 1.0);
+
     return IgnorePointer(
       child: Stack(
         children: [
@@ -310,15 +375,20 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
             top: by - 42.0 - 54.0 * a,
             width: 56.0,
             height: 56.0,
-            child: Transform.scale(
-              scale: 1.0 + 0.12 * a,
-              child: Opacity(
-                opacity: iconOpacity,
-                child: CustomPaint(
-                  painter: _FlowTabIconPainter(
-                    tabId: tab.id,
-                    drawProgress: drawProgress,
-                    color: fgColor,
+            child: AnimatedScale(
+              scale: tactileScale,
+              duration: Duration(milliseconds: isPressed ? 75 : 170),
+              curve: isPressed ? Curves.easeOutQuad : Curves.easeOutBack,
+              child: Transform.scale(
+                scale: 1.0 + 0.12 * a,
+                child: Opacity(
+                  opacity: iconOpacity,
+                  child: CustomPaint(
+                    painter: _FlowTabIconPainter(
+                      tabId: tab.id,
+                      drawProgress: drawProgress,
+                      color: fgColor,
+                    ),
                   ),
                 ),
               ),
@@ -328,19 +398,24 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
             left: ThermostatMath.tabXs[i] - 85.0,
             top: labelY,
             width: 170.0,
-            child: Opacity(
-              opacity: labelOpacity,
-              child: Text(
-                widget.lang == LangCode.tr ? tab.labelTr : tab.labelEn,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: fgColor,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.3,
-                  decoration: TextDecoration.none,
+            child: AnimatedScale(
+              scale: tactileScale,
+              duration: Duration(milliseconds: isPressed ? 75 : 170),
+              curve: isPressed ? Curves.easeOutQuad : Curves.easeOutBack,
+              child: Opacity(
+                opacity: labelOpacity,
+                child: Text(
+                  widget.lang == LangCode.tr ? tab.labelTr : tab.labelEn,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: fgColor,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.3,
+                    decoration: TextDecoration.none,
+                  ),
                 ),
               ),
             ),

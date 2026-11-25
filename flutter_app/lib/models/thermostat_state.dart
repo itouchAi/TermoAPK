@@ -2151,6 +2151,7 @@ class VisualCustomizationState {
   final List<TabId> tabOrder;
   final List<ReportSubTab> reportSubTabOrder;
   final List<ScheduleSubTab> scheduleSubTabOrder;
+  final bool buttonTactileFeedback;
 
   const VisualCustomizationState({
     required this.theme,
@@ -2160,6 +2161,7 @@ class VisualCustomizationState {
     required this.tabOrder,
     required this.reportSubTabOrder,
     required this.scheduleSubTabOrder,
+    this.buttonTactileFeedback = true,
   });
 
   static const List<TabId> defaultTabOrder = [
@@ -2188,6 +2190,7 @@ class VisualCustomizationState {
         tabOrder: defaultTabOrder,
         reportSubTabOrder: defaultReportSubOrder,
         scheduleSubTabOrder: defaultScheduleSubOrder,
+        buttonTactileFeedback: true,
       );
 
   List<TabMeta> get orderedTabs {
@@ -2340,6 +2343,7 @@ class VisualCustomizationState {
     List<TabId>? tabOrder,
     List<ReportSubTab>? reportSubTabOrder,
     List<ScheduleSubTab>? scheduleSubTabOrder,
+    bool? buttonTactileFeedback,
   }) {
     return VisualCustomizationState(
       theme: theme ?? this.theme,
@@ -2349,6 +2353,8 @@ class VisualCustomizationState {
       tabOrder: tabOrder ?? this.tabOrder,
       reportSubTabOrder: reportSubTabOrder ?? this.reportSubTabOrder,
       scheduleSubTabOrder: scheduleSubTabOrder ?? this.scheduleSubTabOrder,
+      buttonTactileFeedback:
+          buttonTactileFeedback ?? this.buttonTactileFeedback,
     );
   }
 
@@ -2360,6 +2366,7 @@ class VisualCustomizationState {
         'tabOrder': tabOrder.map((e) => e.name).toList(),
         'reportSubTabOrder': reportSubTabOrder.map((e) => e.name).toList(),
         'scheduleSubTabOrder': scheduleSubTabOrder.map((e) => e.name).toList(),
+        'buttonTactileFeedback': buttonTactileFeedback,
       };
 
   static List<T> _parseEnumOrder<T extends Enum>(
@@ -2427,6 +2434,8 @@ class VisualCustomizationState {
         ScheduleSubTab.values,
         defaultScheduleSubOrder,
       ),
+      buttonTactileFeedback:
+          (map['buttonTactileFeedback'] as bool?) ?? d.buttonTactileFeedback,
     );
   }
 }

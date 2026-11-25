@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/thermostat_state.dart';
 import '../services/ai_call_service.dart';
+import 'tactile_button.dart';
 import 'termo_bot.dart';
 
 class _AlertVisualSpec {
@@ -112,11 +113,12 @@ class TopCallNotificationBanner extends StatelessWidget {
     final summary = tr ? entry.summaryTr : entry.summaryEn;
     final totalCount = stackExtraCount + 1;
 
-    final card = Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTapBanner,
-        borderRadius: BorderRadius.circular(18),
+    final card = TactilePress.card(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTapBanner,
+          borderRadius: BorderRadius.circular(18),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
@@ -262,6 +264,7 @@ class TopCallNotificationBanner extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
 
@@ -455,59 +458,63 @@ class TopAlertStack extends StatelessWidget {
                               ),
                             ),
                           ),
-                          TextButton(
-                            onPressed: onDismissAll,
-                            style: TextButton.styleFrom(
-                              foregroundColor: const Color(0xFFFCA5A5),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
+                          TactilePress(
+                            child: TextButton(
+                              onPressed: onDismissAll,
+                              style: TextButton.styleFrom(
+                                foregroundColor: const Color(0xFFFCA5A5),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: Text(
-                              tr ? 'Tümünü Kapat' : 'Clear All',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
+                              child: Text(
+                                tr ? 'Tümünü Kapat' : 'Clear All',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
                           ),
                           const SizedBox(width: 6),
-                          InkWell(
-                            onTap: onToggleExpand,
-                            borderRadius: BorderRadius.circular(9),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 9,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(9),
-                                border: Border.all(
-                                  color: Colors.white.withValues(alpha: 0.16),
+                          TactilePress(
+                            child: InkWell(
+                              onTap: onToggleExpand,
+                              borderRadius: BorderRadius.circular(9),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 9,
+                                  vertical: 4,
                                 ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    tr ? 'Daralt' : 'Collapse',
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.white,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(9),
+                                  border: Border.all(
+                                    color: Colors.white.withValues(alpha: 0.16),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      tr ? 'Daralt' : 'Collapse',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white,
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 3),
-                                  const Icon(
-                                    Icons.keyboard_arrow_up_rounded,
-                                    size: 16,
-                                    color: Colors.white70,
-                                  ),
-                                ],
+                                    const SizedBox(width: 3),
+                                    const Icon(
+                                      Icons.keyboard_arrow_up_rounded,
+                                      size: 16,
+                                      color: Colors.white70,
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
@@ -776,66 +783,70 @@ Future<void> showMissedCallActionDialog({
                   for (final act in actions) ...[
                     Padding(
                       padding: const EdgeInsets.only(bottom: 7),
-                      child: FilledButton.icon(
-                        onPressed: () {
-                          Navigator.of(ctx).pop();
-                          onApplyAction(act);
-                        },
-                        style: FilledButton.styleFrom(
-                          backgroundColor: act.isDanger
-                              ? const Color(0xFFEF4444).withValues(alpha: 0.22)
-                              : const Color(0xFF10B981).withValues(alpha: 0.20),
-                          foregroundColor: act.isDanger
-                              ? const Color(0xFFFCA5A5)
-                              : const Color(0xFF6EE7B7),
-                          side: BorderSide(
-                            color: act.isDanger
-                                ? const Color(0xFFEF4444).withValues(alpha: 0.55)
-                                : const Color(0xFF10B981).withValues(alpha: 0.55),
+                      child: TactilePress.card(
+                        child: FilledButton.icon(
+                          onPressed: () {
+                            Navigator.of(ctx).pop();
+                            onApplyAction(act);
+                          },
+                          style: FilledButton.styleFrom(
+                            backgroundColor: act.isDanger
+                                ? const Color(0xFFEF4444).withValues(alpha: 0.22)
+                                : const Color(0xFF10B981).withValues(alpha: 0.20),
+                            foregroundColor: act.isDanger
+                                ? const Color(0xFFFCA5A5)
+                                : const Color(0xFF6EE7B7),
+                            side: BorderSide(
+                              color: act.isDanger
+                                  ? const Color(0xFFEF4444).withValues(alpha: 0.55)
+                                  : const Color(0xFF10B981).withValues(alpha: 0.55),
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
                           ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
+                          icon: Icon(
+                            act.isDanger
+                                ? Icons.power_settings_new_rounded
+                                : Icons.bolt_rounded,
+                            size: 18,
                           ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        icon: Icon(
-                          act.isDanger
-                              ? Icons.power_settings_new_rounded
-                              : Icons.bolt_rounded,
-                          size: 18,
-                        ),
-                        label: Text(
-                          tr ? act.labelTr : act.labelEn,
-                          style: const TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
+                          label: Text(
+                            tr ? act.labelTr : act.labelEn,
+                            style: const TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ],
                   const SizedBox(height: 4),
-                  OutlinedButton(
-                    onPressed: () {
-                      Navigator.of(ctx).pop();
-                      onDismissWithoutAction?.call();
-                    },
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white70,
-                      side: BorderSide(color: Colors.white.withValues(alpha: 0.20)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                  TactilePress.card(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        onDismissWithoutAction?.call();
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white70,
+                        side: BorderSide(color: Colors.white.withValues(alpha: 0.20)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
-                    ),
-                    child: Text(
-                      tr ? 'Hiçbir Şey Yapmadan Kapat' : 'Close Without Action',
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
+                      child: Text(
+                        tr ? 'Hiçbir Şey Yapmadan Kapat' : 'Close Without Action',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ),

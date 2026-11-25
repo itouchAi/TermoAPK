@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/thermostat_state.dart';
+import '../widgets/tactile_button.dart';
 
 Future<void> showThemeEffectsSheet({
   required BuildContext context,
@@ -54,6 +55,7 @@ class _ThemeEffectsModalState extends State<_ThemeEffectsModal> {
 
   void _apply(VisualCustomizationState next) {
     if (widget.hapticEnabled) HapticFeedback.selectionClick();
+    TactileMotionScope.globalEnabled.value = next.buttonTactileFeedback;
     setState(() => _visual = next);
     widget.onUpdateVisual(next);
   }
@@ -219,13 +221,15 @@ class _ThemeEffectsModalState extends State<_ThemeEffectsModal> {
                         ],
                       ),
                     ),
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: IconButton.styleFrom(
-                        backgroundColor: palette.cardBg,
-                        side: BorderSide(color: palette.cardBorder),
+                    TactilePress(
+                      child: IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: IconButton.styleFrom(
+                          backgroundColor: palette.cardBg,
+                          side: BorderSide(color: palette.cardBorder),
+                        ),
+                        icon: Icon(Icons.close_rounded, color: textMain, size: 19),
                       ),
-                      icon: Icon(Icons.close_rounded, color: textMain, size: 19),
                     ),
                   ],
                 ),
@@ -281,35 +285,37 @@ class _ThemeEffectsModalState extends State<_ThemeEffectsModal> {
                                 childAspectRatio: 3.3,
                                 children: [
                                   for (final sw in obsidianSwatches)
-                                    GestureDetector(
-                                      onTap: () => _apply(_visual.copyWith(obsidianPalette: sw.$1)),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                                        decoration: BoxDecoration(
-                                          color: _visual.obsidianPalette == sw.$1
-                                              ? sw.$3.withValues(alpha: 0.22)
-                                              : palette.cardBg,
-                                          borderRadius: BorderRadius.circular(12),
-                                          border: Border.all(
-                                            color: _visual.obsidianPalette == sw.$1 ? sw.$3 : palette.cardBorder,
+                                    TactilePress(
+                                      child: GestureDetector(
+                                        onTap: () => _apply(_visual.copyWith(obsidianPalette: sw.$1)),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                                          decoration: BoxDecoration(
+                                            color: _visual.obsidianPalette == sw.$1
+                                                ? sw.$3.withValues(alpha: 0.22)
+                                                : palette.cardBg,
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(
+                                              color: _visual.obsidianPalette == sw.$1 ? sw.$3 : palette.cardBorder,
+                                            ),
                                           ),
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            Container(
-                                              width: 14,
-                                              height: 14,
-                                              decoration: BoxDecoration(shape: BoxShape.circle, color: sw.$3),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Text(
-                                                sw.$2,
-                                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: textMain),
-                                                overflow: TextOverflow.ellipsis,
+                                          child: Row(
+                                            children: [
+                                              Container(
+                                                width: 14,
+                                                height: 14,
+                                                decoration: BoxDecoration(shape: BoxShape.circle, color: sw.$3),
                                               ),
-                                            ),
-                                          ],
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  sw.$2,
+                                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: textMain),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -369,43 +375,141 @@ class _ThemeEffectsModalState extends State<_ThemeEffectsModal> {
                       childAspectRatio: 3.1,
                       children: [
                         for (final w in weatherChips)
-                          GestureDetector(
-                            onTap: () => _apply(_visual.copyWith(weatherPreview: w.$1)),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10),
-                              decoration: BoxDecoration(
-                                color: _visual.weatherPreview == w.$1
-                                    ? widget.accentColor.withValues(alpha: 0.20)
-                                    : palette.cardBg,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: _visual.weatherPreview == w.$1 ? widget.accentColor : palette.cardBorder,
+                          TactilePress(
+                            child: GestureDetector(
+                              onTap: () => _apply(_visual.copyWith(weatherPreview: w.$1)),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10),
+                                decoration: BoxDecoration(
+                                  color: _visual.weatherPreview == w.$1
+                                      ? widget.accentColor.withValues(alpha: 0.20)
+                                      : palette.cardBg,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(
+                                    color: _visual.weatherPreview == w.$1 ? widget.accentColor : palette.cardBorder,
+                                  ),
                                 ),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    w.$3,
-                                    size: 16,
-                                    color: _visual.weatherPreview == w.$1 ? widget.accentColor : textSub,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      w.$2,
-                                      style: TextStyle(
-                                        fontSize: 11.5,
-                                        fontWeight: FontWeight.w600,
-                                        color: textMain,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      w.$3,
+                                      size: 16,
+                                      color: _visual.weatherPreview == w.$1 ? widget.accentColor : textSub,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        w.$2,
+                                        style: TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: textMain,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
                       ],
+                    ),
+
+                    const SizedBox(height: 16),
+                    Text(
+                      tr ? 'ETKİLEŞİM & HOVER ANİMASYONU (DENEYSEL)' : 'TACTILE HOVER & PRESS (EXPERIMENTAL)',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.0, color: textSub),
+                    ),
+                    const SizedBox(height: 8),
+                    TactilePress.card(
+                      child: GestureDetector(
+                        onTap: () => _apply(
+                          _visual.copyWith(buttonTactileFeedback: !_visual.buttonTactileFeedback),
+                        ),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+                          decoration: BoxDecoration(
+                            color: _visual.buttonTactileFeedback
+                                ? widget.accentColor.withValues(alpha: 0.14)
+                                : palette.cardBg,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(
+                              color: _visual.buttonTactileFeedback ? widget.accentColor : palette.cardBorder,
+                              width: _visual.buttonTactileFeedback ? 1.4 : 1.0,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 38,
+                                height: 38,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  color: widget.accentColor.withValues(alpha: 0.18),
+                                  border: Border.all(color: widget.accentColor.withValues(alpha: 0.38)),
+                                ),
+                                child: Icon(
+                                  Icons.touch_app_rounded,
+                                  color: widget.accentColor,
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            tr ? 'Buton Kabarma & Basma Hissi' : 'Tactile Button Hover & Press',
+                                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: textMain),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFF59E0B).withValues(alpha: 0.16),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: Text(
+                                            tr ? 'Deneysel' : 'Test',
+                                            style: const TextStyle(
+                                              fontSize: 9.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: Color(0xFFFBBF24),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 3),
+                                    Text(
+                                      tr
+                                          ? 'Üzerine gelince hafif kabarma, basınca içeri çöküp yaylanma efekti.'
+                                          : 'Subtle hover swell and mechanical press-in spring across all buttons.',
+                                      style: TextStyle(fontSize: 11, color: textSub),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Switch(
+                                value: _visual.buttonTactileFeedback,
+                                activeColor: widget.accentColor,
+                                onChanged: (v) => _apply(_visual.copyWith(buttonTactileFeedback: v)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -427,17 +531,19 @@ class _ThemeEffectsModalState extends State<_ThemeEffectsModal> {
                           : 'ECO • ${tr ? 'Pil Korumalı' : 'Battery Saver'}',
                       style: TextStyle(fontSize: 11.5, color: textSub),
                     ),
-                    FilledButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: widget.accentColor,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
-                      ),
-                      child: Text(
-                        tr ? 'Tamam & Kapat' : 'Done & Close',
-                        style: const TextStyle(fontWeight: FontWeight.w700),
+                    TactilePress(
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: widget.accentColor,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
+                        ),
+                        child: Text(
+                          tr ? 'Tamam & Kapat' : 'Done & Close',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
                       ),
                     ),
                   ],
@@ -474,10 +580,11 @@ class _ThemeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
+    return TactilePress.card(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
         margin: const EdgeInsets.only(bottom: 9),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
@@ -547,6 +654,7 @@ class _ThemeCard extends StatelessWidget {
           ],
         ),
       ),
+      ),
     );
   }
 }
@@ -572,10 +680,11 @@ class _PerfCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
+    return TactilePress.card(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
         padding: const EdgeInsets.all(11),
         decoration: BoxDecoration(
           color: selected ? color.withValues(alpha: 0.16) : palette.cardBg,
@@ -615,6 +724,7 @@ class _PerfCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

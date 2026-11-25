@@ -8,6 +8,7 @@ import '../models/thermostat_state.dart';
 import '../services/ambient_audio_service.dart';
 import '../services/hardware_service.dart';
 import '../services/media_storage_service.dart';
+import 'tactile_button.dart';
 
 class MascotMeta {
   final String name;
@@ -1747,53 +1748,56 @@ class _TermoBotOverlayState extends State<TermoBotOverlay> with SingleTickerProv
         return Positioned(
           left: x,
           bottom: widget.bottomOffset,
-          child: GestureDetector(
-            onTap: _handleTap,
-            onLongPress: widget.onOpenScreensaver,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (_speech != null || napping)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 4),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF141620).withValues(alpha: 0.94),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: meta.color.withValues(alpha: 0.58)),
-                      boxShadow: [
-                        BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 10),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _speech ?? 'zZz · ${meta.name}',
-                          style: const TextStyle(fontSize: 10.5, color: Colors.white, fontWeight: FontWeight.w600),
-                        ),
-                        if (widget.onOpenScreensaver != null && napping) ...[
-                          const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: widget.onOpenScreensaver,
-                            child: Icon(Icons.fullscreen_rounded, size: 15, color: meta.color),
-                          ),
+          child: TactilePress.card(
+            borderRadius: BorderRadius.circular(24),
+            child: GestureDetector(
+              onTap: _handleTap,
+              onLongPress: widget.onOpenScreensaver,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_speech != null || napping)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF141620).withValues(alpha: 0.94),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: meta.color.withValues(alpha: 0.58)),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withValues(alpha: 0.35), blurRadius: 10),
                         ],
-                      ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _speech ?? 'zZz · ${meta.name}',
+                            style: const TextStyle(fontSize: 10.5, color: Colors.white, fontWeight: FontWeight.w600),
+                          ),
+                          if (widget.onOpenScreensaver != null && napping) ...[
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              onTap: widget.onOpenScreensaver,
+                              child: Icon(Icons.fullscreen_rounded, size: 15, color: meta.color),
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
+                  MascotAvatar(
+                    character: widget.character,
+                    size: scaledSize,
+                    behavior: _behavior,
+                    sleeping: napping,
+                    happy: _happy,
+                    phase: _walkCtrl.value,
+                    facingDirection: facingDir,
+                    frameless: true,
                   ),
-                MascotAvatar(
-                  character: widget.character,
-                  size: scaledSize,
-                  behavior: _behavior,
-                  sleeping: napping,
-                  happy: _happy,
-                  phase: _walkCtrl.value,
-                  facingDirection: facingDir,
-                  frameless: true,
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -2073,41 +2077,44 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
                           const SizedBox(height: 10),
                           Transform.translate(
                             offset: Offset(_patrolDx, 0.0),
-                            child: GestureDetector(
-                              onTap: _petMascot,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (_reactionText != null)
-                                    Container(
-                                      margin: const EdgeInsets.only(bottom: 8),
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF141620).withValues(alpha: 0.92),
-                                        borderRadius: BorderRadius.circular(14),
-                                        border: Border.all(color: meta.color.withValues(alpha: 0.65)),
-                                      ),
-                                      child: Text(
-                                        _reactionText!,
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: Colors.white,
-                                          decoration: TextDecoration.none,
+                            child: TactilePress.card(
+                              borderRadius: BorderRadius.circular(36),
+                              child: GestureDetector(
+                                onTap: _petMascot,
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (_reactionText != null)
+                                      Container(
+                                        margin: const EdgeInsets.only(bottom: 8),
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF141620).withValues(alpha: 0.92),
+                                          borderRadius: BorderRadius.circular(14),
+                                          border: Border.all(color: meta.color.withValues(alpha: 0.65)),
+                                        ),
+                                        child: Text(
+                                          _reactionText!,
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.white,
+                                            decoration: TextDecoration.none,
+                                          ),
                                         ),
                                       ),
+                                    MascotAvatar(
+                                      character: widget.character,
+                                      size: scaledSize,
+                                      behavior: _currentBehavior,
+                                      sleeping: _currentBehavior == MascotBehavior.deepSleep,
+                                      happy: _happy,
+                                      phase: _anim.value,
+                                      facingDirection: _facingDir,
+                                      frameless: true,
                                     ),
-                                  MascotAvatar(
-                                    character: widget.character,
-                                    size: scaledSize,
-                                    behavior: _currentBehavior,
-                                    sleeping: _currentBehavior == MascotBehavior.deepSleep,
-                                    happy: _happy,
-                                    phase: _anim.value,
-                                    facingDirection: _facingDir,
-                                    frameless: true,
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
                             ),
                           ),

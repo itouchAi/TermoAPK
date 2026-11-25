@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../models/thermostat_state.dart';
 import '../widgets/rotary_dial.dart';
+import '../widgets/tactile_button.dart';
 
 class ThermostatScreen extends StatelessWidget {
   final double roomTemp;
@@ -505,9 +506,10 @@ class _PresetCard extends StatelessWidget {
     final bottomColor = Color.lerp(preset.color, Colors.black, 0.22)!.withValues(alpha: 0.68);
     final selectedBorder = Color.lerp(preset.color, Colors.white, 0.28)!.withValues(alpha: 0.92);
 
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
+    return TactilePress.card(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(20),
@@ -585,6 +587,7 @@ class _PresetCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
       ),
     );
   }

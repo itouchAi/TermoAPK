@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/thermostat_state.dart';
 import '../services/notification_service.dart';
 import '../services/schedule_engine.dart';
+import '../widgets/tactile_button.dart';
 
 enum _WeatherAnimKind {
   rain,
@@ -498,20 +499,24 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
           style: TextStyle(fontSize: 13, color: p.textSecondary, height: 1.45),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dCtx).pop(),
-            child: Text(tr ? 'Kapat' : 'Close'),
+          TactilePress(
+            child: TextButton(
+              onPressed: () => Navigator.of(dCtx).pop(),
+              child: Text(tr ? 'Kapat' : 'Close'),
+            ),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.white),
-            onPressed: () {
-              Navigator.of(dCtx).pop();
-              widget.onApplyEcoCompensation();
-              setState(() {
-                _toastMsg = tr ? 'Eko dış ısı kompanzasyonu uygulandı.' : 'Eco weather compensation applied.';
-              });
-            },
-            child: Text(tr ? 'Eko Önlemi Uygula' : 'Apply Eco Mode'),
+          TactilePress(
+            child: FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: Colors.white),
+              onPressed: () {
+                Navigator.of(dCtx).pop();
+                widget.onApplyEcoCompensation();
+                setState(() {
+                  _toastMsg = tr ? 'Eko dış ısı kompanzasyonu uygulandı.' : 'Eco weather compensation applied.';
+                });
+              },
+              child: Text(tr ? 'Eko Önlemi Uygula' : 'Apply Eco Mode'),
+            ),
           ),
         ],
       ),
@@ -533,18 +538,19 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
     Widget buildDayCard(int i) {
       final day = days[i];
       final selected = i == _selectedDay;
-      return GestureDetector(
-        onTap: () {
-          setState(() {
-            if (_selectedDay == i) {
-              _hourlyExpanded = !_hourlyExpanded;
-            } else {
-              _selectedDay = i;
-              _hourlyExpanded = true;
-            }
-          });
-        },
-        child: AnimatedContainer(
+      return TactilePress.card(
+        child: GestureDetector(
+          onTap: () {
+            setState(() {
+              if (_selectedDay == i) {
+                _hourlyExpanded = !_hourlyExpanded;
+              } else {
+                _selectedDay = i;
+                _hourlyExpanded = true;
+              }
+            });
+          },
+          child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
           decoration: BoxDecoration(
@@ -666,6 +672,7 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
             ],
           ),
         ),
+      ),
       );
     }
 
@@ -718,74 +725,78 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
                 alignment: WrapAlignment.spaceBetween,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  PopupMenuButton<String>(
-                    color: p.sheetBg,
-                    onSelected: (loc) => widget.onChangeLocation?.call(loc),
-                    itemBuilder: (_) => [
-                      for (final loc in _locations)
-                        PopupMenuItem(
-                          value: loc,
-                          child: Text(loc, style: TextStyle(color: p.textPrimary, fontSize: 13)),
-                        ),
-                    ],
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: p.cardBg,
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: p.cardBorder),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.location_on_outlined, size: 14, color: Color(0xFFF43F5E)),
-                          const SizedBox(width: 5),
-                          Text(
-                            widget.locationName,
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.textPrimary),
+                  TactilePress(
+                    child: PopupMenuButton<String>(
+                      color: p.sheetBg,
+                      onSelected: (loc) => widget.onChangeLocation?.call(loc),
+                      itemBuilder: (_) => [
+                        for (final loc in _locations)
+                          PopupMenuItem(
+                            value: loc,
+                            child: Text(loc, style: TextStyle(color: p.textPrimary, fontSize: 13)),
                           ),
-                          const SizedBox(width: 4),
-                          Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: p.textSecondary),
-                        ],
+                      ],
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: p.cardBg,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: p.cardBorder),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.location_on_outlined, size: 14, color: Color(0xFFF43F5E)),
+                            const SizedBox(width: 5),
+                            Text(
+                              widget.locationName,
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.textPrimary),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: p.textSecondary),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      GestureDetector(
-                        onTap: () => widget.onToggleWeatherAlerts?.call(!widget.weatherAlertsEnabled),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: widget.weatherAlertsEnabled
-                                ? amberAccent.withValues(alpha: 0.16)
-                                : p.cardBg,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: widget.weatherAlertsEnabled ? amberAccent.withValues(alpha: 0.50) : p.cardBorder,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.notifications_active_outlined,
-                                size: 13,
-                                color: widget.weatherAlertsEnabled ? amberAccent : p.textSecondary,
+                      TactilePress(
+                        child: GestureDetector(
+                          onTap: () => widget.onToggleWeatherAlerts?.call(!widget.weatherAlertsEnabled),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: widget.weatherAlertsEnabled
+                                  ? amberAccent.withValues(alpha: 0.16)
+                                  : p.cardBg,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: widget.weatherAlertsEnabled ? amberAccent.withValues(alpha: 0.50) : p.cardBorder,
                               ),
-                              const SizedBox(width: 5),
-                              Text(
-                                widget.weatherAlertsEnabled
-                                    ? (tr ? 'Hava Bildirimleri Açık' : 'Weather Alerts On')
-                                    : (tr ? 'Bildirimler Kapalı' : 'Alerts Off'),
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.notifications_active_outlined,
+                                  size: 13,
                                   color: widget.weatherAlertsEnabled ? amberAccent : p.textSecondary,
                                 ),
-                              ),
-                            ],
+                                const SizedBox(width: 5),
+                                Text(
+                                  widget.weatherAlertsEnabled
+                                      ? (tr ? 'Hava Bildirimleri Açık' : 'Weather Alerts On')
+                                      : (tr ? 'Bildirimler Kapalı' : 'Alerts Off'),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: widget.weatherAlertsEnabled ? amberAccent : p.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -854,9 +865,11 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
                                     '${tr ? activeDay.dayTr : activeDay.dayEn} (${activeDay.dateLabel}) · ${tr ? 'Saat Bazlı Tahmin' : 'Hourly Forecast'}',
                                     style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: p.textPrimary),
                                   ),
-                                  GestureDetector(
-                                    onTap: () => setState(() => _hourlyExpanded = false),
-                                    child: Icon(Icons.keyboard_arrow_up_rounded, color: p.textSecondary, size: 20),
+                                  TactilePress(
+                                    child: GestureDetector(
+                                      onTap: () => setState(() => _hourlyExpanded = false),
+                                      child: Icon(Icons.keyboard_arrow_up_rounded, color: p.textSecondary, size: 20),
+                                    ),
                                   ),
                                 ],
                               ),
@@ -958,53 +971,57 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        FilledButton(
-                          onPressed: () => _showPrecautionsModal(tr, p),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: amberAccent,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        TactilePress(
+                          child: FilledButton(
+                            onPressed: () => _showPrecautionsModal(tr, p),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: amberAccent,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            child: Text(tr ? 'Önlemleri Gör' : 'View Precautions', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
                           ),
-                          child: Text(tr ? 'Önlemleri Gör' : 'View Precautions', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
                         ),
                         const SizedBox(width: 8),
-                        OutlinedButton(
-                          onPressed: () async {
-                            final activeBoiler = widget.boiler ??
-                                ThermostatMath.computeBoilerTelemetry(widget.roomTemp, widget.targetTemp);
-                            final res = await NotificationService.dispatchNotification(
-                              context: context,
-                              lang: widget.lang,
-                              locationName: widget.locationName,
-                              roomTemp: widget.roomTemp,
-                              targetTemp: widget.targetTemp,
-                              boiler: activeBoiler,
-                              settings: widget.settings ?? SystemSettingsState.defaults(),
-                              customTitle: tr
-                                  ? '🌧️ Hava & Donma Koruma Test Bildirimi'
-                                  : '🌧️ Weather & Freeze Guard Test Alert',
-                              customBody: tr
-                                  ? '${widget.locationName}: Yarın %90 yağış & gece 11-13°C düşüş bekleniyor. Oda ${widget.roomTemp.toStringAsFixed(1)}°C.'
-                                  : '${widget.locationName}: 90% rain & 11-13°C night drop ahead. Room ${widget.roomTemp.toStringAsFixed(1)}°C.',
-                              severityOverride: AlertSeverity.warning,
-                            );
-                            if (!mounted) return;
-                            setState(() {
-                              _toastMsg = tr ? res.statusTextTr : res.statusTextEn;
-                            });
-                          },
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: p.textPrimary,
-                            side: BorderSide(color: p.cardBorder),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        TactilePress(
+                          child: OutlinedButton(
+                            onPressed: () async {
+                              final activeBoiler = widget.boiler ??
+                                  ThermostatMath.computeBoilerTelemetry(widget.roomTemp, widget.targetTemp);
+                              final res = await NotificationService.dispatchNotification(
+                                context: context,
+                                lang: widget.lang,
+                                locationName: widget.locationName,
+                                roomTemp: widget.roomTemp,
+                                targetTemp: widget.targetTemp,
+                                boiler: activeBoiler,
+                                settings: widget.settings ?? SystemSettingsState.defaults(),
+                                customTitle: tr
+                                    ? '🌧️ Hava & Donma Koruma Test Bildirimi'
+                                    : '🌧️ Weather & Freeze Guard Test Alert',
+                                customBody: tr
+                                    ? '${widget.locationName}: Yarın %90 yağış & gece 11-13°C düşüş bekleniyor. Oda ${widget.roomTemp.toStringAsFixed(1)}°C.'
+                                    : '${widget.locationName}: 90% rain & 11-13°C night drop ahead. Room ${widget.roomTemp.toStringAsFixed(1)}°C.',
+                                severityOverride: AlertSeverity.warning,
+                              );
+                              if (!mounted) return;
+                              setState(() {
+                                _toastMsg = tr ? res.statusTextTr : res.statusTextEn;
+                              });
+                            },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: p.textPrimary,
+                              side: BorderSide(color: p.cardBorder),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            child: Text(tr ? 'Test Bildirimi' : 'Test Alert', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
                           ),
-                          child: Text(tr ? 'Test Bildirimi' : 'Test Alert', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
                         ),
                       ],
                     ),
@@ -1133,9 +1150,10 @@ class _ReportScreenState extends State<ReportScreen> {
         final selected = i == _selectedHourIdx;
         final activeBurn = dayEntry.$5[i];
         final tVal = dayEntry.$4[i];
-        return GestureDetector(
-          onTap: () => setState(() => _selectedHourIdx = i),
-          child: AnimatedContainer(
+        return TactilePress.card(
+          child: GestureDetector(
+            onTap: () => setState(() => _selectedHourIdx = i),
+            child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
             decoration: BoxDecoration(
@@ -1208,6 +1226,7 @@ class _ReportScreenState extends State<ReportScreen> {
               ],
             ),
           ),
+        ),
         );
       }
 
@@ -1283,27 +1302,29 @@ class _ReportScreenState extends State<ReportScreen> {
                     (2, tr ? 'Aylık' : 'Monthly'),
                   ])
                     Expanded(
-                      child: GestureDetector(
-                        onTap: () => setState(() => _periodIndex = seg.$1),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          padding: const EdgeInsets.symmetric(vertical: 7),
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: _periodIndex == seg.$1
-                                ? themeAccent.withValues(alpha: 0.28)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(9),
-                            border: Border.all(
-                              color: _periodIndex == seg.$1 ? themeAccent : Colors.transparent,
+                      child: TactilePress(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _periodIndex = seg.$1),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            padding: const EdgeInsets.symmetric(vertical: 7),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: _periodIndex == seg.$1
+                                  ? themeAccent.withValues(alpha: 0.28)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(9),
+                              border: Border.all(
+                                color: _periodIndex == seg.$1 ? themeAccent : Colors.transparent,
+                              ),
                             ),
-                          ),
-                          child: Text(
-                            seg.$2,
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w700,
-                              color: _periodIndex == seg.$1 ? p.textPrimary : p.textSecondary,
+                            child: Text(
+                              seg.$2,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: _periodIndex == seg.$1 ? p.textPrimary : p.textSecondary,
+                              ),
                             ),
                           ),
                         ),
@@ -1337,29 +1358,31 @@ class _ReportScreenState extends State<ReportScreen> {
                           ),
                         ],
                       ),
-                      GestureDetector(
-                        onTap: () => setState(() => _dayOptionIdx = (_dayOptionIdx + 1) % dayOptions.length),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: themeAccent.withValues(alpha: 0.24),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: themeAccent.withValues(alpha: 0.65)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                dayEntry.$1,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: p.textPrimary,
+                      TactilePress(
+                        child: GestureDetector(
+                          onTap: () => setState(() => _dayOptionIdx = (_dayOptionIdx + 1) % dayOptions.length),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: themeAccent.withValues(alpha: 0.24),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: themeAccent.withValues(alpha: 0.65)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  dayEntry.$1,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: p.textPrimary,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 4),
-                              Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: p.textPrimary),
-                            ],
+                                const SizedBox(width: 4),
+                                Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: p.textPrimary),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -1689,27 +1712,29 @@ class _ReportScreenState extends State<ReportScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             for (final sub in widget.subTabOrder) ...[
-                              GestureDetector(
-                                onTap: () => setState(() => _selectedSubTab = sub),
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 200),
-                                  margin: const EdgeInsets.symmetric(horizontal: 2),
-                                  padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-                                  decoration: BoxDecoration(
-                                    color: _activeSubTab == sub
-                                        ? themeAccent.withValues(alpha: 0.28)
-                                        : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(999),
-                                    border: Border.all(
-                                      color: _activeSubTab == sub ? themeAccent : Colors.transparent,
+                              TactilePress(
+                                child: GestureDetector(
+                                  onTap: () => setState(() => _selectedSubTab = sub),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 200),
+                                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+                                    decoration: BoxDecoration(
+                                      color: _activeSubTab == sub
+                                          ? themeAccent.withValues(alpha: 0.28)
+                                          : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: _activeSubTab == sub ? themeAccent : Colors.transparent,
+                                      ),
                                     ),
-                                  ),
-                                  child: Text(
-                                    _subTabLabel(sub, tr),
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: _activeSubTab == sub ? p.textPrimary : p.textSecondary,
+                                    child: Text(
+                                      _subTabLabel(sub, tr),
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: _activeSubTab == sub ? p.textPrimary : p.textSecondary,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -2019,50 +2044,52 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             Widget actionCard(ScheduleActionType type, IconData icon, String title, String sub) {
               final selected = actionType == type;
               return Expanded(
-                child: GestureDetector(
-                  onTap: () {
-                    setDialogState(() {
-                      actionType = type;
-                      if (!titleEdited) {
-                        titleCtrl.text = defaultTitleFor(type);
-                      }
-                    });
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 160),
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? themeAccent.withValues(alpha: 0.22)
-                          : p.scaffoldBg.withValues(alpha: p.isLight ? 0.55 : 0.45),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: selected ? themeAccent : p.cardBorder,
-                        width: selected ? 1.4 : 1.0,
+                child: TactilePress.card(
+                  child: GestureDetector(
+                    onTap: () {
+                      setDialogState(() {
+                        actionType = type;
+                        if (!titleEdited) {
+                          titleCtrl.text = defaultTitleFor(type);
+                        }
+                      });
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 160),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? themeAccent.withValues(alpha: 0.22)
+                            : p.scaffoldBg.withValues(alpha: p.isLight ? 0.55 : 0.45),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: selected ? themeAccent : p.cardBorder,
+                          width: selected ? 1.4 : 1.0,
+                        ),
                       ),
-                    ),
-                    child: Column(
-                      children: [
-                        Icon(icon, size: 17, color: selected ? themeAccent : p.textSecondary),
-                        const SizedBox(height: 4),
-                        Text(
-                          title,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: selected ? p.textPrimary : p.textSecondary,
+                      child: Column(
+                        children: [
+                          Icon(icon, size: 17, color: selected ? themeAccent : p.textSecondary),
+                          const SizedBox(height: 4),
+                          Text(
+                            title,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: selected ? p.textPrimary : p.textSecondary,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          sub,
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 9, color: p.textSecondary),
-                        ),
-                      ],
+                          const SizedBox(height: 2),
+                          Text(
+                            sub,
+                            textAlign: TextAlign.center,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 9, color: p.textSecondary),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -2100,11 +2127,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               ),
                             ),
                           ),
-                          IconButton(
-                            onPressed: () => Navigator.of(dialogCtx).pop(),
-                            icon: Icon(Icons.close_rounded, size: 18, color: p.textSecondary),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                          TactilePress(
+                            child: IconButton(
+                              onPressed: () => Navigator.of(dialogCtx).pop(),
+                              icon: Icon(Icons.close_rounded, size: 18, color: p.textSecondary),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                            ),
                           ),
                         ],
                       ),
@@ -2188,42 +2217,44 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                     tr ? '🔥 Kombi Açılış Saati' : '🔥 Boiler Open Time',
                                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.textPrimary),
                                   ),
-                                  GestureDetector(
-                                    onTap: () async {
-                                      final picked = await showTimePicker(
-                                        context: dialogCtx,
-                                        initialTime: _parseTimeOfDay(openTime, const TimeOfDay(hour: 8, minute: 0)),
-                                        builder: (c, child) => MediaQuery(
-                                          data: MediaQuery.of(c).copyWith(alwaysUse24HourFormat: true),
-                                          child: child ?? const SizedBox.shrink(),
-                                        ),
-                                      );
-                                      if (picked != null) {
-                                        setDialogState(() => openTime = _formatTimeOfDay(picked));
-                                      }
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: emerald.withValues(alpha: 0.22),
-                                        borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(color: emerald.withValues(alpha: 0.55)),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.access_time_rounded, size: 14, color: emerald),
-                                          const SizedBox(width: 5),
-                                          Text(
-                                            openTime,
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w800,
-                                              color: p.textPrimary,
-                                              fontFeatures: const [FontFeature.tabularFigures()],
-                                            ),
+                                  TactilePress(
+                                    child: GestureDetector(
+                                      onTap: () async {
+                                        final picked = await showTimePicker(
+                                          context: dialogCtx,
+                                          initialTime: _parseTimeOfDay(openTime, const TimeOfDay(hour: 8, minute: 0)),
+                                          builder: (c, child) => MediaQuery(
+                                            data: MediaQuery.of(c).copyWith(alwaysUse24HourFormat: true),
+                                            child: child ?? const SizedBox.shrink(),
                                           ),
-                                        ],
+                                        );
+                                        if (picked != null) {
+                                          setDialogState(() => openTime = _formatTimeOfDay(picked));
+                                        }
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: emerald.withValues(alpha: 0.22),
+                                          borderRadius: BorderRadius.circular(10),
+                                          border: Border.all(color: emerald.withValues(alpha: 0.55)),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.access_time_rounded, size: 14, color: emerald),
+                                            const SizedBox(width: 5),
+                                            Text(
+                                              openTime,
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w800,
+                                                color: p.textPrimary,
+                                                fontFeatures: const [FontFeature.tabularFigures()],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -2240,13 +2271,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      IconButton(
-                                        onPressed: () => setDialogState(() {
-                                          openTargetTemp = ThermostatMath.snapTemperature(openTargetTemp - 0.5);
-                                        }),
-                                        icon: Icon(Icons.remove_circle_outline_rounded, size: 20, color: p.textPrimary),
-                                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                        padding: EdgeInsets.zero,
+                                      TactilePress(
+                                        child: IconButton(
+                                          onPressed: () => setDialogState(() {
+                                            openTargetTemp = ThermostatMath.snapTemperature(openTargetTemp - 0.5);
+                                          }),
+                                          icon: Icon(Icons.remove_circle_outline_rounded, size: 20, color: p.textPrimary),
+                                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                          padding: EdgeInsets.zero,
+                                        ),
                                       ),
                                       Padding(
                                         padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -2260,13 +2293,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                           ),
                                         ),
                                       ),
-                                      IconButton(
-                                        onPressed: () => setDialogState(() {
-                                          openTargetTemp = ThermostatMath.snapTemperature(openTargetTemp + 0.5);
-                                        }),
-                                        icon: Icon(Icons.add_circle_outline_rounded, size: 20, color: p.textPrimary),
-                                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                                        padding: EdgeInsets.zero,
+                                      TactilePress(
+                                        child: IconButton(
+                                          onPressed: () => setDialogState(() {
+                                            openTargetTemp = ThermostatMath.snapTemperature(openTargetTemp + 0.5);
+                                          }),
+                                          icon: Icon(Icons.add_circle_outline_rounded, size: 20, color: p.textPrimary),
+                                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                          padding: EdgeInsets.zero,
+                                        ),
                                       ),
                                     ],
                                   ),
@@ -2308,42 +2343,44 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                       ),
                                     ],
                                   ),
-                                  GestureDetector(
-                                    onTap: () async {
-                                      final picked = await showTimePicker(
-                                        context: dialogCtx,
-                                        initialTime: _parseTimeOfDay(closeTime, const TimeOfDay(hour: 23, minute: 0)),
-                                        builder: (c, child) => MediaQuery(
-                                          data: MediaQuery.of(c).copyWith(alwaysUse24HourFormat: true),
-                                          child: child ?? const SizedBox.shrink(),
-                                        ),
-                                      );
-                                      if (picked != null) {
-                                        setDialogState(() => closeTime = _formatTimeOfDay(picked));
-                                      }
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFF43F5E).withValues(alpha: 0.20),
-                                        borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(color: const Color(0xFFF43F5E).withValues(alpha: 0.50)),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(Icons.access_time_rounded, size: 14, color: Color(0xFFFDA4AF)),
-                                          const SizedBox(width: 5),
-                                          Text(
-                                            closeTime,
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w800,
-                                              color: p.textPrimary,
-                                              fontFeatures: const [FontFeature.tabularFigures()],
-                                            ),
+                                  TactilePress(
+                                    child: GestureDetector(
+                                      onTap: () async {
+                                        final picked = await showTimePicker(
+                                          context: dialogCtx,
+                                          initialTime: _parseTimeOfDay(closeTime, const TimeOfDay(hour: 23, minute: 0)),
+                                          builder: (c, child) => MediaQuery(
+                                            data: MediaQuery.of(c).copyWith(alwaysUse24HourFormat: true),
+                                            child: child ?? const SizedBox.shrink(),
                                           ),
-                                        ],
+                                        );
+                                        if (picked != null) {
+                                          setDialogState(() => closeTime = _formatTimeOfDay(picked));
+                                        }
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFF43F5E).withValues(alpha: 0.20),
+                                          borderRadius: BorderRadius.circular(10),
+                                          border: Border.all(color: const Color(0xFFF43F5E).withValues(alpha: 0.50)),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.access_time_rounded, size: 14, color: Color(0xFFFDA4AF)),
+                                            const SizedBox(width: 5),
+                                            Text(
+                                              closeTime,
+                                              style: TextStyle(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w800,
+                                                color: p.textPrimary,
+                                                fontFeatures: const [FontFeature.tabularFigures()],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -2377,25 +2414,27 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                             (ScheduleRepeatMode.weekends, tr ? '🏠 Hafta Sonu' : '🏠 Weekends'),
                             (ScheduleRepeatMode.customDays, tr ? '🗓️ Özel Günler' : '🗓️ Custom Days'),
                           ])
-                            GestureDetector(
-                              onTap: () => setDialogState(() => repeatMode = opt.$1),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                decoration: BoxDecoration(
-                                  color: repeatMode == opt.$1
-                                      ? themeAccent.withValues(alpha: 0.22)
-                                      : p.scaffoldBg.withValues(alpha: p.isLight ? 0.50 : 0.38),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: repeatMode == opt.$1 ? themeAccent : p.cardBorder,
+                            TactilePress(
+                              child: GestureDetector(
+                                onTap: () => setDialogState(() => repeatMode = opt.$1),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: repeatMode == opt.$1
+                                        ? themeAccent.withValues(alpha: 0.22)
+                                        : p.scaffoldBg.withValues(alpha: p.isLight ? 0.50 : 0.38),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: repeatMode == opt.$1 ? themeAccent : p.cardBorder,
+                                    ),
                                   ),
-                                ),
-                                child: Text(
-                                  opt.$2,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: repeatMode == opt.$1 ? p.textPrimary : p.textSecondary,
+                                  child: Text(
+                                    opt.$2,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: repeatMode == opt.$1 ? p.textPrimary : p.textSecondary,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -2417,65 +2456,71 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               Icon(Icons.calendar_month_rounded, size: 16, color: themeAccent),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: GestureDetector(
-                                  onTap: () async {
-                                    final parsed = ScheduleEngine.parseDateIso(specificDateIso) ?? now;
-                                    final first = DateTime(now.year - 1, 1, 1);
-                                    final last = DateTime(now.year + 3, 12, 31);
-                                    final picked = await showDatePicker(
-                                      context: dialogCtx,
-                                      initialDate: parsed.isBefore(first) ? now : parsed,
-                                      firstDate: first,
-                                      lastDate: last,
-                                    );
-                                    if (picked != null) {
-                                      setDialogState(() {
-                                        specificDateIso = ScheduleEngine.formatDateIso(picked);
-                                      });
-                                    }
-                                  },
+                                child: TactilePress(
+                                  child: GestureDetector(
+                                    onTap: () async {
+                                      final parsed = ScheduleEngine.parseDateIso(specificDateIso) ?? now;
+                                      final first = DateTime(now.year - 1, 1, 1);
+                                      final last = DateTime(now.year + 3, 12, 31);
+                                      final picked = await showDatePicker(
+                                        context: dialogCtx,
+                                        initialDate: parsed.isBefore(first) ? now : parsed,
+                                        firstDate: first,
+                                        lastDate: last,
+                                      );
+                                      if (picked != null) {
+                                        setDialogState(() {
+                                          specificDateIso = ScheduleEngine.formatDateIso(picked);
+                                        });
+                                      }
+                                    },
+                                    child: Text(
+                                      ScheduleEngine.formatShortDateTr(
+                                        ScheduleEngine.parseDateIso(specificDateIso) ?? now,
+                                      ),
+                                      style: TextStyle(
+                                        fontSize: 12.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: p.textPrimary,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              TactilePress(
+                                child: TextButton(
+                                  onPressed: () => setDialogState(() => specificDateIso = todayIso),
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  ),
                                   child: Text(
-                                    ScheduleEngine.formatShortDateTr(
-                                      ScheduleEngine.parseDateIso(specificDateIso) ?? now,
-                                    ),
+                                    tr ? 'Bugün' : 'Today',
                                     style: TextStyle(
-                                      fontSize: 12.5,
+                                      fontSize: 11,
                                       fontWeight: FontWeight.w700,
-                                      color: p.textPrimary,
-                                      decoration: TextDecoration.underline,
+                                      color: specificDateIso == todayIso ? themeAccent : p.textSecondary,
                                     ),
                                   ),
                                 ),
                               ),
-                              TextButton(
-                                onPressed: () => setDialogState(() => specificDateIso = todayIso),
-                                style: TextButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  minimumSize: Size.zero,
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                ),
-                                child: Text(
-                                  tr ? 'Bugün' : 'Today',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: specificDateIso == todayIso ? themeAccent : p.textSecondary,
+                              TactilePress(
+                                child: TextButton(
+                                  onPressed: () => setDialogState(() => specificDateIso = tomorrowIso),
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                   ),
-                                ),
-                              ),
-                              TextButton(
-                                onPressed: () => setDialogState(() => specificDateIso = tomorrowIso),
-                                style: TextButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  minimumSize: Size.zero,
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                ),
-                                child: Text(
-                                  tr ? 'Yarın' : 'Tomorrow',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: specificDateIso == tomorrowIso ? themeAccent : p.textSecondary,
+                                  child: Text(
+                                    tr ? 'Yarın' : 'Tomorrow',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: specificDateIso == tomorrowIso ? themeAccent : p.textSecondary,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -2489,36 +2534,38 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           runSpacing: 6,
                           children: [
                             for (final d in dayItems)
-                              GestureDetector(
-                                onTap: () {
-                                  setDialogState(() {
-                                    if (repeatWeekdays.contains(d.$1)) {
-                                      if (repeatWeekdays.length > 1) {
-                                        repeatWeekdays.remove(d.$1);
+                              TactilePress(
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setDialogState(() {
+                                      if (repeatWeekdays.contains(d.$1)) {
+                                        if (repeatWeekdays.length > 1) {
+                                          repeatWeekdays.remove(d.$1);
+                                        }
+                                      } else {
+                                        repeatWeekdays.add(d.$1);
+                                        repeatWeekdays.sort();
                                       }
-                                    } else {
-                                      repeatWeekdays.add(d.$1);
-                                      repeatWeekdays.sort();
-                                    }
-                                  });
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: repeatWeekdays.contains(d.$1)
-                                        ? themeAccent.withValues(alpha: 0.25)
-                                        : p.scaffoldBg.withValues(alpha: p.isLight ? 0.50 : 0.38),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                      color: repeatWeekdays.contains(d.$1) ? themeAccent : p.cardBorder,
+                                    });
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: repeatWeekdays.contains(d.$1)
+                                          ? themeAccent.withValues(alpha: 0.25)
+                                          : p.scaffoldBg.withValues(alpha: p.isLight ? 0.50 : 0.38),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: repeatWeekdays.contains(d.$1) ? themeAccent : p.cardBorder,
+                                      ),
                                     ),
-                                  ),
-                                  child: Text(
-                                    tr ? d.$2 : d.$3,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: repeatWeekdays.contains(d.$1) ? p.textPrimary : p.textSecondary,
+                                    child: Text(
+                                      tr ? d.$2 : d.$3,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: repeatWeekdays.contains(d.$1) ? p.textPrimary : p.textSecondary,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -2530,43 +2577,47 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          TextButton(
-                            onPressed: () => Navigator.of(dialogCtx).pop(),
-                            child: Text(
-                              tr ? 'İptal' : 'Cancel',
-                              style: TextStyle(color: p.textSecondary, fontWeight: FontWeight.w600),
+                          TactilePress(
+                            child: TextButton(
+                              onPressed: () => Navigator.of(dialogCtx).pop(),
+                              child: Text(
+                                tr ? 'İptal' : 'Cancel',
+                                style: TextStyle(color: p.textSecondary, fontWeight: FontWeight.w600),
+                              ),
                             ),
                           ),
                           const SizedBox(width: 8),
-                          FilledButton.icon(
-                            onPressed: () {
-                              final cleanTitle = titleCtrl.text.trim().isEmpty
-                                  ? defaultTitleFor(actionType)
-                                  : titleCtrl.text.trim();
-                              final rule = CustomScheduleRule(
-                                id: existing?.id ?? 'rule_${DateTime.now().microsecondsSinceEpoch}',
-                                title: cleanTitle,
-                                enabled: existing?.enabled ?? true,
-                                actionType: actionType,
-                                openTime: openTime,
-                                openTargetTemp: ThermostatMath.snapTemperature(openTargetTemp),
-                                closeTime: closeTime,
-                                repeatMode: repeatMode,
-                                specificDateIso: specificDateIso,
-                                repeatWeekdays: List<int>.from(repeatWeekdays),
-                              );
-                              Navigator.of(dialogCtx).pop(rule);
-                            },
-                            icon: const Icon(Icons.check_rounded, size: 16),
-                            label: Text(
-                              existing == null
-                                  ? (tr ? 'Plan Ekle' : 'Add Plan')
-                                  : (tr ? 'Güncelle' : 'Update'),
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                            ),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: themeAccent,
-                              foregroundColor: Colors.black,
+                          TactilePress(
+                            child: FilledButton.icon(
+                              onPressed: () {
+                                final cleanTitle = titleCtrl.text.trim().isEmpty
+                                    ? defaultTitleFor(actionType)
+                                    : titleCtrl.text.trim();
+                                final rule = CustomScheduleRule(
+                                  id: existing?.id ?? 'rule_${DateTime.now().microsecondsSinceEpoch}',
+                                  title: cleanTitle,
+                                  enabled: existing?.enabled ?? true,
+                                  actionType: actionType,
+                                  openTime: openTime,
+                                  openTargetTemp: ThermostatMath.snapTemperature(openTargetTemp),
+                                  closeTime: closeTime,
+                                  repeatMode: repeatMode,
+                                  specificDateIso: specificDateIso,
+                                  repeatWeekdays: List<int>.from(repeatWeekdays),
+                                );
+                                Navigator.of(dialogCtx).pop(rule);
+                              },
+                              icon: const Icon(Icons.check_rounded, size: 16),
+                              label: Text(
+                                existing == null
+                                    ? (tr ? 'Plan Ekle' : 'Add Plan')
+                                    : (tr ? 'Güncelle' : 'Update'),
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                              ),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: themeAccent,
+                                foregroundColor: Colors.black,
+                              ),
                             ),
                           ),
                         ],
@@ -2643,34 +2694,38 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   spacing: 6,
                   runSpacing: 6,
                   children: [
-                    FilledButton.icon(
-                      onPressed: () => _openCustomRuleEditor(),
-                      icon: const Icon(Icons.add_alarm_rounded, size: 15),
-                      label: Text(
-                        tr ? 'Yeni Plan' : 'New Plan',
-                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
-                      ),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: themeAccent,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    TactilePress(
+                      child: FilledButton.icon(
+                        onPressed: () => _openCustomRuleEditor(),
+                        icon: const Icon(Icons.add_alarm_rounded, size: 15),
+                        label: Text(
+                          tr ? 'Yeni Plan' : 'New Plan',
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: themeAccent,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
                       ),
                     ),
-                    FilledButton.icon(
-                      onPressed: widget.onSaveSchedule,
-                      icon: Icon(widget.savedNotice ? Icons.check_rounded : Icons.save_outlined, size: 15),
-                      label: Text(
-                        widget.savedNotice ? (tr ? 'Kaydedildi' : 'Saved') : (tr ? 'Kaydet' : 'Save'),
-                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
-                      ),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: themeAccent.withValues(alpha: 0.24),
-                        foregroundColor: themeAccent,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    TactilePress(
+                      child: FilledButton.icon(
+                        onPressed: widget.onSaveSchedule,
+                        icon: Icon(widget.savedNotice ? Icons.check_rounded : Icons.save_outlined, size: 15),
+                        label: Text(
+                          widget.savedNotice ? (tr ? 'Kaydedildi' : 'Saved') : (tr ? 'Kaydet' : 'Save'),
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: themeAccent.withValues(alpha: 0.24),
+                          foregroundColor: themeAccent,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
                       ),
                     ),
                   ],
@@ -2711,33 +2766,37 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                 tr ? slot.labelTr : slot.labelEn,
                                 style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.textPrimary),
                               ),
-                              GestureDetector(
-                                onTap: () => _pickDefaultSlotTime(slot),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      slot.time,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: slot.enabled ? themeAccent : p.textSecondary,
-                                        fontWeight: FontWeight.w700,
+                              TactilePress(
+                                child: GestureDetector(
+                                  onTap: () => _pickDefaultSlotTime(slot),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        slot.time,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: slot.enabled ? themeAccent : p.textSecondary,
+                                          fontWeight: FontWeight.w700,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Icon(Icons.edit_outlined, size: 11, color: p.textSecondary),
-                                  ],
+                                      const SizedBox(width: 4),
+                                      Icon(Icons.edit_outlined, size: 11, color: p.textSecondary),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        IconButton(
-                          onPressed: () => widget.onUpdateSlot(
-                            slot.id,
-                            targetTemp: ThermostatMath.snapTemperature(slot.targetTemp - 0.5),
+                        TactilePress(
+                          child: IconButton(
+                            onPressed: () => widget.onUpdateSlot(
+                              slot.id,
+                              targetTemp: ThermostatMath.snapTemperature(slot.targetTemp - 0.5),
+                            ),
+                            icon: Icon(Icons.remove_rounded, size: 16, color: p.textPrimary),
                           ),
-                          icon: Icon(Icons.remove_rounded, size: 16, color: p.textPrimary),
                         ),
                         Text(
                           '${slot.targetTemp.toStringAsFixed(1)}°',
@@ -2748,12 +2807,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                             fontFeatures: const [FontFeature.tabularFigures()],
                           ),
                         ),
-                        IconButton(
-                          onPressed: () => widget.onUpdateSlot(
-                            slot.id,
-                            targetTemp: ThermostatMath.snapTemperature(slot.targetTemp + 0.5),
+                        TactilePress(
+                          child: IconButton(
+                            onPressed: () => widget.onUpdateSlot(
+                              slot.id,
+                              targetTemp: ThermostatMath.snapTemperature(slot.targetTemp + 0.5),
+                            ),
+                            icon: Icon(Icons.add_rounded, size: 16, color: p.textPrimary),
                           ),
-                          icon: Icon(Icons.add_rounded, size: 16, color: p.textPrimary),
                         ),
                       ],
                     ),
@@ -2787,28 +2848,30 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             ),
             const SizedBox(height: 8),
             if (widget.customRules.isEmpty)
-              GestureDetector(
-                onTap: () => _openCustomRuleEditor(),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: p.scaffoldBg.withValues(alpha: p.isLight ? 0.35 : 0.28),
-                    borderRadius: BorderRadius.circular(13),
-                    border: Border.all(color: p.cardBorder),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.calendar_today_rounded, size: 16, color: themeAccent),
-                      const SizedBox(width: 9),
-                      Expanded(
-                        child: Text(
-                          tr
-                              ? 'Belirli bir tarih veya haftanın günleri için tek yön "Sadece Aç", "Sadece Kapat" ya da "Aç & Kapat" planı eklemek için dokunun.'
-                              : 'Tap to add a calendar date or periodic rule with independent "Open Only", "Close Only", or "Open & Close" actions.',
-                          style: TextStyle(fontSize: 11, color: p.textSecondary, height: 1.35),
+              TactilePress.card(
+                child: GestureDetector(
+                  onTap: () => _openCustomRuleEditor(),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: p.scaffoldBg.withValues(alpha: p.isLight ? 0.35 : 0.28),
+                      borderRadius: BorderRadius.circular(13),
+                      border: Border.all(color: p.cardBorder),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.calendar_today_rounded, size: 16, color: themeAccent),
+                        const SizedBox(width: 9),
+                        Expanded(
+                          child: Text(
+                            tr
+                                ? 'Belirli bir tarih veya haftanın günleri için tek yön "Sadece Aç", "Sadece Kapat" ya da "Aç & Kapat" planı eklemek için dokunun.'
+                                : 'Tap to add a calendar date or periodic rule with independent "Open Only", "Close Only", or "Open & Close" actions.',
+                            style: TextStyle(fontSize: 11, color: p.textSecondary, height: 1.35),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               )
@@ -2835,73 +2898,79 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           ),
                           const SizedBox(width: 4),
                           Expanded(
-                            child: GestureDetector(
-                              onTap: () => _openCustomRuleEditor(existing: rule),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Flexible(
-                                        child: Text(
-                                          rule.title,
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w700,
-                                            color: rule.enabled ? p.textPrimary : p.textSecondary,
-                                          ),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: (rule.actionType == ScheduleActionType.closeOnly
-                                                  ? const Color(0xFFF43F5E)
-                                                  : themeAccent)
-                                              .withValues(alpha: 0.18),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: Text(
-                                          ScheduleEngine.describeScheduleFrequency(rule, widget.lang),
-                                          style: TextStyle(
-                                            fontSize: 9.5,
-                                            fontWeight: FontWeight.w700,
-                                            color: rule.actionType == ScheduleActionType.closeOnly
-                                                ? const Color(0xFFFDA4AF)
-                                                : themeAccent,
+                            child: TactilePress.card(
+                              child: GestureDetector(
+                                onTap: () => _openCustomRuleEditor(existing: rule),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            rule.title,
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w700,
+                                              color: rule.enabled ? p.textPrimary : p.textSecondary,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
                                           ),
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    ScheduleEngine.describeActionSummary(rule, widget.lang),
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: p.textSecondary,
-                                      fontFeatures: const [FontFeature.tabularFigures()],
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: (rule.actionType == ScheduleActionType.closeOnly
+                                                    ? const Color(0xFFF43F5E)
+                                                    : themeAccent)
+                                                .withValues(alpha: 0.18),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            ScheduleEngine.describeScheduleFrequency(rule, widget.lang),
+                                            style: TextStyle(
+                                              fontSize: 9.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: rule.actionType == ScheduleActionType.closeOnly
+                                                  ? const Color(0xFFFDA4AF)
+                                                  : themeAccent,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      ScheduleEngine.describeActionSummary(rule, widget.lang),
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: p.textSecondary,
+                                        fontFeatures: const [FontFeature.tabularFigures()],
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                          IconButton(
-                            onPressed: () => _openCustomRuleEditor(existing: rule),
-                            icon: Icon(Icons.edit_outlined, size: 16, color: p.textSecondary),
-                            tooltip: tr ? 'Düzenle' : 'Edit',
-                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                            padding: EdgeInsets.zero,
+                          TactilePress(
+                            child: IconButton(
+                              onPressed: () => _openCustomRuleEditor(existing: rule),
+                              icon: Icon(Icons.edit_outlined, size: 16, color: p.textSecondary),
+                              tooltip: tr ? 'Düzenle' : 'Edit',
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                              padding: EdgeInsets.zero,
+                            ),
                           ),
-                          IconButton(
-                            onPressed: () => widget.onDeleteCustomRule?.call(rule.id),
-                            icon: const Icon(Icons.delete_outline_rounded, size: 17, color: Color(0xFFF87171)),
-                            tooltip: tr ? 'Sil' : 'Delete',
-                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                            padding: EdgeInsets.zero,
+                          TactilePress(
+                            child: IconButton(
+                              onPressed: () => widget.onDeleteCustomRule?.call(rule.id),
+                              icon: const Icon(Icons.delete_outline_rounded, size: 17, color: Color(0xFFF87171)),
+                              tooltip: tr ? 'Sil' : 'Delete',
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                              padding: EdgeInsets.zero,
+                            ),
                           ),
                         ],
                       ),
@@ -3346,32 +3415,34 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 for (final sub in widget.subTabOrder) ...[
-                                  GestureDetector(
-                                    onTap: () => setState(() {
-                                      _selectedSubTab = sub;
-                                      _canVertScroll = false;
-                                    }),
-                                    child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 200),
-                                      margin: const EdgeInsets.symmetric(horizontal: 2),
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                                      decoration: BoxDecoration(
-                                        color: _activeSubTab == sub
-                                            ? themeAccent.withValues(alpha: 0.28)
-                                            : Colors.transparent,
-                                        borderRadius: BorderRadius.circular(999),
-                                        border: Border.all(
-                                          color: _activeSubTab == sub ? themeAccent : Colors.transparent,
+                                  TactilePress(
+                                    child: GestureDetector(
+                                      onTap: () => setState(() {
+                                        _selectedSubTab = sub;
+                                        _canVertScroll = false;
+                                      }),
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 200),
+                                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                                        decoration: BoxDecoration(
+                                          color: _activeSubTab == sub
+                                              ? themeAccent.withValues(alpha: 0.28)
+                                              : Colors.transparent,
+                                          borderRadius: BorderRadius.circular(999),
+                                          border: Border.all(
+                                            color: _activeSubTab == sub ? themeAccent : Colors.transparent,
+                                          ),
                                         ),
-                                      ),
-                                      child: Text(
-                                        sub == ScheduleSubTab.smartSchedule
-                                            ? (tr ? '⏰ Akıllı Zamanlama' : '⏰ Smart Schedule')
-                                            : (tr ? '💰 Günlük Tüketim & Tasarruf' : '💰 Daily Usage & Savings'),
-                                        style: TextStyle(
-                                          fontSize: 11.5,
-                                          fontWeight: FontWeight.w700,
-                                          color: _activeSubTab == sub ? p.textPrimary : p.textSecondary,
+                                        child: Text(
+                                          sub == ScheduleSubTab.smartSchedule
+                                              ? (tr ? '⏰ Akıllı Zamanlama' : '⏰ Smart Schedule')
+                                              : (tr ? '💰 Günlük Tüketim & Tasarruf' : '💰 Daily Usage & Savings'),
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: _activeSubTab == sub ? p.textPrimary : p.textSecondary,
+                                          ),
                                         ),
                                       ),
                                     ),

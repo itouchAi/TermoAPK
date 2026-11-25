@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/thermostat_state.dart';
+import '../widgets/tactile_button.dart';
 
 Future<void> showWidgetOrderSheet({
   required BuildContext context,
@@ -125,13 +126,15 @@ class _WidgetOrderModalState extends State<_WidgetOrderModal> {
                         ],
                       ),
                     ),
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: IconButton.styleFrom(
-                        backgroundColor: palette.cardBg,
-                        side: BorderSide(color: palette.cardBorder),
+                    TactilePress(
+                      child: IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: IconButton.styleFrom(
+                          backgroundColor: palette.cardBg,
+                          side: BorderSide(color: palette.cardBorder),
+                        ),
+                        icon: Icon(Icons.close_rounded, color: palette.textPrimary, size: 19),
                       ),
-                      icon: Icon(Icons.close_rounded, color: palette.textPrimary, size: 19),
                     ),
                   ],
                 ),
@@ -226,27 +229,31 @@ class _WidgetOrderModalState extends State<_WidgetOrderModal> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    TextButton.icon(
-                      onPressed: () => _apply(
-                        _visual.copyWith(
-                          tabOrder: VisualCustomizationState.defaultTabOrder,
-                          reportSubTabOrder: VisualCustomizationState.defaultReportSubOrder,
-                          scheduleSubTabOrder: VisualCustomizationState.defaultScheduleSubOrder,
+                    TactilePress(
+                      child: TextButton.icon(
+                        onPressed: () => _apply(
+                          _visual.copyWith(
+                            tabOrder: VisualCustomizationState.defaultTabOrder,
+                            reportSubTabOrder: VisualCustomizationState.defaultReportSubOrder,
+                            scheduleSubTabOrder: VisualCustomizationState.defaultScheduleSubOrder,
+                          ),
                         ),
+                        icon: const Icon(Icons.refresh_rounded, size: 16),
+                        label: Text(tr ? 'Varsayılan Düzene Dön' : 'Reset Default Order'),
+                        style: TextButton.styleFrom(foregroundColor: palette.textSecondary),
                       ),
-                      icon: const Icon(Icons.refresh_rounded, size: 16),
-                      label: Text(tr ? 'Varsayılan Düzene Dön' : 'Reset Default Order'),
-                      style: TextButton.styleFrom(foregroundColor: palette.textSecondary),
                     ),
-                    FilledButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: widget.accentColor,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 11),
+                    TactilePress(
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: widget.accentColor,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 11),
+                        ),
+                        child: Text(tr ? 'Tamam' : 'Done', style: const TextStyle(fontWeight: FontWeight.w700)),
                       ),
-                      child: Text(tr ? 'Tamam' : 'Done', style: const TextStyle(fontWeight: FontWeight.w700)),
                     ),
                   ],
                 ),
@@ -379,23 +386,29 @@ class _OrderTile extends StatelessWidget {
               ],
             ),
           ),
-          IconButton(
-            onPressed: index > 0 ? onMoveUp : null,
-            icon: const Icon(Icons.keyboard_arrow_up_rounded, size: 22),
-            color: palette.textPrimary,
-            disabledColor: palette.textSecondary.withValues(alpha: 0.25),
-            tooltip: 'Yukarı taşı',
-            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            padding: EdgeInsets.zero,
+          TactilePress(
+            enabled: index > 0,
+            child: IconButton(
+              onPressed: index > 0 ? onMoveUp : null,
+              icon: const Icon(Icons.keyboard_arrow_up_rounded, size: 22),
+              color: palette.textPrimary,
+              disabledColor: palette.textSecondary.withValues(alpha: 0.25),
+              tooltip: 'Yukarı taşı',
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              padding: EdgeInsets.zero,
+            ),
           ),
-          IconButton(
-            onPressed: index < total - 1 ? onMoveDown : null,
-            icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 22),
-            color: palette.textPrimary,
-            disabledColor: palette.textSecondary.withValues(alpha: 0.25),
-            tooltip: 'Aşağı taşı',
-            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            padding: EdgeInsets.zero,
+          TactilePress(
+            enabled: index < total - 1,
+            child: IconButton(
+              onPressed: index < total - 1 ? onMoveDown : null,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 22),
+              color: palette.textPrimary,
+              disabledColor: palette.textSecondary.withValues(alpha: 0.25),
+              tooltip: 'Aşağı taşı',
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              padding: EdgeInsets.zero,
+            ),
           ),
         ],
       ),

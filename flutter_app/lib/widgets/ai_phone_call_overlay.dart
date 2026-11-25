@@ -7,6 +7,7 @@ import '../services/ambient_audio_service.dart';
 import '../services/hardware_service.dart';
 import '../services/notification_service.dart';
 import '../services/voice_speech_service.dart';
+import 'tactile_button.dart';
 import 'termo_bot.dart';
 
 enum _CallPhase {
@@ -856,41 +857,44 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                               ),
                                             ),
                                           ),
-                                          GestureDetector(
-                                            onTap: () {
-                                              final nextMuted = !_speakerMuted;
-                                              setState(() => _speakerMuted = nextMuted);
-                                              if (nextMuted) {
-                                                VoiceSpeechService.stopSpeaking();
-                                                setState(() => _ttsPlaying = false);
-                                              } else {
-                                                _speakAloud(fullScript.replaceAll('✓', '').trim());
-                                              }
-                                            },
-                                            child: Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white.withValues(alpha: 0.06),
-                                                borderRadius: BorderRadius.circular(10),
-                                              ),
-                                              child: Row(
-                                                mainAxisSize: MainAxisSize.min,
-                                                children: [
-                                                  Icon(
-                                                    _speakerMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                                                    size: 15,
-                                                    color: _speakerMuted ? Colors.white38 : const Color(0xFF34D399),
-                                                  ),
-                                                  const SizedBox(width: 4),
-                                                  Text(
-                                                    _speakerMuted ? (tr ? 'Sessiz' : 'Muted') : (tr ? 'Sesli' : 'Voice'),
-                                                    style: TextStyle(
-                                                      fontSize: 10.5,
-                                                      fontWeight: FontWeight.w700,
-                                                      color: _speakerMuted ? Colors.white54 : const Color(0xFF6EE7B7),
+                                          TactilePress(
+                                            borderRadius: BorderRadius.circular(10),
+                                            child: GestureDetector(
+                                              onTap: () {
+                                                final nextMuted = !_speakerMuted;
+                                                setState(() => _speakerMuted = nextMuted);
+                                                if (nextMuted) {
+                                                  VoiceSpeechService.stopSpeaking();
+                                                  setState(() => _ttsPlaying = false);
+                                                } else {
+                                                  _speakAloud(fullScript.replaceAll('✓', '').trim());
+                                                }
+                                              },
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white.withValues(alpha: 0.06),
+                                                  borderRadius: BorderRadius.circular(10),
+                                                ),
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      _speakerMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                                                      size: 15,
+                                                      color: _speakerMuted ? Colors.white38 : const Color(0xFF34D399),
                                                     ),
-                                                  ),
-                                                ],
+                                                    const SizedBox(width: 4),
+                                                    Text(
+                                                      _speakerMuted ? (tr ? 'Sessiz' : 'Muted') : (tr ? 'Sesli' : 'Voice'),
+                                                      style: TextStyle(
+                                                        fontSize: 10.5,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: _speakerMuted ? Colors.white54 : const Color(0xFF6EE7B7),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -939,51 +943,54 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                       const SizedBox(height: 10),
 
                                       // Direct Microphone Permission & Voice Command Button
-                                      GestureDetector(
-                                        behavior: HitTestBehavior.opaque,
-                                        onTap: _toggleCallMic,
-                                        child: AnimatedContainer(
-                                          duration: const Duration(milliseconds: 200),
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                                          decoration: BoxDecoration(
-                                            color: _listeningCommand
-                                                ? const Color(0xFFEF4444).withValues(alpha: 0.22)
-                                                : const Color(0xFF10B981).withValues(alpha: 0.16),
-                                            borderRadius: BorderRadius.circular(12),
-                                            border: Border.all(
+                                      TactilePress.card(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: _toggleCallMic,
+                                          child: AnimatedContainer(
+                                            duration: const Duration(milliseconds: 200),
+                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                                            decoration: BoxDecoration(
                                               color: _listeningCommand
-                                                  ? const Color(0xFFF87171)
-                                                  : const Color(0xFF10B981).withValues(alpha: 0.55),
-                                            ),
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              Icon(
-                                                _listeningCommand ? Icons.stop_circle_rounded : Icons.mic_rounded,
-                                                size: 20,
+                                                  ? const Color(0xFFEF4444).withValues(alpha: 0.22)
+                                                  : const Color(0xFF10B981).withValues(alpha: 0.16),
+                                              borderRadius: BorderRadius.circular(12),
+                                              border: Border.all(
                                                 color: _listeningCommand
                                                     ? const Color(0xFFF87171)
-                                                    : const Color(0xFF34D399),
+                                                    : const Color(0xFF10B981).withValues(alpha: 0.55),
                                               ),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Text(
-                                                  _heardPreview ??
-                                                      (_ttsPlaying
-                                                          ? (tr
-                                                              ? 'Asistan konuşuyor, bitince otomatik dinlenecek...'
-                                                              : 'Speaking, mic starts automatically next...')
-                                                          : (tr
-                                                              ? 'Dinlenmediyse tekrar başlatmak için dokunun ("Kombiyi kapat", "Evet")'
-                                                              : 'Tap to re-listen ("Turn off boiler", "Yes")')),
-                                                  style: TextStyle(
-                                                    fontSize: 11.5,
-                                                    fontWeight: FontWeight.w700,
-                                                    color: _listeningCommand ? const Color(0xFFFCA5A5) : Colors.white,
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  _listeningCommand ? Icons.stop_circle_rounded : Icons.mic_rounded,
+                                                  size: 20,
+                                                  color: _listeningCommand
+                                                      ? const Color(0xFFF87171)
+                                                      : const Color(0xFF34D399),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text(
+                                                    _heardPreview ??
+                                                        (_ttsPlaying
+                                                            ? (tr
+                                                                ? 'Asistan konuşuyor, bitince otomatik dinlenecek...'
+                                                                : 'Speaking, mic starts automatically next...')
+                                                            : (tr
+                                                                ? 'Dinlenmediyse tekrar başlatmak için dokunun ("Kombiyi kapat", "Evet")'
+                                                                : 'Tap to re-listen ("Turn off boiler", "Yes")')),
+                                                    style: TextStyle(
+                                                      fontSize: 11.5,
+                                                      fontWeight: FontWeight.w700,
+                                                      color: _listeningCommand ? const Color(0xFFFCA5A5) : Colors.white,
+                                                    ),
                                                   ),
                                                 ),
-                                              ),
-                                            ],
+                                              ],
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -1020,19 +1027,22 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                             ),
                                           ),
                                           const SizedBox(width: 6),
-                                          FilledButton(
-                                            onPressed: () => _executeSpokenOrTypedCommand(_voiceCmdCtrl.text),
-                                            style: FilledButton.styleFrom(
-                                              backgroundColor: const Color(0xFF10B981),
-                                              foregroundColor: Colors.white,
-                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius: BorderRadius.circular(11),
+                                          TactilePress(
+                                            borderRadius: BorderRadius.circular(11),
+                                            child: FilledButton(
+                                              onPressed: () => _executeSpokenOrTypedCommand(_voiceCmdCtrl.text),
+                                              style: FilledButton.styleFrom(
+                                                backgroundColor: const Color(0xFF10B981),
+                                                foregroundColor: Colors.white,
+                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                                                shape: RoundedRectangleBorder(
+                                                  borderRadius: BorderRadius.circular(11),
+                                                ),
                                               ),
-                                            ),
-                                            child: Text(
-                                              tr ? 'Uygula' : 'Apply',
-                                              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                                              child: Text(
+                                                tr ? 'Uygula' : 'Apply',
+                                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                                              ),
                                             ),
                                           ),
                                         ],
@@ -1199,22 +1209,25 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                               )
                             : SizedBox(
                                 width: double.infinity,
-                                child: FilledButton.icon(
-                                  onPressed: _declineOrHangup,
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: const Color(0xFFEF4444),
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(vertical: 13),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(24),
+                                child: TactilePress.card(
+                                  borderRadius: BorderRadius.circular(24),
+                                  child: FilledButton.icon(
+                                    onPressed: _declineOrHangup,
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: const Color(0xFFEF4444),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 13),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(24),
+                                      ),
                                     ),
-                                  ),
-                                  icon: const Icon(Icons.call_end_rounded, size: 20),
-                                  label: Text(
-                                    _phase == _CallPhase.answered
-                                        ? (tr ? 'Görüşmeyi Bitir' : 'End Call')
-                                        : (tr ? 'Kapat' : 'Dismiss'),
-                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                                    icon: const Icon(Icons.call_end_rounded, size: 20),
+                                    label: Text(
+                                      _phase == _CallPhase.answered
+                                          ? (tr ? 'Görüşmeyi Bitir' : 'End Call')
+                                          : (tr ? 'Kapat' : 'Dismiss'),
+                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1291,23 +1304,26 @@ class _CircularCallButton extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        GestureDetector(
-          onTap: onTap,
-          child: Container(
-            width: 68,
-            height: 68,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: color,
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.45),
-                  blurRadius: 22,
-                  offset: const Offset(0, 6),
-                ),
-              ],
+        TactilePress(
+          borderRadius: BorderRadius.circular(34),
+          child: GestureDetector(
+            onTap: onTap,
+            child: Container(
+              width: 68,
+              height: 68,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: color,
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.45),
+                    blurRadius: 22,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Icon(icon, color: Colors.white, size: 30),
             ),
-            child: Icon(icon, color: Colors.white, size: 30),
           ),
         ),
         const SizedBox(height: 8),
@@ -1339,32 +1355,35 @@ class _InCallQuickButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
-        decoration: BoxDecoration(
-          color: accent.withValues(alpha: 0.14),
-          borderRadius: BorderRadius.circular(13),
-          border: Border.all(color: accent.withValues(alpha: 0.38)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 15, color: accent),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
+    return TactilePress(
+      borderRadius: BorderRadius.circular(13),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(13),
+            border: Border.all(color: accent.withValues(alpha: 0.38)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 15, color: accent),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
-                overflow: TextOverflow.ellipsis,
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

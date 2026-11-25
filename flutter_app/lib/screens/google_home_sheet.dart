@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/thermostat_state.dart';
 import '../services/firebase_sync_service.dart';
+import '../widgets/tactile_button.dart';
 
 Future<void> showGoogleHomeSheet({
   required BuildContext context,
@@ -338,13 +339,16 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                         ],
                       ),
                     ),
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.white.withValues(alpha: 0.06),
-                        side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
+                    TactilePress(
+                      borderRadius: BorderRadius.circular(20),
+                      child: IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.white.withValues(alpha: 0.06),
+                          side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
+                        ),
+                        icon: const Icon(Icons.close_rounded, color: Color(0xFF7DD3FC), size: 19),
                       ),
-                      icon: const Icon(Icons.close_rounded, color: Color(0xFF7DD3FC), size: 19),
                     ),
                   ],
                 ),
@@ -415,24 +419,27 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                                 ),
                                 for (final r in _rooms) ...[
                                   const SizedBox(width: 6),
-                                  GestureDetector(
-                                    onTap: () => _selectRoom(r),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: _settings.googleHomeRoom == r
-                                            ? const Color(0xFF38BDF8).withValues(alpha: 0.25)
-                                            : Colors.white.withValues(alpha: 0.05),
-                                        borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(
+                                  TactilePress(
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: GestureDetector(
+                                      onTap: () => _selectRoom(r),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                                        decoration: BoxDecoration(
                                           color: _settings.googleHomeRoom == r
-                                              ? const Color(0xFF38BDF8)
-                                              : Colors.white.withValues(alpha: 0.10),
+                                              ? const Color(0xFF38BDF8).withValues(alpha: 0.25)
+                                              : Colors.white.withValues(alpha: 0.05),
+                                          borderRadius: BorderRadius.circular(10),
+                                          border: Border.all(
+                                            color: _settings.googleHomeRoom == r
+                                                ? const Color(0xFF38BDF8)
+                                                : Colors.white.withValues(alpha: 0.10),
+                                          ),
                                         ),
-                                      ),
-                                      child: Text(
-                                        r,
-                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                                        child: Text(
+                                          r,
+                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -444,35 +451,43 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                           Row(
                             children: [
                               Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: _syncing ? null : () => _pushToFirebase(),
-                                  icon: Icon(_syncing ? Icons.sync_rounded : Icons.cloud_upload_outlined, size: 15),
-                                  label: Text(
-                                    tr ? 'Firebase\'e Yaz (Test)' : 'Push to RTDB',
-                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: const Color(0xFF6EE7B7),
-                                    side: BorderSide(color: const Color(0xFF10B981).withValues(alpha: 0.45)),
-                                    padding: const EdgeInsets.symmetric(vertical: 8),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                                child: TactilePress.card(
+                                  enabled: !_syncing,
+                                  borderRadius: BorderRadius.circular(11),
+                                  child: OutlinedButton.icon(
+                                    onPressed: _syncing ? null : () => _pushToFirebase(),
+                                    icon: Icon(_syncing ? Icons.sync_rounded : Icons.cloud_upload_outlined, size: 15),
+                                    label: Text(
+                                      tr ? 'Firebase\'e Yaz (Test)' : 'Push to RTDB',
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFF6EE7B7),
+                                      side: BorderSide(color: const Color(0xFF10B981).withValues(alpha: 0.45)),
+                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                                    ),
                                   ),
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: _syncing ? null : _pullFromFirebase,
-                                  icon: const Icon(Icons.cloud_download_outlined, size: 15),
-                                  label: Text(
-                                    tr ? 'Firebase\'den Çek' : 'Pull from RTDB',
-                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-                                  ),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: const Color(0xFF7DD3FC),
-                                    side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.45)),
-                                    padding: const EdgeInsets.symmetric(vertical: 8),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                                child: TactilePress.card(
+                                  enabled: !_syncing,
+                                  borderRadius: BorderRadius.circular(11),
+                                  child: OutlinedButton.icon(
+                                    onPressed: _syncing ? null : _pullFromFirebase,
+                                    icon: const Icon(Icons.cloud_download_outlined, size: 15),
+                                    label: Text(
+                                      tr ? 'Firebase\'den Çek' : 'Pull from RTDB',
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFF7DD3FC),
+                                      side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.45)),
+                                      padding: const EdgeInsets.symmetric(vertical: 8),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -561,17 +576,20 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                               ),
                             ),
                             const SizedBox(width: 8),
-                            FilledButton(
-                              onPressed: () => _runSimCommand(i),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF0284C7),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                minimumSize: Size.zero,
-                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            TactilePress(
+                              borderRadius: BorderRadius.circular(10),
+                              child: FilledButton(
+                                onPressed: () => _runSimCommand(i),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF0284C7),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                                child: Text(tr ? 'Test Et' : 'Test', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
                               ),
-                              child: Text(tr ? 'Test Et' : 'Test', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
                             ),
                           ],
                         ),
@@ -644,16 +662,19 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                           tr ? 'Hazır Firebase Cloud Functions Kodu:' : 'Ready Firebase Cloud Functions Code:',
                           style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF7DD3FC)),
                         ),
-                        OutlinedButton.icon(
-                          onPressed: _copyCode,
-                          icon: Icon(_copiedCode ? Icons.check_rounded : Icons.copy_rounded, size: 14),
-                          label: Text(_copiedCode ? (tr ? 'Kopyalandı' : 'Copied') : (tr ? 'Kodu Kopyala' : 'Copy Code'), style: const TextStyle(fontSize: 11)),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: _copiedCode ? const Color(0xFF6EE7B7) : const Color(0xFF7DD3FC),
-                            side: BorderSide(color: (_copiedCode ? const Color(0xFF10B981) : const Color(0xFF38BDF8)).withValues(alpha: 0.45)),
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        TactilePress(
+                          borderRadius: BorderRadius.circular(14),
+                          child: OutlinedButton.icon(
+                            onPressed: _copyCode,
+                            icon: Icon(_copiedCode ? Icons.check_rounded : Icons.copy_rounded, size: 14),
+                            label: Text(_copiedCode ? (tr ? 'Kopyalandı' : 'Copied') : (tr ? 'Kodu Kopyala' : 'Copy Code'), style: const TextStyle(fontSize: 11)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: _copiedCode ? const Color(0xFF6EE7B7) : const Color(0xFF7DD3FC),
+                              side: BorderSide(color: (_copiedCode ? const Color(0xFF10B981) : const Color(0xFF38BDF8)).withValues(alpha: 0.45)),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
                           ),
                         ),
                       ],
@@ -688,15 +709,18 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    FilledButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF0284C7),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+                    TactilePress(
+                      borderRadius: BorderRadius.circular(12),
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF0284C7),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+                        ),
+                        child: Text(tr ? 'Tamam' : 'Done', style: const TextStyle(fontWeight: FontWeight.w700)),
                       ),
-                      child: Text(tr ? 'Tamam' : 'Done', style: const TextStyle(fontWeight: FontWeight.w700)),
                     ),
                   ],
                 ),

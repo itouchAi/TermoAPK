@@ -20,6 +20,7 @@ import '../widgets/missed_call_alert.dart';
 import '../widgets/termo_bot.dart';
 import 'google_home_sheet.dart';
 import 'vault_center_sheet.dart';
+import '../widgets/tactile_button.dart';
 
 Future<void> showSystemSettingsSheet({
   required BuildContext context,
@@ -632,9 +633,11 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 style: const TextStyle(color: Colors.white70),
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dCtx).pop(),
-                  child: Text(tr ? 'Kapat' : 'Close'),
+                TactilePress(
+                  child: TextButton(
+                    onPressed: () => Navigator.of(dCtx).pop(),
+                    child: Text(tr ? 'Kapat' : 'Close'),
+                  ),
                 ),
               ],
             );
@@ -670,12 +673,14 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        IconButton(
-                          onPressed: () => Navigator.of(dCtx).pop(),
-                          icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 20),
-                          tooltip: tr ? 'Kapat' : 'Close',
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                        TactilePress(
+                          child: IconButton(
+                            onPressed: () => Navigator.of(dCtx).pop(),
+                            icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 20),
+                            tooltip: tr ? 'Kapat' : 'Close',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                          ),
                         ),
                       ],
                     ),
@@ -702,26 +707,30 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              OutlinedButton(
-                                onPressed: () => setModalState(
-                                  () => currentIdx = (currentIdx - 1 + currentList.length) % currentList.length,
+                              TactilePress(
+                                child: OutlinedButton(
+                                  onPressed: () => setModalState(
+                                    () => currentIdx = (currentIdx - 1 + currentList.length) % currentList.length,
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    minimumSize: const Size(38, 34),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                                  ),
+                                  child: const Icon(Icons.chevron_left_rounded, size: 18, color: Colors.white),
                                 ),
-                                style: OutlinedButton.styleFrom(
-                                  minimumSize: const Size(38, 34),
-                                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                                ),
-                                child: const Icon(Icons.chevron_left_rounded, size: 18, color: Colors.white),
                               ),
                               const SizedBox(width: 6),
-                              OutlinedButton(
-                                onPressed: () => setModalState(
-                                  () => currentIdx = (currentIdx + 1) % currentList.length,
+                              TactilePress(
+                                child: OutlinedButton(
+                                  onPressed: () => setModalState(
+                                    () => currentIdx = (currentIdx + 1) % currentList.length,
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    minimumSize: const Size(38, 34),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                                  ),
+                                  child: const Icon(Icons.chevron_right_rounded, size: 18, color: Colors.white),
                                 ),
-                                style: OutlinedButton.styleFrom(
-                                  minimumSize: const Size(38, 34),
-                                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                                ),
-                                child: const Icon(Icons.chevron_right_rounded, size: 18, color: Colors.white),
                               ),
                             ],
                           )
@@ -730,36 +739,40 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            TextButton.icon(
-                              onPressed: () {
-                                _hapticTap();
-                                final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages);
-                                final removed = updated.removeAt(currentIdx);
-                                unawaited(MediaStorageService.deleteMedia(removed.filePath));
-                                setState(() => _draft = _draft.copyWith(slideImages: updated));
-                                widget.onSaveSettings(_draft);
-                                if (updated.isEmpty) {
-                                  Navigator.of(dCtx).pop();
-                                } else {
-                                  setModalState(() {});
-                                }
-                              },
-                              icon: const Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFFCA5A5)),
-                              label: Text(
-                                tr ? 'Sil' : 'Delete',
-                                style: const TextStyle(color: Color(0xFFFCA5A5), fontWeight: FontWeight.w700),
+                            TactilePress(
+                              child: TextButton.icon(
+                                onPressed: () {
+                                  _hapticTap();
+                                  final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages);
+                                  final removed = updated.removeAt(currentIdx);
+                                  unawaited(MediaStorageService.deleteMedia(removed.filePath));
+                                  setState(() => _draft = _draft.copyWith(slideImages: updated));
+                                  widget.onSaveSettings(_draft);
+                                  if (updated.isEmpty) {
+                                    Navigator.of(dCtx).pop();
+                                  } else {
+                                    setModalState(() {});
+                                  }
+                                },
+                                icon: const Icon(Icons.delete_outline_rounded, size: 16, color: Color(0xFFFCA5A5)),
+                                label: Text(
+                                  tr ? 'Sil' : 'Delete',
+                                  style: const TextStyle(color: Color(0xFFFCA5A5), fontWeight: FontWeight.w700),
+                                ),
                               ),
                             ),
                             const SizedBox(width: 6),
-                            FilledButton(
-                              onPressed: () => Navigator.of(dCtx).pop(),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF2563EB),
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                              ),
-                              child: Text(
-                                tr ? 'Kapat' : 'Close',
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white),
+                            TactilePress(
+                              child: FilledButton(
+                                onPressed: () => Navigator.of(dCtx).pop(),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2563EB),
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                ),
+                                child: Text(
+                                  tr ? 'Kapat' : 'Close',
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white),
+                                ),
                               ),
                             ),
                           ],
@@ -883,23 +896,27 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           style: const TextStyle(color: Colors.white70, fontSize: 13),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dCtx).pop(),
-            child: Text(_lang == LangCode.tr ? 'Vazgeç' : 'Cancel'),
+          TactilePress(
+            child: TextButton(
+              onPressed: () => Navigator.of(dCtx).pop(),
+              child: Text(_lang == LangCode.tr ? 'Vazgeç' : 'Cancel'),
+            ),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
-            onPressed: () {
-              Navigator.of(dCtx).pop();
-              widget.onResetTelemetryHistory();
-              setState(() {
-                _draft = _draft.copyWith(espLogs: const []);
-                _statusBanner = _lang == LangCode.tr
-                    ? 'Tüm geçmiş tüketim ve telemetri kayıtları sıfırlandı.'
-                    : 'All usage history and telemetry cleared.';
-              });
-            },
-            child: Text(_lang == LangCode.tr ? 'Sıfırla' : 'Reset'),
+          TactilePress(
+            child: FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+              onPressed: () {
+                Navigator.of(dCtx).pop();
+                widget.onResetTelemetryHistory();
+                setState(() {
+                  _draft = _draft.copyWith(espLogs: const []);
+                  _statusBanner = _lang == LangCode.tr
+                      ? 'Tüm geçmiş tüketim ve telemetri kayıtları sıfırlandı.'
+                      : 'All usage history and telemetry cleared.';
+                });
+              },
+              child: Text(_lang == LangCode.tr ? 'Sıfırla' : 'Reset'),
+            ),
           ),
         ],
       ),
@@ -962,13 +979,15 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                         ],
                       ),
                     ),
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.white.withValues(alpha: 0.06),
-                        side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
+                    TactilePress(
+                      child: IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.white.withValues(alpha: 0.06),
+                          side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
+                        ),
+                        icon: const Icon(Icons.close_rounded, color: Color(0xFFFBBF24), size: 19),
                       ),
-                      icon: const Icon(Icons.close_rounded, color: Color(0xFFFBBF24), size: 19),
                     ),
                   ],
                 ),
@@ -999,44 +1018,48 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          TextButton.icon(
-                            onPressed: () {
-                              _hapticTap();
-                              setState(() {
-                                _draft = _draft.copyWith(menuOrder: SystemSettingsState.defaultMenuOrder);
-                              });
-                            },
-                            icon: const Icon(Icons.refresh_rounded, size: 14),
-                            label: Text(_lang == LangCode.tr ? 'Sıfırla' : 'Reset', style: const TextStyle(fontSize: 11)),
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.white70,
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          TactilePress(
+                            child: TextButton.icon(
+                              onPressed: () {
+                                _hapticTap();
+                                setState(() {
+                                  _draft = _draft.copyWith(menuOrder: SystemSettingsState.defaultMenuOrder);
+                                });
+                              },
+                              icon: const Icon(Icons.refresh_rounded, size: 14),
+                              label: Text(_lang == LangCode.tr ? 'Sıfırla' : 'Reset', style: const TextStyle(fontSize: 11)),
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.white70,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
                             ),
                           ),
                           const SizedBox(width: 4),
-                          OutlinedButton.icon(
-                            onPressed: () {
-                              _hapticTap();
-                              setState(() => _editOrderMode = !_editOrderMode);
-                            },
-                            icon: Icon(_editOrderMode ? Icons.check_rounded : Icons.edit_outlined, size: 13),
-                            label: Text(
-                              _editOrderMode
-                                  ? (_lang == LangCode.tr ? 'Bitti' : 'Done')
-                                  : (_lang == LangCode.tr ? 'Düzenle' : 'Edit'),
-                              style: const TextStyle(fontSize: 11),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFFFBBF24),
-                              backgroundColor: _editOrderMode
-                                  ? const Color(0xFFF59E0B).withValues(alpha: 0.18)
-                                  : Colors.transparent,
-                              side: BorderSide(color: const Color(0xFFF59E0B).withValues(alpha: 0.45)),
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          TactilePress(
+                            child: OutlinedButton.icon(
+                              onPressed: () {
+                                _hapticTap();
+                                setState(() => _editOrderMode = !_editOrderMode);
+                              },
+                              icon: Icon(_editOrderMode ? Icons.check_rounded : Icons.edit_outlined, size: 13),
+                              label: Text(
+                                _editOrderMode
+                                    ? (_lang == LangCode.tr ? 'Bitti' : 'Done')
+                                    : (_lang == LangCode.tr ? 'Düzenle' : 'Edit'),
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFFBBF24),
+                                backgroundColor: _editOrderMode
+                                    ? const Color(0xFFF59E0B).withValues(alpha: 0.18)
+                                    : Colors.transparent,
+                                side: BorderSide(color: const Color(0xFFF59E0B).withValues(alpha: 0.45)),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
                             ),
                           ),
                         ],
@@ -1102,80 +1125,84 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: TextButton.styleFrom(foregroundColor: Colors.white70),
-                      child: Text(_lang == LangCode.tr ? 'Kapat' : 'Close'),
+                    TactilePress(
+                      child: TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: TextButton.styleFrom(foregroundColor: Colors.white70),
+                        child: Text(_lang == LangCode.tr ? 'Kapat' : 'Close'),
+                      ),
                     ),
                     const SizedBox(width: 10),
-                    Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFFF59E0B), Color(0xFFEA580C)],
+                    TactilePress(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFFF59E0B), Color(0xFFEA580C)],
+                          ),
+                          boxShadow: [
+                            BoxShadow(color: const Color(0xFFEA580C).withValues(alpha: 0.40), blurRadius: 16),
+                          ],
                         ),
-                        boxShadow: [
-                          BoxShadow(color: const Color(0xFFEA580C).withValues(alpha: 0.40), blurRadius: 16),
-                        ],
-                      ),
-                      child: FilledButton(
-                        onPressed: () {
-                          _hapticTap();
-                          final typedEspId = _espIdCtrl.text.trim();
-                          final sanitizedNode = FirebaseSyncService.sanitizeNodePath(
-                            _firebaseNodeCtrl.text.trim().isEmpty
-                                ? _draft.firebaseNodePath
-                                : _firebaseNodeCtrl.text.trim(),
-                          );
-                          final resolvedVideoSource = _resolveVideoSource();
-                          final typedVideo = _customVideoUrlCtrl.text.trim();
-                          final videoHost = Uri.tryParse(typedVideo)?.host ?? '';
-                          final resolvedVideoLabel = resolvedVideoSource.isEmpty
-                              ? ''
-                              : (typedVideo.startsWith('http://') || typedVideo.startsWith('https://'))
-                                  ? (videoHost.isNotEmpty ? videoHost : 'Video URL')
-                                  : (_draft.customVideoLabel.isNotEmpty ? _draft.customVideoLabel : typedVideo);
-                          final resolvedAudioSource = _resolveAudioSource();
-                          final resolvedAudioLabel = _customAudioCtrl.text.trim();
-                          final resolvedTrack = (resolvedAudioSource.isNotEmpty || resolvedAudioLabel.isNotEmpty)
-                              ? AmbientSoundtrack.customMp3
-                              : AmbientSoundtrack.silent;
-                          final updated = _draft.copyWith(
-                            firebaseRtdbUrl: _firebaseUrlCtrl.text.trim(),
-                            firebaseApiKey: _firebaseApiKeyCtrl.text.trim(),
-                            firebaseNodePath: sanitizedNode,
-                            espDeviceId: typedEspId.isEmpty ? _draft.espDeviceId : typedEspId,
-                            ambientSoundtrack: resolvedTrack,
-                            customAudioLabel: resolvedAudioLabel,
-                            customAudioSource: resolvedAudioSource,
-                            customVideoLabel: resolvedVideoLabel,
-                            customVideoSource: resolvedVideoSource,
-                          );
-                          widget.onChangeLang(_lang);
-                          widget.onChangeLocation(_location);
-                          widget.onSaveSettings(updated);
-                          setState(() {
-                            _draft = updated;
-                            _savedToastVisible = true;
-                            _statusBanner = _lang == LangCode.tr
-                                ? '✓ Tüm ayarlar kaydedildi.'
-                                : '✓ All settings saved.';
-                          });
-                          Future.delayed(const Duration(seconds: 3), () {
-                            if (mounted) {
-                              setState(() => _savedToastVisible = false);
-                            }
-                          });
-                        },
-                        style: FilledButton.styleFrom(
-                          backgroundColor: Colors.transparent,
-                          shadowColor: Colors.transparent,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        ),
-                        child: Text(
-                          _lang == LangCode.tr ? 'Ayarları Kaydet' : 'Save Settings',
-                          style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white),
+                        child: FilledButton(
+                          onPressed: () {
+                            _hapticTap();
+                            final typedEspId = _espIdCtrl.text.trim();
+                            final sanitizedNode = FirebaseSyncService.sanitizeNodePath(
+                              _firebaseNodeCtrl.text.trim().isEmpty
+                                  ? _draft.firebaseNodePath
+                                  : _firebaseNodeCtrl.text.trim(),
+                            );
+                            final resolvedVideoSource = _resolveVideoSource();
+                            final typedVideo = _customVideoUrlCtrl.text.trim();
+                            final videoHost = Uri.tryParse(typedVideo)?.host ?? '';
+                            final resolvedVideoLabel = resolvedVideoSource.isEmpty
+                                ? ''
+                                : (typedVideo.startsWith('http://') || typedVideo.startsWith('https://'))
+                                    ? (videoHost.isNotEmpty ? videoHost : 'Video URL')
+                                    : (_draft.customVideoLabel.isNotEmpty ? _draft.customVideoLabel : typedVideo);
+                            final resolvedAudioSource = _resolveAudioSource();
+                            final resolvedAudioLabel = _customAudioCtrl.text.trim();
+                            final resolvedTrack = (resolvedAudioSource.isNotEmpty || resolvedAudioLabel.isNotEmpty)
+                                ? AmbientSoundtrack.customMp3
+                                : AmbientSoundtrack.silent;
+                            final updated = _draft.copyWith(
+                              firebaseRtdbUrl: _firebaseUrlCtrl.text.trim(),
+                              firebaseApiKey: _firebaseApiKeyCtrl.text.trim(),
+                              firebaseNodePath: sanitizedNode,
+                              espDeviceId: typedEspId.isEmpty ? _draft.espDeviceId : typedEspId,
+                              ambientSoundtrack: resolvedTrack,
+                              customAudioLabel: resolvedAudioLabel,
+                              customAudioSource: resolvedAudioSource,
+                              customVideoLabel: resolvedVideoLabel,
+                              customVideoSource: resolvedVideoSource,
+                            );
+                            widget.onChangeLang(_lang);
+                            widget.onChangeLocation(_location);
+                            widget.onSaveSettings(updated);
+                            setState(() {
+                              _draft = updated;
+                              _savedToastVisible = true;
+                              _statusBanner = _lang == LangCode.tr
+                                  ? '✓ Tüm ayarlar kaydedildi.'
+                                  : '✓ All settings saved.';
+                            });
+                            Future.delayed(const Duration(seconds: 3), () {
+                              if (mounted) {
+                                setState(() => _savedToastVisible = false);
+                              }
+                            });
+                          },
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.transparent,
+                            shadowColor: Colors.transparent,
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          child: Text(
+                            _lang == LangCode.tr ? 'Ayarları Kaydet' : 'Save Settings',
+                            style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.white),
+                          ),
                         ),
                       ),
                     ),
@@ -1212,15 +1239,17 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 children: [
                   for (final code in LangCode.values) ...[
                     const SizedBox(width: 4),
-                    ChoiceChip(
-                      label: Text(code.name.toUpperCase(), style: const TextStyle(fontSize: 11)),
-                      selected: _lang == code,
-                      visualDensity: VisualDensity.compact,
-                      selectedColor: widget.accentColor.withValues(alpha: 0.35),
-                      onSelected: (_) {
-                        _hapticTap();
-                        setState(() => _lang = code);
-                      },
+                    TactilePress(
+                      child: ChoiceChip(
+                        label: Text(code.name.toUpperCase(), style: const TextStyle(fontSize: 11)),
+                        selected: _lang == code,
+                        visualDensity: VisualDensity.compact,
+                        selectedColor: widget.accentColor.withValues(alpha: 0.35),
+                        onSelected: (_) {
+                          _hapticTap();
+                          setState(() => _lang = code);
+                        },
+                      ),
                     ),
                   ],
                 ],
@@ -1233,29 +1262,31 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               for (int i = 0; i < _locations.length; i++) ...[
                 if (i > 0) const SizedBox(width: 6),
                 Expanded(
-                  child: GestureDetector(
-                    onTap: () {
-                      _hapticTap();
-                      setState(() => _location = _locations[i]);
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: _location == _locations[i]
-                            ? Colors.white.withValues(alpha: 0.14)
-                            : Colors.white.withValues(alpha: 0.04),
-                        borderRadius: BorderRadius.circular(11),
-                        border: Border.all(
+                  child: TactilePress(
+                    child: GestureDetector(
+                      onTap: () {
+                        _hapticTap();
+                        setState(() => _location = _locations[i]);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
                           color: _location == _locations[i]
-                              ? Colors.white.withValues(alpha: 0.30)
-                              : Colors.white.withValues(alpha: 0.08),
+                              ? Colors.white.withValues(alpha: 0.14)
+                              : Colors.white.withValues(alpha: 0.04),
+                          borderRadius: BorderRadius.circular(11),
+                          border: Border.all(
+                            color: _location == _locations[i]
+                                ? Colors.white.withValues(alpha: 0.30)
+                                : Colors.white.withValues(alpha: 0.08),
+                          ),
                         ),
-                      ),
-                      child: Text(
-                        _locations[i],
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
-                        overflow: TextOverflow.ellipsis,
+                        child: Text(
+                          _locations[i],
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ),
                   ),
@@ -1346,17 +1377,23 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        IconButton(
-                          onPressed: index > 0 ? () => _shiftItem(index, -1) : null,
-                          icon: const Icon(Icons.keyboard_arrow_up_rounded, size: 20),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        TactilePress(
+                          enabled: index > 0,
+                          child: IconButton(
+                            onPressed: index > 0 ? () => _shiftItem(index, -1) : null,
+                            icon: const Icon(Icons.keyboard_arrow_up_rounded, size: 20),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          ),
                         ),
-                        IconButton(
-                          onPressed: index < _draft.menuOrder.length - 1 ? () => _shiftItem(index, 1) : null,
-                          icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 20),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                        TactilePress(
+                          enabled: index < _draft.menuOrder.length - 1,
+                          child: IconButton(
+                            onPressed: index < _draft.menuOrder.length - 1 ? () => _shiftItem(index, 1) : null,
+                            icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 20),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          ),
                         ),
                       ],
                     )
@@ -1657,18 +1694,20 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               ],
             ),
             const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _openVaultCenter,
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFF59E0B),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 11),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              icon: const Icon(Icons.lock_open_rounded, size: 17),
-              label: Text(
-                tr ? 'Şifreli Kasa ve Bildirim Merkezini Aç' : 'Open Encrypted Vault & Alerts Center',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            TactilePress(
+              child: FilledButton.icon(
+                onPressed: _openVaultCenter,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFF59E0B),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                icon: const Icon(Icons.lock_open_rounded, size: 17),
+                label: Text(
+                  tr ? 'Şifreli Kasa ve Bildirim Merkezini Aç' : 'Open Encrypted Vault & Alerts Center',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                ),
               ),
             ),
           ],
@@ -1714,18 +1753,20 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               ),
             ),
             const SizedBox(height: 10),
-            FilledButton.icon(
-              onPressed: _openGoogleHome,
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF0284C7),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 11),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              icon: const Icon(Icons.home_outlined, size: 17),
-              label: Text(
-                tr ? 'Google Home & Asistan Entegrasyonunu Yönet' : 'Manage Google Home & Assistant Integration',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            TactilePress(
+              child: FilledButton.icon(
+                onPressed: _openGoogleHome,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF0284C7),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                icon: const Icon(Icons.home_outlined, size: 17),
+                label: Text(
+                  tr ? 'Google Home & Asistan Entegrasyonunu Yönet' : 'Manage Google Home & Assistant Integration',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                ),
               ),
             ),
           ],
@@ -1824,55 +1865,57 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
 
         Widget buildModeCard((SmartDisplayMode, String, String) m) {
           final selected = activeMode == m.$1;
-          return GestureDetector(
-            onTap: () {
-              _hapticTap();
-              setState(() {
-                _draft = _draft.copyWith(smartDisplayMode: m.$1);
-                if (m.$1 == SmartDisplayMode.liveNature) {
-                  _themesAudioAccordionExpanded = true;
-                }
-              });
-            },
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              decoration: BoxDecoration(
-                color: selected
-                    ? const Color(0xFFF59E0B).withValues(alpha: 0.14)
-                    : Colors.white.withValues(alpha: 0.03),
-                borderRadius: BorderRadius.circular(11),
-                border: Border.all(
+          return TactilePress.card(
+            child: GestureDetector(
+              onTap: () {
+                _hapticTap();
+                setState(() {
+                  _draft = _draft.copyWith(smartDisplayMode: m.$1);
+                  if (m.$1 == SmartDisplayMode.liveNature) {
+                    _themesAudioAccordionExpanded = true;
+                  }
+                });
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
                   color: selected
-                      ? const Color(0xFFFBBF24)
-                      : Colors.white.withValues(alpha: 0.10),
+                      ? const Color(0xFFF59E0B).withValues(alpha: 0.14)
+                      : Colors.white.withValues(alpha: 0.03),
+                  borderRadius: BorderRadius.circular(11),
+                  border: Border.all(
+                    color: selected
+                        ? const Color(0xFFFBBF24)
+                        : Colors.white.withValues(alpha: 0.10),
+                  ),
                 ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          m.$2,
-                          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            m.$2,
+                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                      if (selected)
-                        const Icon(Icons.check_rounded, size: 13, color: Color(0xFFFBBF24)),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    m.$3,
-                    style: TextStyle(fontSize: 9.0, color: Colors.white.withValues(alpha: 0.56)),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+                        if (selected)
+                          const Icon(Icons.check_rounded, size: 13, color: Color(0xFFFBBF24)),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      m.$3,
+                      style: TextStyle(fontSize: 9.0, color: Colors.white.withValues(alpha: 0.56)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
             ),
           );
@@ -1898,46 +1941,48 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                   children: [
                     for (int idx = 0; idx < layoutModes.length; idx++) ...[
                       Expanded(
-                        child: GestureDetector(
-                          onTap: () {
-                            _hapticTap();
-                            setState(() => _draft = _draft.copyWith(smartDisplayLayout: layoutModes[idx].$1));
-                          },
-                          child: Container(
-                            margin: EdgeInsets.only(right: idx == layoutModes.length - 1 ? 0 : 6),
-                            padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
-                            decoration: BoxDecoration(
-                              color: _draft.smartDisplayLayout == layoutModes[idx].$1
-                                  ? const Color(0xFF4F46E5).withValues(alpha: 0.50)
-                                  : Colors.white.withValues(alpha: 0.04),
-                              borderRadius: BorderRadius.circular(11),
-                              border: Border.all(
+                        child: TactilePress.card(
+                          child: GestureDetector(
+                            onTap: () {
+                              _hapticTap();
+                              setState(() => _draft = _draft.copyWith(smartDisplayLayout: layoutModes[idx].$1));
+                            },
+                            child: Container(
+                              margin: EdgeInsets.only(right: idx == layoutModes.length - 1 ? 0 : 6),
+                              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
+                              decoration: BoxDecoration(
                                 color: _draft.smartDisplayLayout == layoutModes[idx].$1
-                                    ? const Color(0xFF818CF8)
-                                    : Colors.white.withValues(alpha: 0.10),
+                                    ? const Color(0xFF4F46E5).withValues(alpha: 0.50)
+                                    : Colors.white.withValues(alpha: 0.04),
+                                borderRadius: BorderRadius.circular(11),
+                                border: Border.all(
+                                  color: _draft.smartDisplayLayout == layoutModes[idx].$1
+                                      ? const Color(0xFF818CF8)
+                                      : Colors.white.withValues(alpha: 0.10),
+                                ),
                               ),
-                            ),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  layoutModes[idx].$2,
-                                  style: const TextStyle(
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    layoutModes[idx].$2,
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  layoutModes[idx].$3,
-                                  style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.62)),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    layoutModes[idx].$3,
+                                    style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.62)),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -2006,70 +2051,76 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                     ),
                   ),
                   const SizedBox(width: 6),
-                  FilledButton.tonalIcon(
-                    onPressed: _pickLocalMp3,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.30),
-                      foregroundColor: const Color(0xFF7DD3FC),
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                    icon: const Icon(Icons.audio_file_outlined, size: 15),
-                    label: Text(
-                      tr ? 'MP3 Seç' : 'MP3',
-                      style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                  TactilePress(
+                    child: FilledButton.tonalIcon(
+                      onPressed: _pickLocalMp3,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.30),
+                        foregroundColor: const Color(0xFF7DD3FC),
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      icon: const Icon(Icons.audio_file_outlined, size: 15),
+                      label: Text(
+                        tr ? 'MP3 Seç' : 'MP3',
+                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 6),
-                  GestureDetector(
-                    onTap: _toggleAudioPreview,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: _audioPreviewPlaying
-                            ? const Color(0xFFEF4444).withValues(alpha: 0.25)
-                            : const Color(0xFF0284C7).withValues(alpha: 0.25),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
+                  TactilePress(
+                    child: GestureDetector(
+                      onTap: _toggleAudioPreview,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 10),
+                        decoration: BoxDecoration(
                           color: _audioPreviewPlaying
-                              ? const Color(0xFFFCA5A5)
-                              : const Color(0xFF38BDF8),
+                              ? const Color(0xFFEF4444).withValues(alpha: 0.25)
+                              : const Color(0xFF0284C7).withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: _audioPreviewPlaying
+                                ? const Color(0xFFFCA5A5)
+                                : const Color(0xFF38BDF8),
+                          ),
                         ),
-                      ),
-                      child: Icon(
-                        _audioPreviewPlaying ? Icons.stop_rounded : Icons.volume_up_rounded,
-                        size: 16,
-                        color: Colors.white,
+                        child: Icon(
+                          _audioPreviewPlaying ? Icons.stop_rounded : Icons.volume_up_rounded,
+                          size: 16,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ),
                   if (hasCustomAudio) ...[
                     const SizedBox(width: 6),
-                    GestureDetector(
-                      onTap: () {
-                        _hapticTap();
-                        AmbientAudioService.stop();
-                        AmbientAudioService.setCustomAudioBytes(null);
-                        unawaited(MediaStorageService.deleteMedia(_draft.customAudioSource));
-                        _customAudioCtrl.clear();
-                        setState(() {
-                          _audioPreviewPlaying = false;
-                          _draft = _draft.copyWith(
-                            ambientSoundtrack: AmbientSoundtrack.silent,
-                            customAudioLabel: '',
-                            customAudioSource: '',
-                          );
-                        });
-                        widget.onSaveSettings(_draft);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFEF4444).withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: const Color(0xFFFCA5A5).withValues(alpha: 0.55)),
+                    TactilePress(
+                      child: GestureDetector(
+                        onTap: () {
+                          _hapticTap();
+                          AmbientAudioService.stop();
+                          AmbientAudioService.setCustomAudioBytes(null);
+                          unawaited(MediaStorageService.deleteMedia(_draft.customAudioSource));
+                          _customAudioCtrl.clear();
+                          setState(() {
+                            _audioPreviewPlaying = false;
+                            _draft = _draft.copyWith(
+                              ambientSoundtrack: AmbientSoundtrack.silent,
+                              customAudioLabel: '',
+                              customAudioSource: '',
+                            );
+                          });
+                          widget.onSaveSettings(_draft);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEF4444).withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFFCA5A5).withValues(alpha: 0.55)),
+                          ),
+                          child: const Icon(Icons.close_rounded, size: 16, color: Color(0xFFFCA5A5)),
                         ),
-                        child: const Icon(Icons.close_rounded, size: 16, color: Color(0xFFFCA5A5)),
                       ),
                     ),
                   ],
@@ -2093,52 +2144,54 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Launch Smart Display Fullscreen CTA
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                gradient: const LinearGradient(colors: [Color(0xFFEA580C), Color(0xFFB45309)]),
-                boxShadow: [BoxShadow(color: const Color(0xFFEA580C).withValues(alpha: 0.35), blurRadius: 14)],
-              ),
-              child: FilledButton.icon(
-                onPressed: () {
-                  _hapticTap();
-                  if (_audioPreviewPlaying) {
-                    AmbientAudioService.stop();
-                    _audioPreviewPlaying = false;
-                  }
-                  final resolvedVideoSource = _resolveVideoSource();
-                  final typedVideo = _customVideoUrlCtrl.text.trim();
-                  final videoHost = Uri.tryParse(typedVideo)?.host ?? '';
-                  final resolvedVideoLabel = resolvedVideoSource.isEmpty
-                      ? ''
-                      : (typedVideo.startsWith('http://') || typedVideo.startsWith('https://'))
-                          ? (videoHost.isNotEmpty ? videoHost : 'Video URL')
-                          : (_draft.customVideoLabel.isNotEmpty ? _draft.customVideoLabel : typedVideo);
-                  final resolvedAudioSource = _resolveAudioSource();
-                  final resolvedAudioLabel = _customAudioCtrl.text.trim();
-                  final resolvedTrack = (resolvedAudioSource.isNotEmpty || resolvedAudioLabel.isNotEmpty)
-                      ? AmbientSoundtrack.customMp3
-                      : AmbientSoundtrack.silent;
-                  final updated = _draft.copyWith(
-                    ambientSoundtrack: resolvedTrack,
-                    customAudioLabel: resolvedAudioLabel,
-                    customAudioSource: resolvedAudioSource,
-                    customVideoLabel: resolvedVideoLabel,
-                    customVideoSource: resolvedVideoSource,
-                  );
-                  widget.onSaveSettings(updated);
-                  Navigator.of(context).pop();
-                  widget.onOpenAmbient();
-                },
-                icon: const Icon(Icons.play_arrow_rounded, size: 19, color: Colors.white),
-                label: Text(
-                  tr ? 'Smart Display\'i Şimdi Başlat (Tam Ekran)' : 'Launch Smart Display (Fullscreen)',
-                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white),
+            TactilePress.card(
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: const LinearGradient(colors: [Color(0xFFEA580C), Color(0xFFB45309)]),
+                  boxShadow: [BoxShadow(color: const Color(0xFFEA580C).withValues(alpha: 0.35), blurRadius: 14)],
                 ),
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.transparent,
-                  shadowColor: Colors.transparent,
-                  padding: const EdgeInsets.symmetric(vertical: 11),
+                child: FilledButton.icon(
+                  onPressed: () {
+                    _hapticTap();
+                    if (_audioPreviewPlaying) {
+                      AmbientAudioService.stop();
+                      _audioPreviewPlaying = false;
+                    }
+                    final resolvedVideoSource = _resolveVideoSource();
+                    final typedVideo = _customVideoUrlCtrl.text.trim();
+                    final videoHost = Uri.tryParse(typedVideo)?.host ?? '';
+                    final resolvedVideoLabel = resolvedVideoSource.isEmpty
+                        ? ''
+                        : (typedVideo.startsWith('http://') || typedVideo.startsWith('https://'))
+                            ? (videoHost.isNotEmpty ? videoHost : 'Video URL')
+                            : (_draft.customVideoLabel.isNotEmpty ? _draft.customVideoLabel : typedVideo);
+                    final resolvedAudioSource = _resolveAudioSource();
+                    final resolvedAudioLabel = _customAudioCtrl.text.trim();
+                    final resolvedTrack = (resolvedAudioSource.isNotEmpty || resolvedAudioLabel.isNotEmpty)
+                        ? AmbientSoundtrack.customMp3
+                        : AmbientSoundtrack.silent;
+                    final updated = _draft.copyWith(
+                      ambientSoundtrack: resolvedTrack,
+                      customAudioLabel: resolvedAudioLabel,
+                      customAudioSource: resolvedAudioSource,
+                      customVideoLabel: resolvedVideoLabel,
+                      customVideoSource: resolvedVideoSource,
+                    );
+                    widget.onSaveSettings(updated);
+                    Navigator.of(context).pop();
+                    widget.onOpenAmbient();
+                  },
+                  icon: const Icon(Icons.play_arrow_rounded, size: 19, color: Colors.white),
+                  label: Text(
+                    tr ? 'Smart Display\'i Şimdi Başlat (Tam Ekran)' : 'Launch Smart Display (Fullscreen)',
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.white),
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
+                    padding: const EdgeInsets.symmetric(vertical: 11),
+                  ),
                 ),
               ),
             ),
@@ -2235,18 +2288,20 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        FilledButton.icon(
-                          onPressed: _pickCustomVideo,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF0284C7),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          icon: const Icon(Icons.video_library_outlined, size: 15),
-                          label: Text(
-                            tr ? 'Video Seç' : 'Pick Video',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                        TactilePress(
+                          child: FilledButton.icon(
+                            onPressed: _pickCustomVideo,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF0284C7),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            icon: const Icon(Icons.video_library_outlined, size: 15),
+                            label: Text(
+                              tr ? 'Video Seç' : 'Pick Video',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                            ),
                           ),
                         ),
                       ],
@@ -2261,37 +2316,39 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                           ),
                         ),
                         const SizedBox(width: 6),
-                        FilledButton(
-                          onPressed: () {
-                            _hapticTap();
-                            final raw = _customVideoUrlCtrl.text.trim();
-                            if (raw.startsWith('http://') || raw.startsWith('https://')) {
-                              final host = Uri.tryParse(raw)?.host ?? '';
-                              setState(() {
-                                _draft = _draft.copyWith(
-                                  smartDisplayMode: SmartDisplayMode.silentVideoMp3,
-                                  customVideoSource: raw,
-                                  customVideoLabel: host.isNotEmpty ? host : 'Video URL',
-                                );
-                                _statusBanner = tr ? 'Video URL uygulandı.' : 'Video URL applied.';
-                              });
-                            } else {
-                              setState(() {
-                                _statusBanner = tr
-                                    ? 'Geçerli bir https:// video URL girin veya Video Seç kullanın.'
-                                    : 'Enter a valid https:// video URL or pick a local video.';
-                              });
-                            }
-                          },
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFFF59E0B),
-                            foregroundColor: const Color(0xFF18181B),
-                            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 11),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          child: Text(
-                            tr ? 'Uygula' : 'Apply',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                        TactilePress(
+                          child: FilledButton(
+                            onPressed: () {
+                              _hapticTap();
+                              final raw = _customVideoUrlCtrl.text.trim();
+                              if (raw.startsWith('http://') || raw.startsWith('https://')) {
+                                final host = Uri.tryParse(raw)?.host ?? '';
+                                setState(() {
+                                  _draft = _draft.copyWith(
+                                    smartDisplayMode: SmartDisplayMode.silentVideoMp3,
+                                    customVideoSource: raw,
+                                    customVideoLabel: host.isNotEmpty ? host : 'Video URL',
+                                  );
+                                  _statusBanner = tr ? 'Video URL uygulandı.' : 'Video URL applied.';
+                                });
+                              } else {
+                                setState(() {
+                                  _statusBanner = tr
+                                      ? 'Geçerli bir https:// video URL girin veya Video Seç kullanın.'
+                                      : 'Enter a valid https:// video URL or pick a local video.';
+                                });
+                              }
+                            },
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFFF59E0B),
+                              foregroundColor: const Color(0xFF18181B),
+                              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 11),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            child: Text(
+                              tr ? 'Uygula' : 'Apply',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                            ),
                           ),
                         ),
                       ],
@@ -2330,14 +2387,16 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                           ),
                         ),
                         if (_draft.customVideoSource.isNotEmpty)
-                          GestureDetector(
-                            onTap: _clearCustomVideo,
-                            child: Text(
-                              tr ? 'Temizle' : 'Clear',
-                              style: const TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFFF87171),
+                          TactilePress(
+                            child: GestureDetector(
+                              onTap: _clearCustomVideo,
+                              child: Text(
+                                tr ? 'Temizle' : 'Clear',
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFF87171),
+                                ),
                               ),
                             ),
                           ),
@@ -2428,36 +2487,38 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                                   Expanded(
                                     child: Padding(
                                       padding: EdgeInsets.only(right: idx < 2 ? 6 : 0),
-                                      child: GestureDetector(
-                                        onTap: () {
-                                          _hapticTap();
-                                          setState(() => _draft = _draft.copyWith(
-                                                smartDisplayVisualTheme: visualThemes[idx].$1,
-                                              ));
-                                        },
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 9),
-                                          alignment: Alignment.center,
-                                          decoration: BoxDecoration(
-                                            color: _draft.smartDisplayVisualTheme == visualThemes[idx].$1
-                                                ? const Color(0xFF0284C7).withValues(alpha: 0.42)
-                                                : Colors.white.withValues(alpha: 0.04),
-                                            borderRadius: BorderRadius.circular(10),
-                                            border: Border.all(
+                                      child: TactilePress.card(
+                                        child: GestureDetector(
+                                          onTap: () {
+                                            _hapticTap();
+                                            setState(() => _draft = _draft.copyWith(
+                                                  smartDisplayVisualTheme: visualThemes[idx].$1,
+                                                ));
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 9),
+                                            alignment: Alignment.center,
+                                            decoration: BoxDecoration(
                                               color: _draft.smartDisplayVisualTheme == visualThemes[idx].$1
-                                                  ? const Color(0xFF38BDF8)
-                                                  : Colors.white.withValues(alpha: 0.10),
+                                                  ? const Color(0xFF0284C7).withValues(alpha: 0.42)
+                                                  : Colors.white.withValues(alpha: 0.04),
+                                              borderRadius: BorderRadius.circular(10),
+                                              border: Border.all(
+                                                color: _draft.smartDisplayVisualTheme == visualThemes[idx].$1
+                                                    ? const Color(0xFF38BDF8)
+                                                    : Colors.white.withValues(alpha: 0.10),
+                                              ),
                                             ),
-                                          ),
-                                          child: Text(
-                                            visualThemes[idx].$2,
-                                            style: const TextStyle(
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.w700,
-                                              color: Colors.white,
+                                            child: Text(
+                                              visualThemes[idx].$2,
+                                              style: const TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w700,
+                                                color: Colors.white,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
                                           ),
                                         ),
                                       ),
@@ -2472,36 +2533,38 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                                   Expanded(
                                     child: Padding(
                                       padding: EdgeInsets.only(right: idx < 5 ? 6 : 0),
-                                      child: GestureDetector(
-                                        onTap: () {
-                                          _hapticTap();
-                                          setState(() => _draft = _draft.copyWith(
-                                                smartDisplayVisualTheme: visualThemes[idx].$1,
-                                              ));
-                                        },
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 9),
-                                          alignment: Alignment.center,
-                                          decoration: BoxDecoration(
-                                            color: _draft.smartDisplayVisualTheme == visualThemes[idx].$1
-                                                ? const Color(0xFF0284C7).withValues(alpha: 0.42)
-                                                : Colors.white.withValues(alpha: 0.04),
-                                            borderRadius: BorderRadius.circular(10),
-                                            border: Border.all(
+                                      child: TactilePress.card(
+                                        child: GestureDetector(
+                                          onTap: () {
+                                            _hapticTap();
+                                            setState(() => _draft = _draft.copyWith(
+                                                  smartDisplayVisualTheme: visualThemes[idx].$1,
+                                                ));
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 9),
+                                            alignment: Alignment.center,
+                                            decoration: BoxDecoration(
                                               color: _draft.smartDisplayVisualTheme == visualThemes[idx].$1
-                                                  ? const Color(0xFF38BDF8)
-                                                  : Colors.white.withValues(alpha: 0.10),
+                                                  ? const Color(0xFF0284C7).withValues(alpha: 0.42)
+                                                  : Colors.white.withValues(alpha: 0.04),
+                                              borderRadius: BorderRadius.circular(10),
+                                              border: Border.all(
+                                                color: _draft.smartDisplayVisualTheme == visualThemes[idx].$1
+                                                    ? const Color(0xFF38BDF8)
+                                                    : Colors.white.withValues(alpha: 0.10),
+                                              ),
                                             ),
-                                          ),
-                                          child: Text(
-                                            visualThemes[idx].$2,
-                                            style: const TextStyle(
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.w700,
-                                              color: Colors.white,
+                                            child: Text(
+                                              visualThemes[idx].$2,
+                                              style: const TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w700,
+                                                color: Colors.white,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
                                           ),
                                         ),
                                       ),
@@ -2549,27 +2612,29 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                               children: [
                                 for (final sec in slideDurations)
                                   Expanded(
-                                    child: GestureDetector(
-                                      onTap: () {
-                                        _hapticTap();
-                                        setState(() => _draft = _draft.copyWith(slideDurationSeconds: sec));
-                                      },
-                                      child: Container(
-                                        margin: const EdgeInsets.only(right: 4),
-                                        padding: const EdgeInsets.symmetric(vertical: 5),
-                                        alignment: Alignment.center,
-                                        decoration: BoxDecoration(
-                                          color: _draft.slideDurationSeconds == sec
-                                              ? const Color(0xFF9333EA)
-                                              : Colors.white.withValues(alpha: 0.06),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: Text(
-                                          '${sec}s',
-                                          style: const TextStyle(
-                                            fontSize: 10.5,
-                                            fontWeight: FontWeight.w700,
-                                            color: Colors.white,
+                                    child: TactilePress(
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          _hapticTap();
+                                          setState(() => _draft = _draft.copyWith(slideDurationSeconds: sec));
+                                        },
+                                        child: Container(
+                                          margin: const EdgeInsets.only(right: 4),
+                                          padding: const EdgeInsets.symmetric(vertical: 5),
+                                          alignment: Alignment.center,
+                                          decoration: BoxDecoration(
+                                            color: _draft.slideDurationSeconds == sec
+                                                ? const Color(0xFF9333EA)
+                                                : Colors.white.withValues(alpha: 0.06),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            '${sec}s',
+                                            style: const TextStyle(
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: Colors.white,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -2592,27 +2657,29 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                               children: [
                                 for (final eff in slideEffects)
                                   Expanded(
-                                    child: GestureDetector(
-                                      onTap: () {
-                                        _hapticTap();
-                                        setState(() => _draft = _draft.copyWith(slideEffect: eff.$1));
-                                      },
-                                      child: Container(
-                                        margin: const EdgeInsets.only(right: 4),
-                                        padding: const EdgeInsets.symmetric(vertical: 5),
-                                        alignment: Alignment.center,
-                                        decoration: BoxDecoration(
-                                          color: _draft.slideEffect == eff.$1
-                                              ? const Color(0xFF9333EA)
-                                              : Colors.white.withValues(alpha: 0.06),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: Text(
-                                          eff.$2,
-                                          style: const TextStyle(
-                                            fontSize: 10.5,
-                                            fontWeight: FontWeight.w700,
-                                            color: Colors.white,
+                                    child: TactilePress(
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          _hapticTap();
+                                          setState(() => _draft = _draft.copyWith(slideEffect: eff.$1));
+                                        },
+                                        child: Container(
+                                          margin: const EdgeInsets.only(right: 4),
+                                          padding: const EdgeInsets.symmetric(vertical: 5),
+                                          alignment: Alignment.center,
+                                          decoration: BoxDecoration(
+                                            color: _draft.slideEffect == eff.$1
+                                                ? const Color(0xFF9333EA)
+                                                : Colors.white.withValues(alpha: 0.06),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            eff.$2,
+                                            style: const TextStyle(
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: Colors.white,
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -2674,18 +2741,20 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                             ],
                           ),
                         ),
-                        FilledButton.icon(
-                          onPressed: _pickMultipleSlideImages,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF0284C7),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-                          ),
-                          icon: const Icon(Icons.upload_rounded, size: 15),
-                          label: Text(
-                            tr ? 'Çoklu Görsel Seç' : 'Select Images',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                        TactilePress(
+                          child: FilledButton.icon(
+                            onPressed: _pickMultipleSlideImages,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF0284C7),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                            ),
+                            icon: const Icon(Icons.upload_rounded, size: 15),
+                            label: Text(
+                              tr ? 'Çoklu Görsel Seç' : 'Select Images',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                            ),
                           ),
                         ),
                       ],
@@ -2695,43 +2764,47 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          OutlinedButton.icon(
-                            onPressed: () => _showSlidePhotoPreviewDialog(
-                              images: _draft.slideImages,
-                              initialIndex: 0,
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFF7DD3FC),
-                              side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.45)),
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                              minimumSize: const Size(0, 30),
-                            ),
-                            icon: const Icon(Icons.visibility_outlined, size: 14),
-                            label: Text(
-                              tr ? 'Önizle' : 'Preview',
-                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                          TactilePress(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _showSlidePhotoPreviewDialog(
+                                images: _draft.slideImages,
+                                initialIndex: 0,
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF7DD3FC),
+                                side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.45)),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                minimumSize: const Size(0, 30),
+                              ),
+                              icon: const Icon(Icons.visibility_outlined, size: 14),
+                              label: Text(
+                                tr ? 'Önizle' : 'Preview',
+                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                              ),
                             ),
                           ),
                           const SizedBox(width: 7),
-                          OutlinedButton.icon(
-                            onPressed: () {
-                              _hapticTap();
-                              for (final s in _draft.slideImages) {
-                                unawaited(MediaStorageService.deleteMedia(s.filePath));
-                              }
-                              setState(() => _draft = _draft.copyWith(slideImages: const []));
-                              widget.onSaveSettings(_draft);
-                            },
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFFFCA5A5),
-                              side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.45)),
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                              minimumSize: const Size(0, 30),
-                            ),
-                            icon: const Icon(Icons.delete_sweep_outlined, size: 14),
-                            label: Text(
-                              tr ? 'Tümünü Sil' : 'Delete All',
-                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                          TactilePress(
+                            child: OutlinedButton.icon(
+                              onPressed: () {
+                                _hapticTap();
+                                for (final s in _draft.slideImages) {
+                                  unawaited(MediaStorageService.deleteMedia(s.filePath));
+                                }
+                                setState(() => _draft = _draft.copyWith(slideImages: const []));
+                                widget.onSaveSettings(_draft);
+                              },
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFFCA5A5),
+                                side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.45)),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                minimumSize: const Size(0, 30),
+                              ),
+                              icon: const Icon(Icons.delete_sweep_outlined, size: 14),
+                              label: Text(
+                                tr ? 'Tümünü Sil' : 'Delete All',
+                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                              ),
                             ),
                           ),
                         ],
@@ -2748,48 +2821,52 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                             final bytes = _resolveSlideBytes(item);
                             return Stack(
                               children: [
-                                GestureDetector(
-                                  onTap: () => _showSlidePhotoPreviewDialog(
-                                    images: _draft.slideImages,
-                                    initialIndex: idx,
-                                  ),
-                                  child: Container(
-                                    width: 76,
-                                    height: 76,
-                                    decoration: BoxDecoration(
-                                      color: Colors.black,
-                                      borderRadius: BorderRadius.circular(11),
-                                      border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+                                TactilePress.card(
+                                  child: GestureDetector(
+                                    onTap: () => _showSlidePhotoPreviewDialog(
+                                      images: _draft.slideImages,
+                                      initialIndex: idx,
                                     ),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(10),
-                                      child: bytes != null
-                                          ? Image.memory(bytes, fit: BoxFit.cover)
-                                          : const Icon(Icons.image_outlined, color: Colors.white38),
+                                    child: Container(
+                                      width: 76,
+                                      height: 76,
+                                      decoration: BoxDecoration(
+                                        color: Colors.black,
+                                        borderRadius: BorderRadius.circular(11),
+                                        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(10),
+                                        child: bytes != null
+                                            ? Image.memory(bytes, fit: BoxFit.cover)
+                                            : const Icon(Icons.image_outlined, color: Colors.white38),
+                                      ),
                                     ),
                                   ),
                                 ),
                                 Positioned(
                                   top: 3,
                                   right: 3,
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      _hapticTap();
-                                      final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages);
-                                      final removed = updated.removeAt(idx);
-                                      unawaited(MediaStorageService.deleteMedia(removed.filePath));
-                                      setState(() => _draft = _draft.copyWith(slideImages: updated));
-                                      widget.onSaveSettings(_draft);
-                                    },
-                                    child: Container(
-                                      width: 20,
-                                      height: 20,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: Colors.black.withValues(alpha: 0.78),
-                                        border: Border.all(color: const Color(0xFFFCA5A5).withValues(alpha: 0.75)),
+                                  child: TactilePress(
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        _hapticTap();
+                                        final updated = List<SmartDisplaySlideImage>.from(_draft.slideImages);
+                                        final removed = updated.removeAt(idx);
+                                        unawaited(MediaStorageService.deleteMedia(removed.filePath));
+                                        setState(() => _draft = _draft.copyWith(slideImages: updated));
+                                        widget.onSaveSettings(_draft);
+                                      },
+                                      child: Container(
+                                        width: 20,
+                                        height: 20,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: Colors.black.withValues(alpha: 0.78),
+                                          border: Border.all(color: const Color(0xFFFCA5A5).withValues(alpha: 0.75)),
+                                        ),
+                                        child: const Icon(Icons.close_rounded, size: 12, color: Color(0xFFFCA5A5)),
                                       ),
-                                      child: const Icon(Icons.close_rounded, size: 12, color: Color(0xFFFCA5A5)),
                                     ),
                                   ),
                                 ),
@@ -2840,45 +2917,47 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                       children: [
                         for (final eq in eqStyles)
                           Expanded(
-                            child: GestureDetector(
-                              onTap: () {
-                                _hapticTap();
-                                setState(() => _draft = _draft.copyWith(equalizerStyle: eq.$1, equalizerEnabled: true));
-                              },
-                              child: Container(
-                                margin: const EdgeInsets.only(right: 5),
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
-                                decoration: BoxDecoration(
-                                  color: _draft.equalizerStyle == eq.$1 && _draft.equalizerEnabled
-                                      ? const Color(0xFF10B981).withValues(alpha: 0.22)
-                                      : Colors.white.withValues(alpha: 0.04),
-                                  borderRadius: BorderRadius.circular(11),
-                                  border: Border.all(
+                            child: TactilePress.card(
+                              child: GestureDetector(
+                                onTap: () {
+                                  _hapticTap();
+                                  setState(() => _draft = _draft.copyWith(equalizerStyle: eq.$1, equalizerEnabled: true));
+                                },
+                                child: Container(
+                                  margin: const EdgeInsets.only(right: 5),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
+                                  decoration: BoxDecoration(
                                     color: _draft.equalizerStyle == eq.$1 && _draft.equalizerEnabled
-                                        ? const Color(0xFF34D399)
-                                        : Colors.white.withValues(alpha: 0.10),
+                                        ? const Color(0xFF10B981).withValues(alpha: 0.22)
+                                        : Colors.white.withValues(alpha: 0.04),
+                                    borderRadius: BorderRadius.circular(11),
+                                    border: Border.all(
+                                      color: _draft.equalizerStyle == eq.$1 && _draft.equalizerEnabled
+                                          ? const Color(0xFF34D399)
+                                          : Colors.white.withValues(alpha: 0.10),
+                                    ),
                                   ),
-                                ),
-                                child: Column(
-                                  children: [
-                                    Text(
-                                      eq.$2,
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.white,
+                                  child: Column(
+                                    children: [
+                                      Text(
+                                        eq.$2,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.white,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      eq.$3,
-                                      style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.62)),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ],
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        eq.$3,
+                                        style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.62)),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -3117,31 +3196,33 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                         children: [
                           for (int idx = 0; idx < blurPresets.length; idx++)
                             Expanded(
-                              child: GestureDetector(
-                                onTap: () {
-                                  _hapticTap();
-                                  setState(() => _draft = _draft.copyWith(smartDisplayBlur: blurPresets[idx].$1));
-                                },
-                                child: Container(
-                                  margin: EdgeInsets.only(right: idx < blurPresets.length - 1 ? 4 : 0),
-                                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
-                                  alignment: Alignment.center,
-                                  decoration: BoxDecoration(
-                                    color: (_draft.smartDisplayBlur - blurPresets[idx].$1).abs() < 0.8
-                                        ? const Color(0xFF0284C7).withValues(alpha: 0.35)
-                                        : Colors.white.withValues(alpha: 0.05),
-                                    borderRadius: BorderRadius.circular(9),
-                                    border: Border.all(
+                              child: TactilePress(
+                                child: GestureDetector(
+                                  onTap: () {
+                                    _hapticTap();
+                                    setState(() => _draft = _draft.copyWith(smartDisplayBlur: blurPresets[idx].$1));
+                                  },
+                                  child: Container(
+                                    margin: EdgeInsets.only(right: idx < blurPresets.length - 1 ? 4 : 0),
+                                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+                                    alignment: Alignment.center,
+                                    decoration: BoxDecoration(
                                       color: (_draft.smartDisplayBlur - blurPresets[idx].$1).abs() < 0.8
-                                          ? const Color(0xFF38BDF8)
-                                          : Colors.transparent,
+                                          ? const Color(0xFF0284C7).withValues(alpha: 0.35)
+                                          : Colors.white.withValues(alpha: 0.05),
+                                      borderRadius: BorderRadius.circular(9),
+                                      border: Border.all(
+                                        color: (_draft.smartDisplayBlur - blurPresets[idx].$1).abs() < 0.8
+                                            ? const Color(0xFF38BDF8)
+                                            : Colors.transparent,
+                                      ),
                                     ),
-                                  ),
-                                  child: Text(
-                                    blurPresets[idx].$2,
-                                    style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Colors.white),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                                    child: Text(
+                                      blurPresets[idx].$2,
+                                      style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Colors.white),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -3269,31 +3350,33 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                     children: [
                       for (final bp in brightnessPresets)
                         Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              _hapticTap();
-                              setState(() => _draft = _draft.copyWith(displayBrightness: bp.$1));
-                            },
-                            child: Container(
-                              margin: const EdgeInsets.only(right: 4),
-                              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: _draft.displayBrightness == bp.$1
-                                    ? const Color(0xFFF59E0B).withValues(alpha: 0.25)
-                                    : Colors.white.withValues(alpha: 0.05),
-                                borderRadius: BorderRadius.circular(9),
-                                border: Border.all(
+                          child: TactilePress(
+                            child: GestureDetector(
+                              onTap: () {
+                                _hapticTap();
+                                setState(() => _draft = _draft.copyWith(displayBrightness: bp.$1));
+                              },
+                              child: Container(
+                                margin: const EdgeInsets.only(right: 4),
+                                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
                                   color: _draft.displayBrightness == bp.$1
-                                      ? const Color(0xFFFBBF24)
-                                      : Colors.transparent,
+                                      ? const Color(0xFFF59E0B).withValues(alpha: 0.25)
+                                      : Colors.white.withValues(alpha: 0.05),
+                                  borderRadius: BorderRadius.circular(9),
+                                  border: Border.all(
+                                    color: _draft.displayBrightness == bp.$1
+                                        ? const Color(0xFFFBBF24)
+                                        : Colors.transparent,
+                                  ),
                                 ),
-                              ),
-                              child: Text(
-                                bp.$2,
-                                style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Colors.white),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                                child: Text(
+                                  bp.$2,
+                                  style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Colors.white),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ),
                           ),
@@ -3347,32 +3430,34 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                     runSpacing: 6,
                     children: [
                       for (final autoOpt in autoStartOptions)
-                        GestureDetector(
-                          onTap: () {
-                            _hapticTap();
-                            final val = autoOpt.$1;
-                            setState(() => _draft = _draft.copyWith(
-                              smartDisplayAutoMinutes: val,
-                              smartDisplayEnabled: val > 0,
-                              termoBotEnabled: val > 0 ? false : _draft.termoBotEnabled,
-                            ));
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: (_draft.smartDisplayEnabled ? _draft.smartDisplayAutoMinutes : 0) == autoOpt.$1
-                                  ? const Color(0xFFEA580C).withValues(alpha: 0.28)
-                                  : Colors.white.withValues(alpha: 0.05),
-                              borderRadius: BorderRadius.circular(9),
-                              border: Border.all(
+                        TactilePress(
+                          child: GestureDetector(
+                            onTap: () {
+                              _hapticTap();
+                              final val = autoOpt.$1;
+                              setState(() => _draft = _draft.copyWith(
+                                smartDisplayAutoMinutes: val,
+                                smartDisplayEnabled: val > 0,
+                                termoBotEnabled: val > 0 ? false : _draft.termoBotEnabled,
+                              ));
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
                                 color: (_draft.smartDisplayEnabled ? _draft.smartDisplayAutoMinutes : 0) == autoOpt.$1
-                                    ? const Color(0xFFFB923C)
-                                    : Colors.white.withValues(alpha: 0.10),
+                                    ? const Color(0xFFEA580C).withValues(alpha: 0.28)
+                                    : Colors.white.withValues(alpha: 0.05),
+                                borderRadius: BorderRadius.circular(9),
+                                border: Border.all(
+                                  color: (_draft.smartDisplayEnabled ? _draft.smartDisplayAutoMinutes : 0) == autoOpt.$1
+                                      ? const Color(0xFFFB923C)
+                                      : Colors.white.withValues(alpha: 0.10),
+                                ),
                               ),
-                            ),
-                            child: Text(
-                              autoOpt.$2,
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                              child: Text(
+                                autoOpt.$2,
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                              ),
                             ),
                           ),
                         ),
@@ -3391,27 +3476,29 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                     runSpacing: 6,
                     children: [
                       for (final sl in aodSleepOptions)
-                        GestureDetector(
-                          onTap: () {
-                            _hapticTap();
-                            setState(() => _draft = _draft.copyWith(displaySleepMinutes: sl.$1));
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: _draft.displaySleepMinutes == sl.$1
-                                  ? const Color(0xFFF59E0B).withValues(alpha: 0.26)
-                                  : Colors.white.withValues(alpha: 0.05),
-                              borderRadius: BorderRadius.circular(9),
-                              border: Border.all(
+                        TactilePress(
+                          child: GestureDetector(
+                            onTap: () {
+                              _hapticTap();
+                              setState(() => _draft = _draft.copyWith(displaySleepMinutes: sl.$1));
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
                                 color: _draft.displaySleepMinutes == sl.$1
-                                    ? const Color(0xFFFBBF24)
-                                    : Colors.white.withValues(alpha: 0.10),
+                                    ? const Color(0xFFF59E0B).withValues(alpha: 0.26)
+                                    : Colors.white.withValues(alpha: 0.05),
+                                borderRadius: BorderRadius.circular(9),
+                                border: Border.all(
+                                  color: _draft.displaySleepMinutes == sl.$1
+                                      ? const Color(0xFFFBBF24)
+                                      : Colors.white.withValues(alpha: 0.10),
+                                ),
                               ),
-                            ),
-                            child: Text(
-                              sl.$2,
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                              child: Text(
+                                sl.$2,
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                              ),
                             ),
                           ),
                         ),
@@ -3636,24 +3723,27 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             const SizedBox(height: 11),
 
             // Real Test Notification Dispatcher Button
-            FilledButton.icon(
-              onPressed: _sendingTestNotification ? null : _sendTestNotification,
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFF59E0B),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 11),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              icon: _sendingTestNotification
-                  ? const SizedBox(
-                      width: 15,
-                      height: 15,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.notifications_active_outlined, size: 17),
-              label: Text(
-                tr ? 'Test Bildirimi Gönder' : 'Send Test Notification',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            TactilePress(
+              enabled: !_sendingTestNotification,
+              child: FilledButton.icon(
+                onPressed: _sendingTestNotification ? null : _sendTestNotification,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFF59E0B),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                icon: _sendingTestNotification
+                    ? const SizedBox(
+                        width: 15,
+                        height: 15,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.notifications_active_outlined, size: 17),
+                label: Text(
+                  tr ? 'Test Bildirimi Gönder' : 'Send Test Notification',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                ),
               ),
             ),
             if (_notificationStatus != null) ...[
@@ -3777,49 +3867,51 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               childAspectRatio: 2.35,
               children: [
                 for (final p in testProfiles)
-                  GestureDetector(
-                    onTap: () => _testHapticPulse(p.$1, p.$2),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 160),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: _lastTestedHapticMs == p.$1
-                            ? const Color(0xFFF59E0B).withValues(alpha: 0.20)
-                            : Colors.white.withValues(alpha: 0.045),
-                        borderRadius: BorderRadius.circular(13),
-                        border: Border.all(
+                  TactilePress.card(
+                    child: GestureDetector(
+                      onTap: () => _testHapticPulse(p.$1, p.$2),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                        decoration: BoxDecoration(
                           color: _lastTestedHapticMs == p.$1
-                              ? const Color(0xFFFBBF24)
-                              : Colors.white.withValues(alpha: 0.11),
+                              ? const Color(0xFFF59E0B).withValues(alpha: 0.20)
+                              : Colors.white.withValues(alpha: 0.045),
+                          borderRadius: BorderRadius.circular(13),
+                          border: Border.all(
+                            color: _lastTestedHapticMs == p.$1
+                                ? const Color(0xFFFBBF24)
+                                : Colors.white.withValues(alpha: 0.11),
+                          ),
                         ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.vibration_rounded, size: 14, color: Color(0xFFFBBF24)),
-                              const SizedBox(width: 5),
-                              Expanded(
-                                child: Text(
-                                  p.$3,
-                                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.white),
-                                  overflow: TextOverflow.ellipsis,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.vibration_rounded, size: 14, color: Color(0xFFFBBF24)),
+                                const SizedBox(width: 5),
+                                Expanded(
+                                  child: Text(
+                                    p.$3,
+                                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.white),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
-                              ),
-                              if (_lastTestedHapticMs == p.$1)
-                                const Icon(Icons.check_circle_outline_rounded, size: 13, color: Color(0xFF6EE7B7)),
-                            ],
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            p.$4,
-                            style: TextStyle(fontSize: 9.5, color: Colors.white.withValues(alpha: 0.58)),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
+                                if (_lastTestedHapticMs == p.$1)
+                                  const Icon(Icons.check_circle_outline_rounded, size: 13, color: Color(0xFF6EE7B7)),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              p.$4,
+                              style: TextStyle(fontSize: 9.5, color: Colors.white.withValues(alpha: 0.58)),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -3903,46 +3995,48 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 for (int i = 0; i < bootStyles.length; i++) ...[
                   if (i > 0) const SizedBox(width: 6),
                   Expanded(
-                    child: GestureDetector(
-                      onTap: () {
-                        _hapticTap();
-                        setState(() => _draft = _draft.copyWith(bootCeremonyStyle: bootStyles[i].$1));
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
-                        decoration: BoxDecoration(
-                          color: _draft.bootCeremonyStyle == bootStyles[i].$1
-                              ? const Color(0xFFF97316).withValues(alpha: 0.18)
-                              : Colors.white.withValues(alpha: 0.04),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
+                    child: TactilePress.card(
+                      child: GestureDetector(
+                        onTap: () {
+                          _hapticTap();
+                          setState(() => _draft = _draft.copyWith(bootCeremonyStyle: bootStyles[i].$1));
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                          decoration: BoxDecoration(
                             color: _draft.bootCeremonyStyle == bootStyles[i].$1
-                                ? const Color(0xFFF97316)
-                                : Colors.white.withValues(alpha: 0.10),
-                          ),
-                        ),
-                        child: Column(
-                          children: [
-                            Icon(
-                              bootStyles[i].$3,
-                              size: 18,
+                                ? const Color(0xFFF97316).withValues(alpha: 0.18)
+                                : Colors.white.withValues(alpha: 0.04),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
                               color: _draft.bootCeremonyStyle == bootStyles[i].$1
-                                  ? const Color(0xFFFDBA74)
-                                  : Colors.white70,
+                                  ? const Color(0xFFF97316)
+                                  : Colors.white.withValues(alpha: 0.10),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              bootStyles[i].$2,
-                              textAlign: TextAlign.center,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w600,
-                                color: _draft.bootCeremonyStyle == bootStyles[i].$1 ? Colors.white : Colors.white70,
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(
+                                bootStyles[i].$3,
+                                size: 18,
+                                color: _draft.bootCeremonyStyle == bootStyles[i].$1
+                                    ? const Color(0xFFFDBA74)
+                                    : Colors.white70,
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 4),
+                              Text(
+                                bootStyles[i].$2,
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: _draft.bootCeremonyStyle == bootStyles[i].$1 ? Colors.white : Colors.white70,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -4012,23 +4106,25 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               ),
             ),
             const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () {
-                _hapticTap();
-                widget.onSaveSettings(_draft);
-                Navigator.of(context).pop();
-                widget.onReplayBootCeremony();
-              },
-              icon: const Icon(Icons.replay_rounded, size: 18, color: Color(0xFFF97316)),
-              label: Text(
-                tr ? 'Seremoniyi Şimdi Başlat (Önizle)' : 'Replay Boot Ceremony Now',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFFDBA74)),
-              ),
-              style: OutlinedButton.styleFrom(
-                backgroundColor: const Color(0xFFF97316).withValues(alpha: 0.14),
-                side: BorderSide(color: const Color(0xFFF97316).withValues(alpha: 0.45)),
-                padding: const EdgeInsets.symmetric(vertical: 11),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            TactilePress.card(
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  _hapticTap();
+                  widget.onSaveSettings(_draft);
+                  Navigator.of(context).pop();
+                  widget.onReplayBootCeremony();
+                },
+                icon: const Icon(Icons.replay_rounded, size: 18, color: Color(0xFFF97316)),
+                label: Text(
+                  tr ? 'Seremoniyi Şimdi Başlat (Önizle)' : 'Replay Boot Ceremony Now',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFFDBA74)),
+                ),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: const Color(0xFFF97316).withValues(alpha: 0.14),
+                  side: BorderSide(color: const Color(0xFFF97316).withValues(alpha: 0.45)),
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
               ),
             ),
           ],
@@ -4095,23 +4191,25 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               ],
             ),
             const SizedBox(height: 10),
-            OutlinedButton.icon(
-              onPressed: () {
-                _hapticTap();
-                widget.onSaveSettings(_draft);
-                Navigator.of(context).pop();
-                widget.onOpenScreensaverPreview();
-              },
-              icon: const Icon(Icons.play_arrow_rounded, size: 18, color: Color(0xFFFBBF24)),
-              label: Text(
-                tr ? 'Ekran Koruyucuyu Şimdi Başlat (Önizle)' : 'Launch Screensaver Preview',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
-              ),
-              style: OutlinedButton.styleFrom(
-                backgroundColor: Colors.white.withValues(alpha: 0.05),
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            TactilePress.card(
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  _hapticTap();
+                  widget.onSaveSettings(_draft);
+                  Navigator.of(context).pop();
+                  widget.onOpenScreensaverPreview();
+                },
+                icon: const Icon(Icons.play_arrow_rounded, size: 18, color: Color(0xFFFBBF24)),
+                label: Text(
+                  tr ? 'Ekran Koruyucuyu Şimdi Başlat (Önizle)' : 'Launch Screensaver Preview',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
+                ),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: Colors.white.withValues(alpha: 0.05),
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
               ),
             ),
             const SizedBox(height: 12),
@@ -4130,43 +4228,45 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                   final ch = MascotCharacter.values[idx];
                   final meta = MascotMeta.of(ch);
                   final selected = _draft.mascotCharacter == ch;
-                  return GestureDetector(
-                    onTap: () {
-                      _hapticTap();
-                      setState(() => _draft = _draft.copyWith(mascotCharacter: ch));
-                      if (_draft.mascotSoundsEnabled) {
-                        AmbientAudioService.playMascotSound(ch);
-                      }
-                    },
-                    child: Container(
-                      width: 92,
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: selected ? meta.color.withValues(alpha: 0.18) : Colors.white.withValues(alpha: 0.04),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: selected ? meta.color : Colors.white.withValues(alpha: 0.10),
+                  return TactilePress.card(
+                    child: GestureDetector(
+                      onTap: () {
+                        _hapticTap();
+                        setState(() => _draft = _draft.copyWith(mascotCharacter: ch));
+                        if (_draft.mascotSoundsEnabled) {
+                          AmbientAudioService.playMascotSound(ch);
+                        }
+                      },
+                      child: Container(
+                        width: 92,
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: selected ? meta.color.withValues(alpha: 0.18) : Colors.white.withValues(alpha: 0.04),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: selected ? meta.color : Colors.white.withValues(alpha: 0.10),
+                          ),
                         ),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          MascotAvatar(
-                            character: ch,
-                            size: 46,
-                            happy: selected,
-                            showBehaviorOverlay: false,
-                            frameless: false,
-                          ),
-                          const SizedBox(height: 5),
-                          Text(meta.name, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
-                          Text(
-                            tr ? meta.roleTr : meta.roleEn,
-                            style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.58)),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            MascotAvatar(
+                              character: ch,
+                              size: 46,
+                              happy: selected,
+                              showBehaviorOverlay: false,
+                              frameless: false,
+                            ),
+                            const SizedBox(height: 5),
+                            Text(meta.name, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white)),
+                            Text(
+                              tr ? meta.roleTr : meta.roleEn,
+                              style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.58)),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   );
@@ -4183,29 +4283,31 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               children: [
                 for (final opt in idleOptions) ...[
                   Expanded(
-                    child: GestureDetector(
-                      onTap: () {
-                        _hapticTap();
-                        setState(() => _draft = _draft.copyWith(screensaverIdleSeconds: opt.$1));
-                      },
-                      child: Container(
-                        margin: const EdgeInsets.only(right: 4),
-                        padding: const EdgeInsets.symmetric(vertical: 7),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: _draft.screensaverIdleSeconds == opt.$1
-                              ? const Color(0xFFF59E0B).withValues(alpha: 0.22)
-                              : Colors.white.withValues(alpha: 0.04),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
+                    child: TactilePress(
+                      child: GestureDetector(
+                        onTap: () {
+                          _hapticTap();
+                          setState(() => _draft = _draft.copyWith(screensaverIdleSeconds: opt.$1));
+                        },
+                        child: Container(
+                          margin: const EdgeInsets.only(right: 4),
+                          padding: const EdgeInsets.symmetric(vertical: 7),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
                             color: _draft.screensaverIdleSeconds == opt.$1
-                                ? const Color(0xFFF59E0B)
-                                : Colors.white.withValues(alpha: 0.10),
+                                ? const Color(0xFFF59E0B).withValues(alpha: 0.22)
+                                : Colors.white.withValues(alpha: 0.04),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: _draft.screensaverIdleSeconds == opt.$1
+                                  ? const Color(0xFFF59E0B)
+                                  : Colors.white.withValues(alpha: 0.10),
+                            ),
                           ),
-                        ),
-                        child: Text(
-                          opt.$2,
-                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                          child: Text(
+                            opt.$2,
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                          ),
                         ),
                       ),
                     ),
@@ -4228,40 +4330,42 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 itemBuilder: (_, idx) {
                   final bg = bgOptions[idx];
                   final selected = _draft.screensaverBackdrop == bg.$1;
-                  return GestureDetector(
-                    onTap: () {
-                      _hapticTap();
-                      setState(() => _draft = _draft.copyWith(screensaverBackdrop: bg.$1));
-                    },
-                    child: Container(
-                      width: 96,
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: bg.$4.withValues(alpha: 0.45),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: selected ? const Color(0xFFFBBF24) : Colors.white.withValues(alpha: 0.12),
-                          width: selected ? 1.6 : 1.0,
+                  return TactilePress.card(
+                    child: GestureDetector(
+                      onTap: () {
+                        _hapticTap();
+                        setState(() => _draft = _draft.copyWith(screensaverBackdrop: bg.$1));
+                      },
+                      child: Container(
+                        width: 96,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: bg.$4.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: selected ? const Color(0xFFFBBF24) : Colors.white.withValues(alpha: 0.12),
+                            width: selected ? 1.6 : 1.0,
+                          ),
                         ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            bg.$2,
-                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            bg.$3,
-                            style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.65)),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              bg.$2,
+                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              bg.$3,
+                              style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.65)),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   );
@@ -4306,64 +4410,66 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               children: [
                 Expanded(
                   flex: 11,
-                  child: ElevatedButton.icon(
-                    onPressed: () async {
-                      _hapticTap();
-                      try {
-                        final res = await FilePicker.platform.pickFiles(
-                          type: FileType.image,
-                          withData: true,
-                        );
-                        if (res != null && res.files.isNotEmpty) {
-                          final file = res.files.first;
-                          if (file.bytes != null && file.bytes!.isNotEmpty) {
-                            final ext = (file.extension ?? 'jpg').toLowerCase();
-                            final mime = ext == 'png'
-                                ? 'image/png'
-                                : (ext == 'webp' ? 'image/webp' : 'image/jpeg');
-                            final persistedBg = await MediaStorageService.persistPickedFile(
-                              key: MediaStorageService.screensaverBgKey,
-                              sourcePath: kIsWeb ? null : file.path,
-                              bytes: file.bytes!,
-                              mimeType: mime,
-                              fileName: file.name,
-                            );
-                            final source = persistedBg.isNotEmpty
-                                ? persistedBg
-                                : 'data:$mime;base64,${base64Encode(file.bytes!)}';
-                            if (!mounted) return;
-                            setState(() {
-                              _screensaverBgUrlCtrl.clear();
-                              _draft = _draft.copyWith(
-                                screensaverBackdrop: ScreensaverBackdrop.custom,
-                                screensaverCustomBgSource: source,
-                                screensaverCustomBgLabel: file.name,
+                  child: TactilePress.card(
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        _hapticTap();
+                        try {
+                          final res = await FilePicker.platform.pickFiles(
+                            type: FileType.image,
+                            withData: true,
+                          );
+                          if (res != null && res.files.isNotEmpty) {
+                            final file = res.files.first;
+                            if (file.bytes != null && file.bytes!.isNotEmpty) {
+                              final ext = (file.extension ?? 'jpg').toLowerCase();
+                              final mime = ext == 'png'
+                                  ? 'image/png'
+                                  : (ext == 'webp' ? 'image/webp' : 'image/jpeg');
+                              final persistedBg = await MediaStorageService.persistPickedFile(
+                                key: MediaStorageService.screensaverBgKey,
+                                sourcePath: kIsWeb ? null : file.path,
+                                bytes: file.bytes!,
+                                mimeType: mime,
+                                fileName: file.name,
                               );
-                              _statusBanner = tr ? 'Duvar kağıdı kalıcı kaydedildi: ${file.name}' : 'Wallpaper saved: ${file.name}';
+                              final source = persistedBg.isNotEmpty
+                                  ? persistedBg
+                                  : 'data:$mime;base64,${base64Encode(file.bytes!)}';
+                              if (!mounted) return;
+                              setState(() {
+                                _screensaverBgUrlCtrl.clear();
+                                _draft = _draft.copyWith(
+                                  screensaverBackdrop: ScreensaverBackdrop.custom,
+                                  screensaverCustomBgSource: source,
+                                  screensaverCustomBgLabel: file.name,
+                                );
+                                _statusBanner = tr ? 'Duvar kağıdı kalıcı kaydedildi: ${file.name}' : 'Wallpaper saved: ${file.name}';
+                              });
+                              widget.onSaveSettings(_draft);
+                            }
+                          }
+                        } catch (_) {
+                          if (mounted) {
+                            setState(() {
+                              _statusBanner = tr ? 'Görsel seçilemedi.' : 'Could not pick image.';
                             });
-                            widget.onSaveSettings(_draft);
                           }
                         }
-                      } catch (_) {
-                        if (mounted) {
-                          setState(() {
-                            _statusBanner = tr ? 'Görsel seçilemedi.' : 'Could not pick image.';
-                          });
-                        }
-                      }
-                    },
-                    icon: const Icon(Icons.upload_rounded, size: 16),
-                    label: Text(
-                      tr ? 'Cihazdan Resim / Duvar Kağıdı Seç' : 'Pick Wallpaper Image',
-                      style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4F6BFF),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      },
+                      icon: const Icon(Icons.upload_rounded, size: 16),
+                      label: Text(
+                        tr ? 'Cihazdan Resim / Duvar Kağıdı Seç' : 'Pick Wallpaper Image',
+                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4F6BFF),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
                     ),
                   ),
                 ),
@@ -4392,43 +4498,45 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                   ),
                 ),
                 const SizedBox(width: 6),
-                ElevatedButton(
-                  onPressed: () {
-                    _hapticTap();
-                    final url = _screensaverBgUrlCtrl.text.trim();
-                    if (url.startsWith('http://') || url.startsWith('https://')) {
-                      final host = Uri.tryParse(url)?.host ?? 'URL';
-                      setState(() {
-                        _draft = _draft.copyWith(
-                          screensaverBackdrop: ScreensaverBackdrop.custom,
-                          screensaverCustomBgSource: url,
-                          screensaverCustomBgLabel: host.isNotEmpty ? host : 'Özel URL',
-                        );
-                        _statusBanner = tr ? 'Özel görsel URL uygulandı.' : 'Custom wallpaper URL applied.';
-                      });
-                    } else if (url.isEmpty && _draft.screensaverCustomBgSource.isNotEmpty) {
-                      setState(() {
-                        _draft = _draft.copyWith(
-                          screensaverCustomBgSource: '',
-                          screensaverCustomBgLabel: '',
-                        );
-                        _statusBanner = tr ? 'Özel duvar kağıdı temizlendi.' : 'Custom wallpaper cleared.';
-                      });
-                    } else {
-                      setState(() {
-                        _statusBanner = tr ? 'Geçerli bir https:// URL girin.' : 'Enter a valid https:// URL.';
-                      });
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFF59E0B),
-                    foregroundColor: const Color(0xFF18181B),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: Text(
-                    tr ? 'Uygula' : 'Apply',
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                TactilePress(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      _hapticTap();
+                      final url = _screensaverBgUrlCtrl.text.trim();
+                      if (url.startsWith('http://') || url.startsWith('https://')) {
+                        final host = Uri.tryParse(url)?.host ?? 'URL';
+                        setState(() {
+                          _draft = _draft.copyWith(
+                            screensaverBackdrop: ScreensaverBackdrop.custom,
+                            screensaverCustomBgSource: url,
+                            screensaverCustomBgLabel: host.isNotEmpty ? host : 'Özel URL',
+                          );
+                          _statusBanner = tr ? 'Özel görsel URL uygulandı.' : 'Custom wallpaper URL applied.';
+                        });
+                      } else if (url.isEmpty && _draft.screensaverCustomBgSource.isNotEmpty) {
+                        setState(() {
+                          _draft = _draft.copyWith(
+                            screensaverCustomBgSource: '',
+                            screensaverCustomBgLabel: '',
+                          );
+                          _statusBanner = tr ? 'Özel duvar kağıdı temizlendi.' : 'Custom wallpaper cleared.';
+                        });
+                      } else {
+                        setState(() {
+                          _statusBanner = tr ? 'Geçerli bir https:// URL girin.' : 'Enter a valid https:// URL.';
+                        });
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFF59E0B),
+                      foregroundColor: const Color(0xFF18181B),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: Text(
+                      tr ? 'Uygula' : 'Apply',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+                    ),
                   ),
                 ),
               ],
@@ -4445,22 +4553,24 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  GestureDetector(
-                    onTap: () {
-                      _hapticTap();
-                      unawaited(MediaStorageService.deleteMedia(_draft.screensaverCustomBgSource));
-                      _screensaverBgUrlCtrl.clear();
-                      setState(() {
-                        _draft = _draft.copyWith(
-                          screensaverCustomBgSource: '',
-                          screensaverCustomBgLabel: '',
-                        );
-                      });
-                      widget.onSaveSettings(_draft);
-                    },
-                    child: Text(
-                      tr ? 'Kaldır' : 'Clear',
-                      style: const TextStyle(fontSize: 10.5, color: Color(0xFFF87171), fontWeight: FontWeight.w700),
+                  TactilePress(
+                    child: GestureDetector(
+                      onTap: () {
+                        _hapticTap();
+                        unawaited(MediaStorageService.deleteMedia(_draft.screensaverCustomBgSource));
+                        _screensaverBgUrlCtrl.clear();
+                        setState(() {
+                          _draft = _draft.copyWith(
+                            screensaverCustomBgSource: '',
+                            screensaverCustomBgLabel: '',
+                          );
+                        });
+                        widget.onSaveSettings(_draft);
+                      },
+                      child: Text(
+                        tr ? 'Kaldır' : 'Clear',
+                        style: const TextStyle(fontSize: 10.5, color: Color(0xFFF87171), fontWeight: FontWeight.w700),
+                      ),
                     ),
                   ),
                 ],
@@ -4539,40 +4649,42 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                 itemBuilder: (_, idx) {
                   final b = behaviorOptions[idx];
                   final active = _previewBehavior == b.$1;
-                  return GestureDetector(
-                    onTap: () {
-                      _hapticTap();
-                      setState(() => _previewBehavior = b.$1);
-                      if (_draft.mascotSoundsEnabled) {
-                        AmbientAudioService.playMascotSound(
-                          _draft.mascotCharacter,
-                          sleepy: b.$1 == MascotBehavior.deepSleep,
-                        );
-                      }
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: active ? b.$4.withValues(alpha: 0.24) : Colors.white.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: active ? b.$4 : Colors.white.withValues(alpha: 0.14),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(b.$3, size: 13, color: active ? b.$4 : Colors.white.withValues(alpha: 0.7)),
-                          const SizedBox(width: 5),
-                          Text(
-                            b.$2,
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w700,
-                              color: active ? Colors.white : Colors.white.withValues(alpha: 0.78),
-                            ),
+                  return TactilePress(
+                    child: GestureDetector(
+                      onTap: () {
+                        _hapticTap();
+                        setState(() => _previewBehavior = b.$1);
+                        if (_draft.mascotSoundsEnabled) {
+                          AmbientAudioService.playMascotSound(
+                            _draft.mascotCharacter,
+                            sleepy: b.$1 == MascotBehavior.deepSleep,
+                          );
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: active ? b.$4.withValues(alpha: 0.24) : Colors.white.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: active ? b.$4 : Colors.white.withValues(alpha: 0.14),
                           ),
-                        ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(b.$3, size: 13, color: active ? b.$4 : Colors.white.withValues(alpha: 0.7)),
+                            const SizedBox(width: 5),
+                            Text(
+                              b.$2,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                color: active ? Colors.white : Colors.white.withValues(alpha: 0.78),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   );
@@ -4631,30 +4743,32 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               runSpacing: 6,
               children: [
                 for (final mode in AiCallTriggerMode.values)
-                  GestureDetector(
-                    onTap: () {
-                      _hapticTap();
-                      setState(() => _draft = _draft.copyWith(aiCallTriggerMode: mode));
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: _draft.aiCallTriggerMode == mode
-                            ? const Color(0xFF10B981).withValues(alpha: 0.24)
-                            : Colors.white.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
+                  TactilePress(
+                    child: GestureDetector(
+                      onTap: () {
+                        _hapticTap();
+                        setState(() => _draft = _draft.copyWith(aiCallTriggerMode: mode));
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                        decoration: BoxDecoration(
                           color: _draft.aiCallTriggerMode == mode
-                              ? const Color(0xFF34D399)
-                              : Colors.white.withValues(alpha: 0.14),
+                              ? const Color(0xFF10B981).withValues(alpha: 0.24)
+                              : Colors.white.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: _draft.aiCallTriggerMode == mode
+                                ? const Color(0xFF34D399)
+                                : Colors.white.withValues(alpha: 0.14),
+                          ),
                         ),
-                      ),
-                      child: Text(
-                        AiCallService.triggerModeLabel(mode, _lang),
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: _draft.aiCallTriggerMode == mode ? Colors.white : Colors.white70,
+                        child: Text(
+                          AiCallService.triggerModeLabel(mode, _lang),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: _draft.aiCallTriggerMode == mode ? Colors.white : Colors.white70,
+                          ),
                         ),
                       ),
                     ),
@@ -4755,16 +4869,18 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                         style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF6EE7B7)),
                       ),
                       if (_draft.aiCallHistory.isNotEmpty)
-                        GestureDetector(
-                          onTap: () {
-                            _hapticTap();
-                            final cleared = _draft.copyWith(aiCallHistory: const [], aiCallLastOutcome: '');
-                            setState(() => _draft = cleared);
-                            widget.onSaveSettings(cleared);
-                          },
-                          child: Text(
-                            tr ? 'Temizle' : 'Clear',
-                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFFF87171)),
+                        TactilePress(
+                          child: GestureDetector(
+                            onTap: () {
+                              _hapticTap();
+                              final cleared = _draft.copyWith(aiCallHistory: const [], aiCallLastOutcome: '');
+                              setState(() => _draft = cleared);
+                              widget.onSaveSettings(cleared);
+                            },
+                            child: Text(
+                              tr ? 'Temizle' : 'Clear',
+                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFFF87171)),
+                            ),
                           ),
                         ),
                     ],
@@ -4789,83 +4905,85 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                                   : const Color(0xFFF59E0B));
                           final summary = tr ? entry.summaryTr : entry.summaryEn;
                           final actionText = tr ? entry.actionTakenTr : entry.actionTakenEn;
-                          return GestureDetector(
-                            onTap: () {
-                              _hapticTap();
-                              showMissedCallActionDialog(
-                                context: context,
-                                entry: entry,
-                                lang: _lang,
-                                onApplyAction: (act) {
-                                  widget.onChangeTargetTemp(act.targetTemp);
-                                  final updatedHistory = AiCallService.updateCallHistoryAction(
-                                    _draft.aiCallHistory,
-                                    entry.id,
-                                    actionTr: act.logActionTr,
-                                    actionEn: act.logActionEn,
-                                  );
-                                  final nextSettings = _draft.copyWith(aiCallHistory: updatedHistory);
-                                  setState(() {
-                                    _liveTargetTemp = act.targetTemp;
-                                    _draft = nextSettings;
-                                  });
-                                  widget.onSaveSettings(nextSettings);
-                                },
-                              );
-                            },
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 6),
-                              padding: const EdgeInsets.all(9),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.035),
-                                borderRadius: BorderRadius.circular(11),
-                                border: Border.all(color: badgeColor.withValues(alpha: 0.28)),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: badgeColor.withValues(alpha: 0.16),
-                                          borderRadius: BorderRadius.circular(7),
+                          return TactilePress.card(
+                            child: GestureDetector(
+                              onTap: () {
+                                _hapticTap();
+                                showMissedCallActionDialog(
+                                  context: context,
+                                  entry: entry,
+                                  lang: _lang,
+                                  onApplyAction: (act) {
+                                    widget.onChangeTargetTemp(act.targetTemp);
+                                    final updatedHistory = AiCallService.updateCallHistoryAction(
+                                      _draft.aiCallHistory,
+                                      entry.id,
+                                      actionTr: act.logActionTr,
+                                      actionEn: act.logActionEn,
+                                    );
+                                    final nextSettings = _draft.copyWith(aiCallHistory: updatedHistory);
+                                    setState(() {
+                                      _liveTargetTemp = act.targetTemp;
+                                      _draft = nextSettings;
+                                    });
+                                    widget.onSaveSettings(nextSettings);
+                                  },
+                                );
+                              },
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 6),
+                                padding: const EdgeInsets.all(9),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.035),
+                                  borderRadius: BorderRadius.circular(11),
+                                  border: Border.all(color: badgeColor.withValues(alpha: 0.28)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: badgeColor.withValues(alpha: 0.16),
+                                            borderRadius: BorderRadius.circular(7),
+                                          ),
+                                          child: Text(
+                                            entry.statusLabel(_lang),
+                                            style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: badgeColor),
+                                          ),
                                         ),
-                                        child: Text(
-                                          entry.statusLabel(_lang),
-                                          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: badgeColor),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            '${m.name} · ${entry.timestamp}',
+                                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
                                         ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Expanded(
-                                        child: Text(
-                                          '${m.name} · ${entry.timestamp}',
-                                          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Colors.white),
-                                          overflow: TextOverflow.ellipsis,
+                                        Text(
+                                          '${entry.durationSeconds} sn',
+                                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white.withValues(alpha: 0.65)),
                                         ),
-                                      ),
+                                      ],
+                                    ),
+                                    if (summary.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
                                       Text(
-                                        '${entry.durationSeconds} sn',
-                                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white.withValues(alpha: 0.65)),
+                                        summary,
+                                        style: const TextStyle(fontSize: 11, color: Colors.white, height: 1.3),
                                       ),
                                     ],
-                                  ),
-                                  if (summary.isNotEmpty) ...[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      summary,
-                                      style: const TextStyle(fontSize: 11, color: Colors.white, height: 1.3),
-                                    ),
+                                    if (actionText.isNotEmpty) ...[
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        '${tr ? 'İşlem' : 'Action'}: $actionText',
+                                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFF93C5FD)),
+                                      ),
+                                    ],
                                   ],
-                                  if (actionText.isNotEmpty) ...[
-                                    const SizedBox(height: 3),
-                                    Text(
-                                      '${tr ? 'İşlem' : 'Action'}: $actionText',
-                                      style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFF93C5FD)),
-                                    ),
-                                  ],
-                                ],
+                                ),
                               ),
                             ),
                           );
@@ -4893,14 +5011,16 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                         tr ? 'Kadın / Erkek Ses Testi & Seçimi' : 'Female / Male Voice Test & Selector',
                         style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF6EE7B7)),
                       ),
-                      GestureDetector(
-                        onTap: () {
-                          _hapticTap();
-                          _refreshTurkishVoices();
-                        },
-                        child: Text(
-                          tr ? '↻ Sesleri Yenile' : '↻ Refresh Voices',
-                          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFF38BDF8)),
+                      TactilePress(
+                        child: GestureDetector(
+                          onTap: () {
+                            _hapticTap();
+                            _refreshTurkishVoices();
+                          },
+                          child: Text(
+                            tr ? '↻ Sesleri Yenile' : '↻ Refresh Voices',
+                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFF38BDF8)),
+                          ),
                         ),
                       ),
                     ],
@@ -4909,64 +5029,68 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                   Row(
                     children: [
                       Expanded(
-                        child: OutlinedButton(
-                          onPressed: () async {
-                            _hapticTap();
-                            VoiceSpeechService.preferredFemaleVoice = _draft.femaleVoiceName;
-                            await VoiceSpeechService.speak(
-                              tr ? 'Merhaba, ben Ela. Kadın ses testidir.' : 'Hello, this is Ela.',
-                              lang: _lang,
-                              character: MascotCharacter.ela,
-                            );
-                            if (!mounted) return;
-                            final used = VoiceSpeechService.lastSpokenVoiceName;
-                            final matched = VoiceSpeechService.lastSpokenMatchedGender;
-                            setState(() {
-                              _voiceTestStatus = used.isEmpty
-                                  ? (tr ? 'Ela: Tarayıcı varsayılan sesi' : 'Ela: Browser default')
-                                  : (matched
-                                      ? 'Ela → $used'
-                                      : (tr
-                                          ? 'Ela → $used (Tarayıcıda kadın Türkçe ses yok, erkek yedeği kullanıldı)'
-                                          : 'Ela → $used (No female Turkish voice in browser)'));
-                            });
-                          },
-                          style: OutlinedButton.styleFrom(
-                            side: BorderSide(color: const Color(0xFFEC4899).withValues(alpha: 0.5)),
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                          ),
-                          child: Text(
-                            tr ? '👩 Kadın (Ela)' : '👩 Female (Ela)',
-                            style: const TextStyle(fontSize: 11, color: Colors.white),
+                        child: TactilePress(
+                          child: OutlinedButton(
+                            onPressed: () async {
+                              _hapticTap();
+                              VoiceSpeechService.preferredFemaleVoice = _draft.femaleVoiceName;
+                              await VoiceSpeechService.speak(
+                                tr ? 'Merhaba, ben Ela. Kadın ses testidir.' : 'Hello, this is Ela.',
+                                lang: _lang,
+                                character: MascotCharacter.ela,
+                              );
+                              if (!mounted) return;
+                              final used = VoiceSpeechService.lastSpokenVoiceName;
+                              final matched = VoiceSpeechService.lastSpokenMatchedGender;
+                              setState(() {
+                                _voiceTestStatus = used.isEmpty
+                                    ? (tr ? 'Ela: Tarayıcı varsayılan sesi' : 'Ela: Browser default')
+                                    : (matched
+                                        ? 'Ela → $used'
+                                        : (tr
+                                            ? 'Ela → $used (Tarayıcıda kadın Türkçe ses yok, erkek yedeği kullanıldı)'
+                                            : 'Ela → $used (No female Turkish voice in browser)'));
+                              });
+                            },
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(color: const Color(0xFFEC4899).withValues(alpha: 0.5)),
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                            ),
+                            child: Text(
+                              tr ? '👩 Kadın (Ela)' : '👩 Female (Ela)',
+                              style: const TextStyle(fontSize: 11, color: Colors.white),
+                            ),
                           ),
                         ),
                       ),
                       const SizedBox(width: 6),
                       Expanded(
-                        child: OutlinedButton(
-                          onPressed: () async {
-                            _hapticTap();
-                            VoiceSpeechService.preferredMaleVoice = _draft.maleVoiceName;
-                            await VoiceSpeechService.speak(
-                              tr ? 'Merhaba, ben Mert. Erkek ses testidir.' : 'Hello, this is Mert.',
-                              lang: _lang,
-                              character: MascotCharacter.mert,
-                            );
-                            if (!mounted) return;
-                            final used = VoiceSpeechService.lastSpokenVoiceName;
-                            setState(() {
-                              _voiceTestStatus = used.isEmpty
-                                  ? (tr ? 'Mert: Tarayıcı varsayılan sesi' : 'Mert: Browser default')
-                                  : 'Mert → $used';
-                            });
-                          },
-                          style: OutlinedButton.styleFrom(
-                            side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.5)),
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                          ),
-                          child: Text(
-                            tr ? '👨 Erkek (Mert)' : '👨 Male (Mert)',
-                            style: const TextStyle(fontSize: 11, color: Colors.white),
+                        child: TactilePress(
+                          child: OutlinedButton(
+                            onPressed: () async {
+                              _hapticTap();
+                              VoiceSpeechService.preferredMaleVoice = _draft.maleVoiceName;
+                              await VoiceSpeechService.speak(
+                                tr ? 'Merhaba, ben Mert. Erkek ses testidir.' : 'Hello, this is Mert.',
+                                lang: _lang,
+                                character: MascotCharacter.mert,
+                              );
+                              if (!mounted) return;
+                              final used = VoiceSpeechService.lastSpokenVoiceName;
+                              setState(() {
+                                _voiceTestStatus = used.isEmpty
+                                    ? (tr ? 'Mert: Tarayıcı varsayılan sesi' : 'Mert: Browser default')
+                                    : 'Mert → $used';
+                              });
+                            },
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.5)),
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                            ),
+                            child: Text(
+                              tr ? '👨 Erkek (Mert)' : '👨 Male (Mert)',
+                              style: const TextStyle(fontSize: 11, color: Colors.white),
+                            ),
                           ),
                         ),
                       ),
@@ -5023,26 +5147,30 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                         spacing: 5,
                         runSpacing: 5,
                         children: [
-                          ChoiceChip(
-                            label: Text(tr ? 'Otomatik' : 'Auto', style: const TextStyle(fontSize: 10, color: Colors.white)),
-                            selected: _draft.femaleVoiceName.isEmpty,
-                            selectedColor: const Color(0xFFEC4899).withValues(alpha: 0.35),
-                            backgroundColor: Colors.white.withValues(alpha: 0.06),
-                            onSelected: (_) {
-                              VoiceSpeechService.preferredFemaleVoice = '';
-                              setState(() => _draft = _draft.copyWith(femaleVoiceName: ''));
-                            },
-                          ),
-                          for (final v in _trVoices)
-                            ChoiceChip(
-                              label: Text(v.labelTr(), style: const TextStyle(fontSize: 10, color: Colors.white)),
-                              selected: _draft.femaleVoiceName == v.name,
+                          TactilePress(
+                            child: ChoiceChip(
+                              label: Text(tr ? 'Otomatik' : 'Auto', style: const TextStyle(fontSize: 10, color: Colors.white)),
+                              selected: _draft.femaleVoiceName.isEmpty,
                               selectedColor: const Color(0xFFEC4899).withValues(alpha: 0.35),
                               backgroundColor: Colors.white.withValues(alpha: 0.06),
                               onSelected: (_) {
-                                VoiceSpeechService.preferredFemaleVoice = v.name;
-                                setState(() => _draft = _draft.copyWith(femaleVoiceName: v.name));
+                                VoiceSpeechService.preferredFemaleVoice = '';
+                                setState(() => _draft = _draft.copyWith(femaleVoiceName: ''));
                               },
+                            ),
+                          ),
+                          for (final v in _trVoices)
+                            TactilePress(
+                              child: ChoiceChip(
+                                label: Text(v.labelTr(), style: const TextStyle(fontSize: 10, color: Colors.white)),
+                                selected: _draft.femaleVoiceName == v.name,
+                                selectedColor: const Color(0xFFEC4899).withValues(alpha: 0.35),
+                                backgroundColor: Colors.white.withValues(alpha: 0.06),
+                                onSelected: (_) {
+                                  VoiceSpeechService.preferredFemaleVoice = v.name;
+                                  setState(() => _draft = _draft.copyWith(femaleVoiceName: v.name));
+                                },
+                              ),
                             ),
                         ],
                       ),
@@ -5056,26 +5184,30 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                         spacing: 5,
                         runSpacing: 5,
                         children: [
-                          ChoiceChip(
-                            label: Text(tr ? 'Otomatik' : 'Auto', style: const TextStyle(fontSize: 10, color: Colors.white)),
-                            selected: _draft.maleVoiceName.isEmpty,
-                            selectedColor: const Color(0xFF38BDF8).withValues(alpha: 0.35),
-                            backgroundColor: Colors.white.withValues(alpha: 0.06),
-                            onSelected: (_) {
-                              VoiceSpeechService.preferredMaleVoice = '';
-                              setState(() => _draft = _draft.copyWith(maleVoiceName: ''));
-                            },
-                          ),
-                          for (final v in _trVoices)
-                            ChoiceChip(
-                              label: Text(v.labelTr(), style: const TextStyle(fontSize: 10, color: Colors.white)),
-                              selected: _draft.maleVoiceName == v.name,
+                          TactilePress(
+                            child: ChoiceChip(
+                              label: Text(tr ? 'Otomatik' : 'Auto', style: const TextStyle(fontSize: 10, color: Colors.white)),
+                              selected: _draft.maleVoiceName.isEmpty,
                               selectedColor: const Color(0xFF38BDF8).withValues(alpha: 0.35),
                               backgroundColor: Colors.white.withValues(alpha: 0.06),
                               onSelected: (_) {
-                                VoiceSpeechService.preferredMaleVoice = v.name;
-                                setState(() => _draft = _draft.copyWith(maleVoiceName: v.name));
+                                VoiceSpeechService.preferredMaleVoice = '';
+                                setState(() => _draft = _draft.copyWith(maleVoiceName: ''));
                               },
+                            ),
+                          ),
+                          for (final v in _trVoices)
+                            TactilePress(
+                              child: ChoiceChip(
+                                label: Text(v.labelTr(), style: const TextStyle(fontSize: 10, color: Colors.white)),
+                                selected: _draft.maleVoiceName == v.name,
+                                selectedColor: const Color(0xFF38BDF8).withValues(alpha: 0.35),
+                                backgroundColor: Colors.white.withValues(alpha: 0.06),
+                                onSelected: (_) {
+                                  VoiceSpeechService.preferredMaleVoice = v.name;
+                                  setState(() => _draft = _draft.copyWith(maleVoiceName: v.name));
+                                },
+                              ),
                             ),
                         ],
                       ),
@@ -5085,23 +5217,25 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               ),
             ),
             const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () {
-                _hapticTap();
-                widget.onSaveSettings(_draft);
-                Navigator.of(context).pop();
-                widget.onTestAiCall(AiCallReason.manualTest);
-              },
-              icon: const Icon(Icons.phone_forwarded_rounded, size: 18, color: Color(0xFF34D399)),
-              label: Text(
-                tr ? 'Gelen Aramayı Şimdi Test Et (Önizle)' : 'Test Incoming AI Call Now',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF6EE7B7)),
-              ),
-              style: OutlinedButton.styleFrom(
-                backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.14),
-                side: BorderSide(color: const Color(0xFF10B981).withValues(alpha: 0.45)),
-                padding: const EdgeInsets.symmetric(vertical: 11),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+            TactilePress.card(
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  _hapticTap();
+                  widget.onSaveSettings(_draft);
+                  Navigator.of(context).pop();
+                  widget.onTestAiCall(AiCallReason.manualTest);
+                },
+                icon: const Icon(Icons.phone_forwarded_rounded, size: 18, color: Color(0xFF34D399)),
+                label: Text(
+                  tr ? 'Gelen Aramayı Şimdi Test Et (Önizle)' : 'Test Incoming AI Call Now',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF6EE7B7)),
+                ),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.14),
+                  side: BorderSide(color: const Color(0xFF10B981).withValues(alpha: 0.45)),
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -5115,16 +5249,18 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                   (AiCallReason.coldRoom, tr ? '❄️ Ev Soğuk (Açalım mı?)' : '❄️ Cold Room'),
                   (AiCallReason.hotRoom, tr ? '☀️ Ev Sıcak (Kapatalım mı?)' : '☀️ Hot Room'),
                 ])
-                  ActionChip(
-                    label: Text(sc.$2, style: const TextStyle(fontSize: 10.5, color: Colors.white)),
-                    backgroundColor: Colors.white.withValues(alpha: 0.06),
-                    side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
-                    onPressed: () {
-                      _hapticTap();
-                      widget.onSaveSettings(_draft);
-                      Navigator.of(context).pop();
-                      widget.onTestAiCall(sc.$1);
-                    },
+                  TactilePress(
+                    child: ActionChip(
+                      label: Text(sc.$2, style: const TextStyle(fontSize: 10.5, color: Colors.white)),
+                      backgroundColor: Colors.white.withValues(alpha: 0.06),
+                      side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                      onPressed: () {
+                        _hapticTap();
+                        widget.onSaveSettings(_draft);
+                        Navigator.of(context).pop();
+                        widget.onTestAiCall(sc.$1);
+                      },
+                    ),
                   ),
               ],
             ),
@@ -5177,27 +5313,30 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                FilledButton.icon(
-                  onPressed: _espPingBusy ? null : _runEspConnectionTest,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFFFBBF24).withValues(alpha: 0.22),
-                    foregroundColor: const Color(0xFFFDE68A),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(color: const Color(0xFFFBBF24).withValues(alpha: 0.45)),
+                TactilePress(
+                  enabled: !_espPingBusy,
+                  child: FilledButton.icon(
+                    onPressed: _espPingBusy ? null : _runEspConnectionTest,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFFBBF24).withValues(alpha: 0.22),
+                      foregroundColor: const Color(0xFFFDE68A),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: const Color(0xFFFBBF24).withValues(alpha: 0.45)),
+                      ),
                     ),
-                  ),
-                  icon: _espPingBusy
-                      ? const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFDE68A)),
-                        )
-                      : const Icon(Icons.wifi_tethering_rounded, size: 16),
-                  label: Text(
-                    tr ? 'Ping' : 'Ping',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                    icon: _espPingBusy
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFFDE68A)),
+                          )
+                        : const Icon(Icons.wifi_tethering_rounded, size: 16),
+                    label: Text(
+                      tr ? 'Ping' : 'Ping',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                    ),
                   ),
                 ),
               ],
@@ -5261,137 +5400,145 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               spacing: 6,
               runSpacing: 6,
               children: [
-                ActionChip(
-                  avatar: const Icon(Icons.add_chart_rounded, size: 14, color: Color(0xFF38BDF8)),
-                  label: Text(
-                    tr ? 'Anlık Kayıt Al' : 'Log Snapshot',
-                    style: const TextStyle(fontSize: 11, color: Colors.white),
-                  ),
-                  backgroundColor: Colors.white.withValues(alpha: 0.06),
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
-                  onPressed: () {
-                    _hapticTap();
-                    final nowLabel = NotificationService.formatNowTime();
-                    final devId = _espIdCtrl.text.trim().isEmpty
-                        ? _draft.espDeviceId
-                        : _espIdCtrl.text.trim();
-                    final entry = EspLogEntry(
-                      timestamp: nowLabel,
-                      event: liveBoiler.isHeating
-                          ? (tr ? 'Modülasyon %${liveBoiler.flamePercent}' : 'Modulation %${liveBoiler.flamePercent}')
-                          : (tr ? 'Bekleme Telemetrisi' : 'Standby Telemetry'),
-                      detail:
-                          '$devId · ${widget.roomTemp.toStringAsFixed(1)}°C → ${_liveTargetTemp.toStringAsFixed(1)}°C · ${liveBoiler.waterPressureBar.toStringAsFixed(1)} Bar',
-                      category: liveBoiler.isHeating ? EspLogCategory.burner : EspLogCategory.system,
-                    );
-                    final next = _draft.copyWith(
-                      espDeviceId: devId,
-                      espLogs: EspLogService.appendLog(_draft.espLogs, entry),
-                    );
-                    setState(() {
-                      _draft = next;
-                      _espPingOk = true;
-                      _espPingStatus = tr
-                          ? 'Anlık telemetri kaydı NVS günlüğüne eklendi ($nowLabel).'
-                          : 'Live telemetry snapshot appended ($nowLabel).';
-                    });
-                    widget.onSaveSettings(next);
-                  },
-                ),
-                ActionChip(
-                  avatar: const Icon(Icons.warning_amber_rounded, size: 14, color: Color(0xFFFBBF24)),
-                  label: Text(
-                    tr ? 'WDT Testi' : 'WDT Test',
-                    style: const TextStyle(fontSize: 11, color: Colors.white),
-                  ),
-                  backgroundColor: Colors.white.withValues(alpha: 0.06),
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
-                  onPressed: () {
-                    _hapticTap();
-                    final nowLabel = NotificationService.formatNowTime();
-                    final devId = _espIdCtrl.text.trim().isEmpty
-                        ? _draft.espDeviceId
-                        : _espIdCtrl.text.trim();
-                    final entry = EspLogEntry(
-                      timestamp: nowLabel,
-                      event: tr ? 'WDT Tetikleme Testi' : 'WDT Reset Self-Test',
-                      detail: tr
-                          ? '$devId · Çekirdek güvenli kurtarma doğrulandı'
-                          : '$devId · Core recovery verified',
-                      isWarning: true,
-                      category: EspLogCategory.watchdog,
-                    );
-                    final next = _draft.copyWith(
-                      espDeviceId: devId,
-                      espWdtResetCount: _draft.espWdtResetCount + 1,
-                      espLogs: EspLogService.appendLog(_draft.espLogs, entry),
-                    );
-                    setState(() {
-                      _draft = next;
-                      _espPingOk = true;
-                      _espPingStatus = tr
-                          ? 'WDT kurtarma testi kaydedildi (#${next.espWdtResetCount}).'
-                          : 'WDT recovery test logged (#${next.espWdtResetCount}).';
-                    });
-                    widget.onSaveSettings(next);
-                  },
-                ),
-                ActionChip(
-                  avatar: const Icon(Icons.copy_all_rounded, size: 14, color: Color(0xFF10B981)),
-                  label: Text(
-                    tr ? 'Raporu Kopyala' : 'Copy Report',
-                    style: const TextStyle(fontSize: 11, color: Colors.white),
-                  ),
-                  backgroundColor: Colors.white.withValues(alpha: 0.06),
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
-                  onPressed: () async {
-                    _hapticTap();
-                    final report = EspLogService.exportLogsReport(
-                      settings: _draft.copyWith(
-                        espDeviceId: _espIdCtrl.text.trim().isEmpty
-                            ? _draft.espDeviceId
-                            : _espIdCtrl.text.trim(),
-                      ),
-                      roomTemp: widget.roomTemp,
-                      targetTemp: _liveTargetTemp,
-                      boiler: liveBoiler,
-                      lang: _lang,
-                    );
-                    await Clipboard.setData(ClipboardData(text: report));
-                    if (!mounted) return;
-                    setState(() {
-                      _espPingOk = true;
-                      _espPingStatus = tr
-                          ? 'ESP32 donanım raporu panoya kopyalandı (${_draft.espLogs.length} kayıt).'
-                          : 'ESP32 hardware report copied (${_draft.espLogs.length} logs).';
-                    });
-                  },
-                ),
-                if (_draft.espLogs.isNotEmpty)
-                  ActionChip(
-                    avatar: const Icon(Icons.delete_outline_rounded, size: 14, color: Color(0xFFF87171)),
+                TactilePress(
+                  child: ActionChip(
+                    avatar: const Icon(Icons.add_chart_rounded, size: 14, color: Color(0xFF38BDF8)),
                     label: Text(
-                      tr ? 'Temizle' : 'Clear',
+                      tr ? 'Anlık Kayıt Al' : 'Log Snapshot',
                       style: const TextStyle(fontSize: 11, color: Colors.white),
                     ),
-                    backgroundColor: const Color(0xFFEF4444).withValues(alpha: 0.12),
-                    side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.35)),
+                    backgroundColor: Colors.white.withValues(alpha: 0.06),
+                    side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
                     onPressed: () {
                       _hapticTap();
+                      final nowLabel = NotificationService.formatNowTime();
+                      final devId = _espIdCtrl.text.trim().isEmpty
+                          ? _draft.espDeviceId
+                          : _espIdCtrl.text.trim();
+                      final entry = EspLogEntry(
+                        timestamp: nowLabel,
+                        event: liveBoiler.isHeating
+                            ? (tr ? 'Modülasyon %${liveBoiler.flamePercent}' : 'Modulation %${liveBoiler.flamePercent}')
+                            : (tr ? 'Bekleme Telemetrisi' : 'Standby Telemetry'),
+                        detail:
+                            '$devId · ${widget.roomTemp.toStringAsFixed(1)}°C → ${_liveTargetTemp.toStringAsFixed(1)}°C · ${liveBoiler.waterPressureBar.toStringAsFixed(1)} Bar',
+                        category: liveBoiler.isHeating ? EspLogCategory.burner : EspLogCategory.system,
+                      );
                       final next = _draft.copyWith(
-                        espLogs: const [],
-                        espOfflineBurnMinutes: 0,
-                        espWdtResetCount: 0,
+                        espDeviceId: devId,
+                        espLogs: EspLogService.appendLog(_draft.espLogs, entry),
                       );
                       setState(() {
                         _draft = next;
                         _espPingOk = true;
                         _espPingStatus = tr
-                            ? 'ESP32 donanım günlüğü ve sayaçlar temizlendi.'
-                            : 'ESP32 hardware logs and counters cleared.';
+                            ? 'Anlık telemetri kaydı NVS günlüğüne eklendi ($nowLabel).'
+                            : 'Live telemetry snapshot appended ($nowLabel).';
                       });
                       widget.onSaveSettings(next);
                     },
+                  ),
+                ),
+                TactilePress(
+                  child: ActionChip(
+                    avatar: const Icon(Icons.warning_amber_rounded, size: 14, color: Color(0xFFFBBF24)),
+                    label: Text(
+                      tr ? 'WDT Testi' : 'WDT Test',
+                      style: const TextStyle(fontSize: 11, color: Colors.white),
+                    ),
+                    backgroundColor: Colors.white.withValues(alpha: 0.06),
+                    side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                    onPressed: () {
+                      _hapticTap();
+                      final nowLabel = NotificationService.formatNowTime();
+                      final devId = _espIdCtrl.text.trim().isEmpty
+                          ? _draft.espDeviceId
+                          : _espIdCtrl.text.trim();
+                      final entry = EspLogEntry(
+                        timestamp: nowLabel,
+                        event: tr ? 'WDT Tetikleme Testi' : 'WDT Reset Self-Test',
+                        detail: tr
+                            ? '$devId · Çekirdek güvenli kurtarma doğrulandı'
+                            : '$devId · Core recovery verified',
+                        isWarning: true,
+                        category: EspLogCategory.watchdog,
+                      );
+                      final next = _draft.copyWith(
+                        espDeviceId: devId,
+                        espWdtResetCount: _draft.espWdtResetCount + 1,
+                        espLogs: EspLogService.appendLog(_draft.espLogs, entry),
+                      );
+                      setState(() {
+                        _draft = next;
+                        _espPingOk = true;
+                        _espPingStatus = tr
+                            ? 'WDT kurtarma testi kaydedildi (#${next.espWdtResetCount}).'
+                            : 'WDT recovery test logged (#${next.espWdtResetCount}).';
+                      });
+                      widget.onSaveSettings(next);
+                    },
+                  ),
+                ),
+                TactilePress(
+                  child: ActionChip(
+                    avatar: const Icon(Icons.copy_all_rounded, size: 14, color: Color(0xFF10B981)),
+                    label: Text(
+                      tr ? 'Raporu Kopyala' : 'Copy Report',
+                      style: const TextStyle(fontSize: 11, color: Colors.white),
+                    ),
+                    backgroundColor: Colors.white.withValues(alpha: 0.06),
+                    side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                    onPressed: () async {
+                      _hapticTap();
+                      final report = EspLogService.exportLogsReport(
+                        settings: _draft.copyWith(
+                          espDeviceId: _espIdCtrl.text.trim().isEmpty
+                              ? _draft.espDeviceId
+                              : _espIdCtrl.text.trim(),
+                        ),
+                        roomTemp: widget.roomTemp,
+                        targetTemp: _liveTargetTemp,
+                        boiler: liveBoiler,
+                        lang: _lang,
+                      );
+                      await Clipboard.setData(ClipboardData(text: report));
+                      if (!mounted) return;
+                      setState(() {
+                        _espPingOk = true;
+                        _espPingStatus = tr
+                            ? 'ESP32 donanım raporu panoya kopyalandı (${_draft.espLogs.length} kayıt).'
+                            : 'ESP32 hardware report copied (${_draft.espLogs.length} logs).';
+                      });
+                    },
+                  ),
+                ),
+                if (_draft.espLogs.isNotEmpty)
+                  TactilePress(
+                    child: ActionChip(
+                      avatar: const Icon(Icons.delete_outline_rounded, size: 14, color: Color(0xFFF87171)),
+                      label: Text(
+                        tr ? 'Temizle' : 'Clear',
+                        style: const TextStyle(fontSize: 11, color: Colors.white),
+                      ),
+                      backgroundColor: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                      side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.35)),
+                      onPressed: () {
+                        _hapticTap();
+                        final next = _draft.copyWith(
+                          espLogs: const [],
+                          espOfflineBurnMinutes: 0,
+                          espWdtResetCount: 0,
+                        );
+                        setState(() {
+                          _draft = next;
+                          _espPingOk = true;
+                          _espPingStatus = tr
+                              ? 'ESP32 donanım günlüğü ve sayaçlar temizlendi.'
+                              : 'ESP32 hardware logs and counters cleared.';
+                        });
+                        widget.onSaveSettings(next);
+                      },
+                    ),
                   ),
               ],
             ),
@@ -5406,24 +5553,26 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                     (EspLogCategory.watchdog, tr ? 'WDT / Uyarı' : 'WDT / Alert'),
                     (EspLogCategory.sync, tr ? 'Bulut' : 'Cloud'),
                   ]) ...[
-                    ChoiceChip(
-                      label: Text(filterOpt.$2, style: const TextStyle(fontSize: 10.5)),
-                      selected: _espLogFilter == filterOpt.$1,
-                      selectedColor: const Color(0xFFFBBF24).withValues(alpha: 0.25),
-                      backgroundColor: Colors.white.withValues(alpha: 0.05),
-                      labelStyle: TextStyle(
-                        color: _espLogFilter == filterOpt.$1 ? const Color(0xFFFDE68A) : Colors.white70,
-                        fontWeight: FontWeight.w600,
+                    TactilePress(
+                      child: ChoiceChip(
+                        label: Text(filterOpt.$2, style: const TextStyle(fontSize: 10.5)),
+                        selected: _espLogFilter == filterOpt.$1,
+                        selectedColor: const Color(0xFFFBBF24).withValues(alpha: 0.25),
+                        backgroundColor: Colors.white.withValues(alpha: 0.05),
+                        labelStyle: TextStyle(
+                          color: _espLogFilter == filterOpt.$1 ? const Color(0xFFFDE68A) : Colors.white70,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        side: BorderSide(
+                          color: _espLogFilter == filterOpt.$1
+                              ? const Color(0xFFFBBF24).withValues(alpha: 0.55)
+                              : Colors.white.withValues(alpha: 0.12),
+                        ),
+                        onSelected: (_) {
+                          _hapticTap();
+                          setState(() => _espLogFilter = filterOpt.$1);
+                        },
                       ),
-                      side: BorderSide(
-                        color: _espLogFilter == filterOpt.$1
-                            ? const Color(0xFFFBBF24).withValues(alpha: 0.55)
-                            : Colors.white.withValues(alpha: 0.12),
-                      ),
-                      onSelected: (_) {
-                        _hapticTap();
-                        setState(() => _espLogFilter = filterOpt.$1);
-                      },
                     ),
                     const SizedBox(width: 6),
                   ],
@@ -5715,26 +5864,28 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                     (60, tr ? '60 sn' : '60s'),
                     (180, tr ? '3 dk' : '3m'),
                   ]) ...[
-                    ChoiceChip(
-                      label: Text(opt.$2, style: const TextStyle(fontSize: 10.5)),
-                      selected: _draft.cloudSyncIntervalSeconds == opt.$1,
-                      selectedColor: const Color(0xFF38BDF8).withValues(alpha: 0.25),
-                      backgroundColor: Colors.white.withValues(alpha: 0.05),
-                      labelStyle: TextStyle(
-                        color: _draft.cloudSyncIntervalSeconds == opt.$1 ? const Color(0xFFBAE6FD) : Colors.white70,
-                        fontWeight: FontWeight.w600,
+                    TactilePress(
+                      child: ChoiceChip(
+                        label: Text(opt.$2, style: const TextStyle(fontSize: 10.5)),
+                        selected: _draft.cloudSyncIntervalSeconds == opt.$1,
+                        selectedColor: const Color(0xFF38BDF8).withValues(alpha: 0.25),
+                        backgroundColor: Colors.white.withValues(alpha: 0.05),
+                        labelStyle: TextStyle(
+                          color: _draft.cloudSyncIntervalSeconds == opt.$1 ? const Color(0xFFBAE6FD) : Colors.white70,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        side: BorderSide(
+                          color: _draft.cloudSyncIntervalSeconds == opt.$1
+                              ? const Color(0xFF38BDF8).withValues(alpha: 0.55)
+                              : Colors.white.withValues(alpha: 0.12),
+                        ),
+                        onSelected: (_) {
+                          _hapticTap();
+                          final next = _draft.copyWith(cloudSyncIntervalSeconds: opt.$1);
+                          setState(() => _draft = next);
+                          widget.onSaveSettings(next);
+                        },
                       ),
-                      side: BorderSide(
-                        color: _draft.cloudSyncIntervalSeconds == opt.$1
-                            ? const Color(0xFF38BDF8).withValues(alpha: 0.55)
-                            : Colors.white.withValues(alpha: 0.12),
-                      ),
-                      onSelected: (_) {
-                        _hapticTap();
-                        final next = _draft.copyWith(cloudSyncIntervalSeconds: opt.$1);
-                        setState(() => _draft = next);
-                        widget.onSaveSettings(next);
-                      },
                     ),
                     const SizedBox(width: 6),
                   ],
@@ -5745,41 +5896,47 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
             Row(
               children: [
                 Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _cloudSyncBusy ? null : () => _runCloudPush(pullInstead: false),
-                    icon: _cloudSyncBusy
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF6EE7B7)),
-                          )
-                        : const Icon(Icons.cloud_upload_outlined, size: 16),
-                    label: Text(
-                      tr ? 'Buluta Gönder' : 'Push to RTDB',
-                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF6EE7B7),
-                      side: BorderSide(color: const Color(0xFF10B981).withValues(alpha: 0.45)),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: TactilePress(
+                    enabled: !_cloudSyncBusy,
+                    child: OutlinedButton.icon(
+                      onPressed: _cloudSyncBusy ? null : () => _runCloudPush(pullInstead: false),
+                      icon: _cloudSyncBusy
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF6EE7B7)),
+                            )
+                          : const Icon(Icons.cloud_upload_outlined, size: 16),
+                      label: Text(
+                        tr ? 'Buluta Gönder' : 'Push to RTDB',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF6EE7B7),
+                        side: BorderSide(color: const Color(0xFF10B981).withValues(alpha: 0.45)),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _cloudSyncBusy ? null : () => _runCloudPush(pullInstead: true),
-                    icon: const Icon(Icons.cloud_download_outlined, size: 16),
-                    label: Text(
-                      tr ? 'Buluttan Çek' : 'Pull from RTDB',
-                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF7DD3FC),
-                      side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.45)),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: TactilePress(
+                    enabled: !_cloudSyncBusy,
+                    child: OutlinedButton.icon(
+                      onPressed: _cloudSyncBusy ? null : () => _runCloudPush(pullInstead: true),
+                      icon: const Icon(Icons.cloud_download_outlined, size: 16),
+                      label: Text(
+                        tr ? 'Buluttan Çek' : 'Pull from RTDB',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF7DD3FC),
+                        side: BorderSide(color: const Color(0xFF38BDF8).withValues(alpha: 0.45)),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
                     ),
                   ),
                 ),
@@ -5810,44 +5967,48 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
               spacing: 6,
               runSpacing: 6,
               children: [
-                ActionChip(
-                  avatar: Icon(
-                    _showCloudPayloadPreview ? Icons.code_off_rounded : Icons.data_object_rounded,
-                    size: 14,
-                    color: const Color(0xFF38BDF8),
+                TactilePress(
+                  child: ActionChip(
+                    avatar: Icon(
+                      _showCloudPayloadPreview ? Icons.code_off_rounded : Icons.data_object_rounded,
+                      size: 14,
+                      color: const Color(0xFF38BDF8),
+                    ),
+                    label: Text(
+                      _showCloudPayloadPreview
+                          ? (tr ? 'JSON Önizlemeyi Gizle' : 'Hide JSON Preview')
+                          : (tr ? 'Canlı JSON Önizleme' : 'Live JSON Preview'),
+                      style: const TextStyle(fontSize: 11, color: Colors.white),
+                    ),
+                    backgroundColor: Colors.white.withValues(alpha: 0.06),
+                    side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                    onPressed: () {
+                      _hapticTap();
+                      setState(() => _showCloudPayloadPreview = !_showCloudPayloadPreview);
+                    },
                   ),
-                  label: Text(
-                    _showCloudPayloadPreview
-                        ? (tr ? 'JSON Önizlemeyi Gizle' : 'Hide JSON Preview')
-                        : (tr ? 'Canlı JSON Önizleme' : 'Live JSON Preview'),
-                    style: const TextStyle(fontSize: 11, color: Colors.white),
-                  ),
-                  backgroundColor: Colors.white.withValues(alpha: 0.06),
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
-                  onPressed: () {
-                    _hapticTap();
-                    setState(() => _showCloudPayloadPreview = !_showCloudPayloadPreview);
-                  },
                 ),
-                ActionChip(
-                  avatar: const Icon(Icons.copy_rounded, size: 14, color: Color(0xFF10B981)),
-                  label: Text(
-                    tr ? 'JSON Kopyala' : 'Copy JSON',
-                    style: const TextStyle(fontSize: 11, color: Colors.white),
+                TactilePress(
+                  child: ActionChip(
+                    avatar: const Icon(Icons.copy_rounded, size: 14, color: Color(0xFF10B981)),
+                    label: Text(
+                      tr ? 'JSON Kopyala' : 'Copy JSON',
+                      style: const TextStyle(fontSize: 11, color: Colors.white),
+                    ),
+                    backgroundColor: Colors.white.withValues(alpha: 0.06),
+                    side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
+                    onPressed: () async {
+                      _hapticTap();
+                      await Clipboard.setData(ClipboardData(text: payloadPreview));
+                      if (!mounted) return;
+                      setState(() {
+                        _cloudSyncOk = true;
+                        _cloudSyncStatus = tr
+                            ? '/$activeNode.json telemetri yükü panoya kopyalandı.'
+                            : '/$activeNode.json telemetry payload copied.';
+                      });
+                    },
                   ),
-                  backgroundColor: Colors.white.withValues(alpha: 0.06),
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.14)),
-                  onPressed: () async {
-                    _hapticTap();
-                    await Clipboard.setData(ClipboardData(text: payloadPreview));
-                    if (!mounted) return;
-                    setState(() {
-                      _cloudSyncOk = true;
-                      _cloudSyncStatus = tr
-                          ? '/$activeNode.json telemetri yükü panoya kopyalandı.'
-                          : '/$activeNode.json telemetry payload copied.';
-                    });
-                  },
                 ),
               ],
             ),
@@ -5878,11 +6039,13 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
         );
 
       case SettingsItemId.resetHistory:
-        return FilledButton.icon(
-          style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444).withValues(alpha: 0.25), foregroundColor: const Color(0xFFFCA5A5)),
-          onPressed: _confirmResetHistory,
-          icon: const Icon(Icons.delete_forever_outlined, size: 17),
-          label: Text(tr ? 'Tüm Tüketim & Telemetriyi Sıfırla' : 'Clear All Usage & Telemetry'),
+        return TactilePress.card(
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444).withValues(alpha: 0.25), foregroundColor: const Color(0xFFFCA5A5)),
+            onPressed: _confirmResetHistory,
+            icon: const Icon(Icons.delete_forever_outlined, size: 17),
+            label: Text(tr ? 'Tüm Tüketim & Telemetriyi Sıfırla' : 'Clear All Usage & Telemetry'),
+          ),
         );
     }
   }
@@ -5921,21 +6084,23 @@ class _ActionPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          gradient: active
-              ? LinearGradient(colors: [color, color.withValues(alpha: 0.72)])
-              : null,
-          color: active ? null : Colors.white.withValues(alpha: 0.06),
-          border: Border.all(color: active ? color : Colors.white.withValues(alpha: 0.14)),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+    return TactilePress(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            gradient: active
+                ? LinearGradient(colors: [color, color.withValues(alpha: 0.72)])
+                : null,
+            color: active ? null : Colors.white.withValues(alpha: 0.06),
+            border: Border.all(color: active ? color : Colors.white.withValues(alpha: 0.14)),
+          ),
+          child: Text(
+            label,
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+          ),
         ),
       ),
     );
@@ -6000,44 +6165,46 @@ class _MiniToggleTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.04),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: value ? activeColor.withValues(alpha: 0.45) : Colors.white.withValues(alpha: 0.10),
-          ),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                label,
-                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Colors.white),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+    return TactilePress.card(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: value ? activeColor.withValues(alpha: 0.45) : Colors.white.withValues(alpha: 0.10),
             ),
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: value ? activeColor : Colors.white.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(9),
-              ),
-              child: Text(
-                value ? 'Açık' : 'Kapalı',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  color: value ? Colors.white : Colors.white60,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Colors.white),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-            ),
-          ],
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: value ? activeColor : Colors.white.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Text(
+                  value ? 'Açık' : 'Kapalı',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: value ? Colors.white : Colors.white60,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

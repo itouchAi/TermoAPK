@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models/thermostat_state.dart';
 import '../services/ambient_audio_service.dart';
 import '../services/hardware_service.dart';
+import 'tactile_button.dart';
 
 class BootCeremonyOverlay extends StatefulWidget {
   final BootCeremonyStyle style;
@@ -305,28 +306,31 @@ class _BootCeremonyOverlayState extends State<BootCeremonyOverlay> with SingleTi
                           Positioned(
                             right: 16,
                             bottom: 16,
-                            child: GestureDetector(
-                              onTap: _skip,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: isLight
-                                      ? Colors.black.withValues(alpha: 0.06)
-                                      : Colors.white.withValues(alpha: 0.08),
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
+                            child: TactilePress(
+                              borderRadius: BorderRadius.circular(14),
+                              child: GestureDetector(
+                                onTap: _skip,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                  decoration: BoxDecoration(
                                     color: isLight
-                                        ? Colors.black.withValues(alpha: 0.14)
-                                        : Colors.white.withValues(alpha: 0.14),
+                                        ? Colors.black.withValues(alpha: 0.06)
+                                        : Colors.white.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: isLight
+                                          ? Colors.black.withValues(alpha: 0.14)
+                                          : Colors.white.withValues(alpha: 0.14),
+                                    ),
                                   ),
-                                ),
-                                child: Text(
-                                  tr ? 'Atla ›' : 'Skip ›',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: primaryText.withValues(alpha: 0.88),
-                                    decoration: TextDecoration.none,
+                                  child: Text(
+                                    tr ? 'Atla ›' : 'Skip ›',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: primaryText.withValues(alpha: 0.88),
+                                      decoration: TextDecoration.none,
+                                    ),
                                   ),
                                 ),
                               ),

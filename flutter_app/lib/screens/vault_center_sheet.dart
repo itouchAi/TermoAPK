@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import '../models/thermostat_state.dart';
 import '../services/vault_crypto_service.dart';
+import '../widgets/tactile_button.dart';
 
 Future<void> showVaultCenterSheet({
   required BuildContext context,
@@ -215,30 +216,36 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
           style: const TextStyle(color: Colors.white70, fontSize: 13),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dCtx).pop(),
-            child: Text(tr ? 'Vazgeç' : 'Cancel'),
+          TactilePress(
+            borderRadius: BorderRadius.circular(10),
+            child: TextButton(
+              onPressed: () => Navigator.of(dCtx).pop(),
+              child: Text(tr ? 'Vazgeç' : 'Cancel'),
+            ),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
-            onPressed: () {
-              Navigator.of(dCtx).pop();
-              _tgTokenCtrl.clear();
-              _tgChatCtrl.clear();
-              _pinCtrl.clear();
-              _newPinCtrl.clear();
-              setState(() => _exportedBackupJson = null);
-              _commit(
-                _settings.copyWith(
-                  vaultPin: '1234',
-                  vaultUnlocked: false,
-                  telegramToken: '',
-                  telegramChatId: '',
-                ),
-                msg: tr ? 'Şifreli kasa fabrika ayarlarına sıfırlandı.' : 'Encrypted vault reset to defaults.',
-              );
-            },
-            child: Text(tr ? 'Sıfırla' : 'Reset'),
+          TactilePress(
+            borderRadius: BorderRadius.circular(12),
+            child: FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+              onPressed: () {
+                Navigator.of(dCtx).pop();
+                _tgTokenCtrl.clear();
+                _tgChatCtrl.clear();
+                _pinCtrl.clear();
+                _newPinCtrl.clear();
+                setState(() => _exportedBackupJson = null);
+                _commit(
+                  _settings.copyWith(
+                    vaultPin: '1234',
+                    vaultUnlocked: false,
+                    telegramToken: '',
+                    telegramChatId: '',
+                  ),
+                  msg: tr ? 'Şifreli kasa fabrika ayarlarına sıfırlandı.' : 'Encrypted vault reset to defaults.',
+                );
+              },
+              child: Text(tr ? 'Sıfırla' : 'Reset'),
+            ),
           ),
         ],
       ),
@@ -373,13 +380,16 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
                         ],
                       ),
                     ),
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.white.withValues(alpha: 0.06),
-                        side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
+                    TactilePress(
+                      borderRadius: BorderRadius.circular(20),
+                      child: IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.white.withValues(alpha: 0.06),
+                          side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
+                        ),
+                        icon: const Icon(Icons.close_rounded, color: Color(0xFFFBBF24), size: 19),
                       ),
-                      icon: const Icon(Icons.close_rounded, color: Color(0xFFFBBF24), size: 19),
                     ),
                   ],
                 ),
@@ -488,15 +498,18 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    FilledButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFFF59E0B),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                    TactilePress(
+                      borderRadius: BorderRadius.circular(12),
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFF59E0B),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                        ),
+                        child: Text(tr ? 'Tamam & Kapat' : 'Done & Close', style: const TextStyle(fontWeight: FontWeight.w700)),
                       ),
-                      child: Text(tr ? 'Tamam & Kapat' : 'Done & Close', style: const TextStyle(fontWeight: FontWeight.w700)),
                     ),
                   ],
                 ),
@@ -622,11 +635,14 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    FilledButton.icon(
-                      onPressed: _unlockVault,
-                      style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B)),
-                      icon: const Icon(Icons.lock_open_rounded, size: 16),
-                      label: Text(tr ? 'Kilidi Aç' : 'Unlock'),
+                    TactilePress(
+                      borderRadius: BorderRadius.circular(20),
+                      child: FilledButton.icon(
+                        onPressed: _unlockVault,
+                        style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B)),
+                        icon: const Icon(Icons.lock_open_rounded, size: 16),
+                        label: Text(tr ? 'Kilidi Aç' : 'Unlock'),
+                      ),
                     ),
                   ],
                 ),
@@ -647,11 +663,14 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    FilledButton.icon(
-                      onPressed: _createPinAndLock,
-                      style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B)),
-                      icon: const Icon(Icons.lock_outline_rounded, size: 16),
-                      label: Text(tr ? 'PIN Oluştur & Kilitle' : 'Set & Lock'),
+                    TactilePress(
+                      borderRadius: BorderRadius.circular(20),
+                      child: FilledButton.icon(
+                        onPressed: _createPinAndLock,
+                        style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B)),
+                        icon: const Icon(Icons.lock_outline_rounded, size: 16),
+                        label: Text(tr ? 'PIN Oluştur & Kilitle' : 'Set & Lock'),
+                      ),
                     ),
                   ],
                 ),
@@ -665,53 +684,62 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
         Row(
           children: [
             Expanded(
-              child: FilledButton.tonalIcon(
-                onPressed: _exportBackup,
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF38BDF8).withValues(alpha: 0.18),
-                  foregroundColor: const Color(0xFF7DD3FC),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                icon: const Icon(Icons.download_outlined, size: 17),
-                label: Text(
-                  tr ? 'Yedeği İndir (.json)' : 'Export (.json)',
-                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+              child: TactilePress.card(
+                borderRadius: BorderRadius.circular(14),
+                child: FilledButton.tonalIcon(
+                  onPressed: _exportBackup,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF38BDF8).withValues(alpha: 0.18),
+                    foregroundColor: const Color(0xFF7DD3FC),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  icon: const Icon(Icons.download_outlined, size: 17),
+                  label: Text(
+                    tr ? 'Yedeği İndir (.json)' : 'Export (.json)',
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                  ),
                 ),
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: FilledButton.tonalIcon(
-                onPressed: _importBackup,
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.16),
-                  foregroundColor: const Color(0xFF6EE7B7),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                icon: const Icon(Icons.upload_file_outlined, size: 17),
-                label: Text(
-                  tr ? 'Yedek Yükle' : 'Restore',
-                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+              child: TactilePress.card(
+                borderRadius: BorderRadius.circular(14),
+                child: FilledButton.tonalIcon(
+                  onPressed: _importBackup,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.16),
+                    foregroundColor: const Color(0xFF6EE7B7),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  icon: const Icon(Icons.upload_file_outlined, size: 17),
+                  label: Text(
+                    tr ? 'Yedek Yükle' : 'Restore',
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+                  ),
                 ),
               ),
             ),
           ],
         ),
         const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: _confirmResetVault,
-          style: OutlinedButton.styleFrom(
-            foregroundColor: const Color(0xFFFCA5A5),
-            side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.45)),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          ),
-          icon: const Icon(Icons.restart_alt_rounded, size: 17),
-          label: Text(
-            tr ? 'Kasayı Sıfırla' : 'Reset Vault',
-            style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+        TactilePress.card(
+          borderRadius: BorderRadius.circular(14),
+          child: OutlinedButton.icon(
+            onPressed: _confirmResetVault,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFFCA5A5),
+              side: BorderSide(color: const Color(0xFFEF4444).withValues(alpha: 0.45)),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            icon: const Icon(Icons.restart_alt_rounded, size: 17),
+            label: Text(
+              tr ? 'Kasayı Sıfırla' : 'Reset Vault',
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
+            ),
           ),
         ),
 
@@ -792,9 +820,12 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
           controller: _tgTokenCtrl,
           hint: '1234567890:ABCdefGhIJKlmNoPQRstuVWxYZ...',
           obscure: _obscureToken,
-          suffix: IconButton(
-            onPressed: () => setState(() => _obscureToken = !_obscureToken),
-            icon: Icon(_obscureToken ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 18, color: Colors.white54),
+          suffix: TactilePress(
+            borderRadius: BorderRadius.circular(16),
+            child: IconButton(
+              onPressed: () => setState(() => _obscureToken = !_obscureToken),
+              icon: Icon(_obscureToken ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 18, color: Colors.white54),
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -814,37 +845,44 @@ class _VaultCenterModalState extends State<_VaultCenterModal> {
         Row(
           children: [
             Expanded(
-              child: FilledButton.icon(
-                onPressed: _saveTelegramEncrypted,
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF0284C7),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                icon: const Icon(Icons.enhanced_encryption_outlined, size: 17),
-                label: Text(
-                  tr ? 'Şifreli Olarak Kaydet' : 'Save Encrypted',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              child: TactilePress.card(
+                borderRadius: BorderRadius.circular(14),
+                child: FilledButton.icon(
+                  onPressed: _saveTelegramEncrypted,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF0284C7),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  icon: const Icon(Icons.enhanced_encryption_outlined, size: 17),
+                  label: Text(
+                    tr ? 'Şifreli Olarak Kaydet' : 'Save Encrypted',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
                 ),
               ),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _sendingTelegram ? null : _sendTelegramTest,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFFFBBF24),
-                  side: BorderSide(color: const Color(0xFFF59E0B).withValues(alpha: 0.48)),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                icon: _sendingTelegram
-                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.notifications_active_outlined, size: 17),
-                label: Text(
-                  tr ? 'Test Bildirimi Gönder' : 'Send Test Alert',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              child: TactilePress.card(
+                enabled: !_sendingTelegram,
+                borderRadius: BorderRadius.circular(14),
+                child: OutlinedButton.icon(
+                  onPressed: _sendingTelegram ? null : _sendTelegramTest,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFFBBF24),
+                    side: BorderSide(color: const Color(0xFFF59E0B).withValues(alpha: 0.48)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  icon: _sendingTelegram
+                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.notifications_active_outlined, size: 17),
+                  label: Text(
+                    tr ? 'Test Bildirimi Gönder' : 'Send Test Alert',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                  ),
                 ),
               ),
             ),
@@ -872,36 +910,39 @@ class _SegmentTabButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-        decoration: BoxDecoration(
-          color: active ? accentColor.withValues(alpha: 0.20) : Colors.transparent,
-          borderRadius: BorderRadius.circular(11),
-          border: Border.all(
-            color: active ? accentColor.withValues(alpha: 0.55) : Colors.transparent,
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 14, color: active ? accentColor : Colors.white54),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                  color: active ? Colors.white : Colors.white60,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+    return TactilePress(
+      borderRadius: BorderRadius.circular(11),
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          decoration: BoxDecoration(
+            color: active ? accentColor.withValues(alpha: 0.20) : Colors.transparent,
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(
+              color: active ? accentColor.withValues(alpha: 0.55) : Colors.transparent,
             ),
-          ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 14, color: active ? accentColor : Colors.white54),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: active ? Colors.white : Colors.white60,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

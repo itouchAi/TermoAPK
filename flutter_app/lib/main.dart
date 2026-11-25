@@ -27,6 +27,7 @@ import 'widgets/flow_tab_bar.dart';
 import 'widgets/missed_call_alert.dart';
 import 'widgets/overlays.dart';
 import 'widgets/smart_display_overlay.dart';
+import 'widgets/tactile_button.dart';
 import 'widgets/termo_bot.dart';
 import 'widgets/weather_effects_layer.dart';
 
@@ -54,6 +55,10 @@ class TermostatFlowApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark(useMaterial3: true).copyWith(
         scaffoldBackgroundColor: const Color(0xFF040406),
+      ),
+      builder: (context, child) => TactileMotionScope(
+        notifier: TactileMotionScope.globalEnabled,
+        child: child ?? const SizedBox.shrink(),
       ),
       home: const TermostatHomeShell(),
     );
@@ -155,6 +160,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   void initState() {
     super.initState();
     _syncPreferredVoices(_settings);
+    TactileMotionScope.globalEnabled.value = _visual.buttonTactileFeedback;
     if (ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating) {
       _heatingCycleStartedAt = DateTime.now();
     }
@@ -338,6 +344,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           _locationName = (map['locationName'] as String?) ?? _locationName;
           _settings = loadedSettings;
           _visual = loadedVisual;
+          TactileMotionScope.globalEnabled.value = loadedVisual.buttonTactileFeedback;
           _syncPreferredVoices(loadedSettings);
           final rawSched = map['schedule'];
           if (rawSched is List) {
@@ -1056,6 +1063,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
   void _updateVisual(VisualCustomizationState next) {
     final orderChanged = !_listEquals(next.tabOrder, _visual.tabOrder);
+    TactileMotionScope.globalEnabled.value = next.buttonTactileFeedback;
     setState(() => _visual = next);
     if (orderChanged) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1860,27 +1868,29 @@ class _TopActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: palette.isLight ? palette.cardBg : Colors.white.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(11),
-          border: Border.all(
-            color: palette.isLight ? palette.cardBorder : Colors.white.withValues(alpha: 0.11),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: palette.isLight ? 0.08 : 0.28),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
+    return TactilePress(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: palette.isLight ? palette.cardBg : Colors.white.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(
+              color: palette.isLight ? palette.cardBorder : Colors.white.withValues(alpha: 0.11),
             ),
-          ],
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: palette.isLight ? 0.08 : 0.28),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: child,
         ),
-        child: child,
       ),
     );
   }

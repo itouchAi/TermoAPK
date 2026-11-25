@@ -11,6 +11,7 @@ import '../services/hardware_service.dart';
 import '../services/media_storage_service.dart';
 import '../services/video_source_bridge.dart';
 import 'rotary_dial.dart';
+import 'tactile_button.dart';
 
 class SmartDisplayOverlay extends StatefulWidget {
   final SystemSettingsState settings;
@@ -933,15 +934,21 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
                                                       },
                                                     ),
                                                     const SizedBox(width: 8),
-                                                    GestureDetector(
-                                                      onTap: _openThermostatModal,
-                                                      child: Text(
-                                                        '${widget.targetTemp % 1 == 0 ? widget.targetTemp.toStringAsFixed(0) : widget.targetTemp.toStringAsFixed(1)}°C',
-                                                        style: const TextStyle(
-                                                          fontSize: 14.5,
-                                                          fontWeight: FontWeight.w800,
-                                                          color: Color(0xFFF59E0B),
-                                                          fontFeatures: [FontFeature.tabularFigures()],
+                                                    TactilePress(
+                                                      borderRadius: BorderRadius.circular(8),
+                                                      child: GestureDetector(
+                                                        onTap: _openThermostatModal,
+                                                        child: Padding(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                                          child: Text(
+                                                            '${widget.targetTemp % 1 == 0 ? widget.targetTemp.toStringAsFixed(0) : widget.targetTemp.toStringAsFixed(1)}°C',
+                                                            style: const TextStyle(
+                                                              fontSize: 14.5,
+                                                              fontWeight: FontWeight.w800,
+                                                              color: Color(0xFFF59E0B),
+                                                              fontFeatures: [FontFeature.tabularFigures()],
+                                                            ),
+                                                          ),
                                                         ),
                                                       ),
                                                     ),
@@ -1109,39 +1116,42 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
                                               ),
                                             ),
                                             const SizedBox(width: 8),
-                                            GestureDetector(
-                                              onTap: _toggleHudHidden,
-                                              child: AnimatedContainer(
-                                                duration: const Duration(milliseconds: 260),
-                                                width: 44,
-                                                height: 44,
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: _hudHidden
-                                                      ? Colors.black.withValues(alpha: 0.42)
-                                                      : const Color(0xFF14121B).withValues(alpha: 0.88),
-                                                  border: Border.all(
-                                                    color: const Color(0xFFF59E0B).withValues(
-                                                      alpha: _hudHidden ? 0.45 : 0.55,
+                                            TactilePress(
+                                              borderRadius: BorderRadius.circular(22),
+                                              child: GestureDetector(
+                                                onTap: _toggleHudHidden,
+                                                child: AnimatedContainer(
+                                                  duration: const Duration(milliseconds: 260),
+                                                  width: 44,
+                                                  height: 44,
+                                                  decoration: BoxDecoration(
+                                                    shape: BoxShape.circle,
+                                                    color: _hudHidden
+                                                        ? Colors.black.withValues(alpha: 0.42)
+                                                        : const Color(0xFF14121B).withValues(alpha: 0.88),
+                                                    border: Border.all(
+                                                      color: const Color(0xFFF59E0B).withValues(
+                                                        alpha: _hudHidden ? 0.45 : 0.55,
+                                                      ),
                                                     ),
+                                                    boxShadow: [
+                                                      BoxShadow(
+                                                        color: Colors.black.withValues(alpha: 0.45),
+                                                        blurRadius: 12,
+                                                      ),
+                                                    ],
                                                   ),
-                                                  boxShadow: [
-                                                    BoxShadow(
-                                                      color: Colors.black.withValues(alpha: 0.45),
-                                                      blurRadius: 12,
-                                                    ),
-                                                  ],
-                                                ),
-                                                child: AnimatedOpacity(
-                                                  duration: const Duration(milliseconds: 250),
-                                                  opacity: _hudHidden ? 0.55 : 1.0,
-                                                  child: Icon(
-                                                    _hudHidden ? Icons.visibility_outlined : Icons.brush_rounded,
-                                                    size: 19,
+                                                  child: AnimatedOpacity(
+                                                    duration: const Duration(milliseconds: 250),
+                                                    opacity: _hudHidden ? 0.55 : 1.0,
+                                                    child: Icon(
+                                                      _hudHidden ? Icons.visibility_outlined : Icons.brush_rounded,
+                                                      size: 19,
                                                     color: const Color(0xFFFBBF24),
                                                   ),
                                                 ),
                                               ),
+                                            ),
                                             ),
                                           ],
                                         ),
@@ -1401,57 +1411,60 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
         ? (tr ? '🔥 Isıtma %${widget.boiler.flamePercent}' : '🔥 Heating ${widget.boiler.flamePercent}%')
         : (tr ? '❄️ Bekleme' : '❄️ Standby');
 
-    final thermoBadge = GestureDetector(
-      onTap: _openThermostatModal,
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: compact ? 9 : 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xFF14121D).withValues(alpha: 0.78),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
-          boxShadow: [
-            BoxShadow(color: const Color(0xFFF59E0B).withValues(alpha: 0.14), blurRadius: 14),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.black.withValues(alpha: 0.45),
-                border: Border.all(color: const Color(0xFFF59E0B), width: 1.6),
+    final thermoBadge = TactilePress(
+      borderRadius: BorderRadius.circular(999),
+      child: GestureDetector(
+        onTap: _openThermostatModal,
+        child: Container(
+          padding: EdgeInsets.symmetric(horizontal: compact ? 9 : 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xFF14121D).withValues(alpha: 0.78),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+            boxShadow: [
+              BoxShadow(color: const Color(0xFFF59E0B).withValues(alpha: 0.14), blurRadius: 14),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black.withValues(alpha: 0.45),
+                  border: Border.all(color: const Color(0xFFF59E0B), width: 1.6),
+                ),
+                child: const Icon(Icons.local_fire_department_outlined, size: 15, color: Color(0xFFFBBF24)),
               ),
-              child: const Icon(Icons.local_fire_department_outlined, size: 15, color: Color(0xFFFBBF24)),
-            ),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  tr ? 'TERMOSTAT' : 'THERMOSTAT',
-                  style: TextStyle(
-                    fontSize: 8.5,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.8,
-                    color: Colors.white.withValues(alpha: 0.60),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    tr ? 'TERMOSTAT' : 'THERMOSTAT',
+                    style: TextStyle(
+                      fontSize: 8.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                      color: Colors.white.withValues(alpha: 0.60),
+                    ),
                   ),
-                ),
-                Text(
-                  '${widget.targetTemp.toStringAsFixed(1)}°C',
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFFFBBF24),
-                    fontFeatures: [FontFeature.tabularFigures()],
+                  Text(
+                    '${widget.targetTemp.toStringAsFixed(1)}°C',
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFFFBBF24),
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1566,19 +1579,22 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
       double iconSize = 17,
       List<BoxShadow>? shadows,
     }) {
-      return GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: gradient == null ? bgColor : null,
-            gradient: gradient,
-            border: borderColor != null ? Border.all(color: borderColor) : null,
-            boxShadow: shadows,
+      return TactilePress(
+        borderRadius: BorderRadius.circular(size / 2),
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: gradient == null ? bgColor : null,
+              gradient: gradient,
+              border: borderColor != null ? Border.all(color: borderColor) : null,
+              boxShadow: shadows,
+            ),
+            child: Icon(icon, size: iconSize, color: iconColor),
           ),
-          child: Icon(icon, size: iconSize, color: iconColor),
         ),
       );
     }
@@ -1779,25 +1795,28 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
                                 ),
                               ),
                               const SizedBox(width: 5),
-                              GestureDetector(
-                                onTap: () {
-                                  _wakeBottomControls();
-                                  _toggleMute();
-                                  _scheduleLeftCollapse();
-                                },
-                                child: Container(
-                                  width: 24,
-                                  height: 24,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: mutedNow
-                                        ? const Color(0xFFEF4444).withValues(alpha: 0.24)
-                                        : const Color(0xFF0EA5E9).withValues(alpha: 0.24),
-                                  ),
-                                  child: Icon(
-                                    mutedNow ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                                    size: 13,
-                                    color: mutedNow ? const Color(0xFFFCA5A5) : const Color(0xFF7DD3FC),
+                              TactilePress(
+                                borderRadius: BorderRadius.circular(12),
+                                child: GestureDetector(
+                                  onTap: () {
+                                    _wakeBottomControls();
+                                    _toggleMute();
+                                    _scheduleLeftCollapse();
+                                  },
+                                  child: Container(
+                                    width: 24,
+                                    height: 24,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: mutedNow
+                                          ? const Color(0xFFEF4444).withValues(alpha: 0.24)
+                                          : const Color(0xFF0EA5E9).withValues(alpha: 0.24),
+                                    ),
+                                    child: Icon(
+                                      mutedNow ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                                      size: 13,
+                                      color: mutedNow ? const Color(0xFFFCA5A5) : const Color(0xFF7DD3FC),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1814,19 +1833,22 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
 
           const SizedBox(width: 4),
           // Rotating '>' / '<' toggle arrow
-          GestureDetector(
-            onTap: () {
-              _haptic();
-              _wakeBottomControls();
-              _setLeftExpanded(!_leftExpanded);
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-              child: AnimatedRotation(
-                turns: _leftExpanded ? 0.5 : 0.0,
-                duration: const Duration(milliseconds: 240),
-                curve: Curves.easeInOutCubic,
-                child: const Icon(Icons.chevron_right_rounded, size: 19, color: Colors.white70),
+          TactilePress(
+            borderRadius: BorderRadius.circular(14),
+            child: GestureDetector(
+              onTap: () {
+                _haptic();
+                _wakeBottomControls();
+                _setLeftExpanded(!_leftExpanded);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                child: AnimatedRotation(
+                  turns: _leftExpanded ? 0.5 : 0.0,
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeInOutCubic,
+                  child: const Icon(Icons.chevron_right_rounded, size: 19, color: Colors.white70),
+                ),
               ),
             ),
           ),
@@ -1851,39 +1873,45 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
         mainAxisSize: MainAxisSize.min,
         children: [
           // Rotating '<' (open left) / '>' (collapse right) toggle arrow
-          GestureDetector(
-            onTap: () {
-              _haptic();
-              _wakeBottomControls();
-              _setRightExpanded(!_rightExpanded);
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-              child: AnimatedRotation(
-                turns: _rightExpanded ? 0.5 : 0.0,
-                duration: const Duration(milliseconds: 240),
-                curve: Curves.easeInOutCubic,
-                child: const Icon(Icons.chevron_left_rounded, size: 19, color: Colors.white70),
+          TactilePress(
+            borderRadius: BorderRadius.circular(14),
+            child: GestureDetector(
+              onTap: () {
+                _haptic();
+                _wakeBottomControls();
+                _setRightExpanded(!_rightExpanded);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                child: AnimatedRotation(
+                  turns: _rightExpanded ? 0.5 : 0.0,
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeInOutCubic,
+                  child: const Icon(Icons.chevron_left_rounded, size: 19, color: Colors.white70),
+                ),
               ),
             ),
           ),
 
           // Identical 34x34 circular Amber Brightness Button (kept constant in both collapsed & expanded states)
-          GestureDetector(
-            onTap: () {
-              _haptic();
-              _wakeBottomControls();
-              _setRightExpanded(!_rightExpanded);
-            },
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(0xFFF59E0B).withValues(alpha: _rightExpanded ? 0.30 : 0.22),
-                border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.45)),
+          TactilePress(
+            borderRadius: BorderRadius.circular(17),
+            child: GestureDetector(
+              onTap: () {
+                _haptic();
+                _wakeBottomControls();
+                _setRightExpanded(!_rightExpanded);
+              },
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFFF59E0B).withValues(alpha: _rightExpanded ? 0.30 : 0.22),
+                  border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.45)),
+                ),
+                child: const Icon(Icons.wb_sunny_outlined, size: 17, color: Color(0xFFFCD34D)),
               ),
-              child: const Icon(Icons.wb_sunny_outlined, size: 17, color: Color(0xFFFCD34D)),
             ),
           ),
 
@@ -1962,19 +1990,22 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
 
           const SizedBox(width: 6),
           // Red X Button (Completely exits Smart Display)
-          GestureDetector(
-            onTap: () {
-              _haptic();
-              widget.onClose();
-            },
-            child: Container(
-              width: 34,
-              height: 34,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                color: Color(0xFFE11D48),
+          TactilePress(
+            borderRadius: BorderRadius.circular(17),
+            child: GestureDetector(
+              onTap: () {
+                _haptic();
+                widget.onClose();
+              },
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Color(0xFFE11D48),
+                ),
+                child: const Icon(Icons.close_rounded, size: 18, color: Colors.white),
               ),
-              child: const Icon(Icons.close_rounded, size: 18, color: Colors.white),
             ),
           ),
         ],
@@ -2019,9 +2050,15 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
                   tr ? 'Hızlı Mod, Tema & Blur' : 'Quick Mode, Theme & Blur',
                   style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFFBBF24)),
                 ),
-                GestureDetector(
-                  onTap: () => setState(() => _leftDrawerOpen = false),
-                  child: const Icon(Icons.close_rounded, size: 16, color: Colors.white54),
+                TactilePress(
+                  borderRadius: BorderRadius.circular(10),
+                  child: GestureDetector(
+                    onTap: () => setState(() => _leftDrawerOpen = false),
+                    child: const Padding(
+                      padding: EdgeInsets.all(2),
+                      child: Icon(Icons.close_rounded, size: 16, color: Colors.white54),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -2093,19 +2130,23 @@ class _CircleMiniBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: enabled ? onTap : null,
-      child: Opacity(
-        opacity: enabled ? 1.0 : 0.35,
-        child: Container(
-          width: 24,
-          height: 24,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.white.withValues(alpha: 0.14),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+    return TactilePress(
+      enabled: enabled,
+      borderRadius: BorderRadius.circular(12),
+      child: GestureDetector(
+        onTap: enabled ? onTap : null,
+        child: Opacity(
+          opacity: enabled ? 1.0 : 0.35,
+          child: Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withValues(alpha: 0.14),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+            ),
+            child: Icon(icon, size: 15, color: Colors.white),
           ),
-          child: Icon(icon, size: 15, color: Colors.white),
         ),
       ),
     );
@@ -2127,21 +2168,24 @@ class _QuickPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        decoration: BoxDecoration(
-          color: active ? activeColor.withValues(alpha: 0.28) : Colors.white.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: active ? activeColor : Colors.white.withValues(alpha: 0.12),
+    return TactilePress(
+      borderRadius: BorderRadius.circular(10),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: BoxDecoration(
+            color: active ? activeColor.withValues(alpha: 0.28) : Colors.white.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: active ? activeColor : Colors.white.withValues(alpha: 0.12),
+            ),
           ),
-        ),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Colors.white),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Colors.white),
+          ),
         ),
       ),
     );
@@ -2383,17 +2427,20 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                           ],
                         ),
                       ),
-                      GestureDetector(
-                        onTap: onClose,
-                        child: Container(
-                          width: 34,
-                          height: 34,
-                          decoration: BoxDecoration(
-                            color: palette.cardBg,
-                            borderRadius: BorderRadius.circular(11),
-                            border: Border.all(color: palette.cardBorder),
+                      TactilePress(
+                        borderRadius: BorderRadius.circular(11),
+                        child: GestureDetector(
+                          onTap: onClose,
+                          child: Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: palette.cardBg,
+                              borderRadius: BorderRadius.circular(11),
+                              border: Border.all(color: palette.cardBorder),
+                            ),
+                            child: Icon(Icons.close_rounded, size: 18, color: palette.textSecondary),
                           ),
-                          child: Icon(Icons.close_rounded, size: 18, color: palette.textSecondary),
                         ),
                       ),
                     ],
@@ -2498,47 +2545,50 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                         Expanded(
                           child: Padding(
                             padding: EdgeInsets.only(right: p.id == PresetId.boost ? 0 : 7),
-                            child: GestureDetector(
-                              onTap: () => onSelectPreset(p),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
-                                decoration: BoxDecoration(
-                                  color: (targetTemp - p.temp).abs() < 0.05
-                                      ? colorFor(p.id).withValues(alpha: 0.18)
-                                      : palette.cardBg,
-                                  borderRadius: BorderRadius.circular(14),
-                                  border: Border.all(
+                            child: TactilePress.card(
+                              borderRadius: BorderRadius.circular(14),
+                              child: GestureDetector(
+                                onTap: () => onSelectPreset(p),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
+                                  decoration: BoxDecoration(
                                     color: (targetTemp - p.temp).abs() < 0.05
-                                        ? colorFor(p.id)
-                                        : palette.cardBorder,
+                                        ? colorFor(p.id).withValues(alpha: 0.18)
+                                        : palette.cardBg,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: (targetTemp - p.temp).abs() < 0.05
+                                          ? colorFor(p.id)
+                                          : palette.cardBorder,
+                                    ),
                                   ),
-                                ),
-                                child: Column(
-                                  children: [
-                                    Icon(iconFor(p.id), size: 15, color: colorFor(p.id)),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      tr ? p.labelTr : p.labelEn,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w700,
-                                        color: (targetTemp - p.temp).abs() < 0.05
-                                            ? colorFor(p.id)
-                                            : palette.textPrimary,
+                                  child: Column(
+                                    children: [
+                                      Icon(iconFor(p.id), size: 15, color: colorFor(p.id)),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        tr ? p.labelTr : p.labelEn,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w700,
+                                          color: (targetTemp - p.temp).abs() < 0.05
+                                              ? colorFor(p.id)
+                                              : palette.textPrimary,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      '${p.temp % 1 == 0 ? p.temp.toStringAsFixed(0) : p.temp.toStringAsFixed(1)}°C',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w600,
-                                        color: (targetTemp - p.temp).abs() < 0.05
-                                            ? colorFor(p.id)
-                                            : palette.textSecondary,
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '${p.temp % 1 == 0 ? p.temp.toStringAsFixed(0) : p.temp.toStringAsFixed(1)}°C',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                          color: (targetTemp - p.temp).abs() < 0.05
+                                              ? colorFor(p.id)
+                                              : palette.textSecondary,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -2552,19 +2602,22 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                   // Bottom Return CTA
                   SizedBox(
                     width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: onClose,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: themeAccent,
-                        side: BorderSide(color: palette.cardBorder),
-                        backgroundColor: palette.cardBg,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
-                      icon: const Icon(Icons.auto_awesome_outlined, size: 16),
-                      label: Text(
-                        tr ? 'Sinematik Ambiyans Moduna Dön' : 'Return to Cinematic Ambient Mode',
-                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                    child: TactilePress.card(
+                      borderRadius: BorderRadius.circular(14),
+                      child: OutlinedButton.icon(
+                        onPressed: onClose,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: themeAccent,
+                          side: BorderSide(color: palette.cardBorder),
+                          backgroundColor: palette.cardBg,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                        icon: const Icon(Icons.auto_awesome_outlined, size: 16),
+                        label: Text(
+                          tr ? 'Sinematik Ambiyans Moduna Dön' : 'Return to Cinematic Ambient Mode',
+                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                        ),
                       ),
                     ),
                   ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/thermostat_state.dart';
 import '../services/voice_speech_service.dart';
+import 'tactile_button.dart';
 
 Future<void> showVoiceCommandSheet({
   required BuildContext context,
@@ -170,21 +171,25 @@ Future<void> showVoiceCommandSheet({
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          IconButton(
-                            tooltip: lang == LangCode.tr ? 'Sesli Yanıt' : 'Voice Reply',
-                            onPressed: () {
-                              setSheetState(() => speakingReply = !speakingReply);
-                              if (!speakingReply) VoiceSpeechService.stopSpeaking();
-                            },
-                            icon: Icon(
-                              speakingReply ? Icons.volume_up_rounded : Icons.volume_off_rounded,
-                              size: 20,
-                              color: speakingReply ? const Color(0xFF34D399) : Colors.white38,
+                          TactilePress(
+                            child: IconButton(
+                              tooltip: lang == LangCode.tr ? 'Sesli Yanıt' : 'Voice Reply',
+                              onPressed: () {
+                                setSheetState(() => speakingReply = !speakingReply);
+                                if (!speakingReply) VoiceSpeechService.stopSpeaking();
+                              },
+                              icon: Icon(
+                                speakingReply ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+                                size: 20,
+                                color: speakingReply ? const Color(0xFF34D399) : Colors.white38,
+                              ),
                             ),
                           ),
-                          IconButton(
-                            onPressed: () => Navigator.of(ctx).pop(),
-                            icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                          TactilePress(
+                            child: IconButton(
+                              onPressed: () => Navigator.of(ctx).pop(),
+                              icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                            ),
                           ),
                         ],
                       ),
@@ -193,9 +198,10 @@ Future<void> showVoiceCommandSheet({
                   const SizedBox(height: 12),
 
                   // Big Press-to-Speak Microphone Banner
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: toggleMic,
+                  TactilePress.card(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: toggleMic,
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 220),
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -240,6 +246,7 @@ Future<void> showVoiceCommandSheet({
                         ],
                       ),
                     ),
+                    ),
                   ),
 
                   const SizedBox(height: 12),
@@ -248,11 +255,13 @@ Future<void> showVoiceCommandSheet({
                     runSpacing: 7,
                     children: [
                       for (final cmd in presets)
-                        ActionChip(
-                          label: Text(cmd, style: const TextStyle(fontSize: 11.5, color: Colors.white)),
-                          backgroundColor: Colors.white.withValues(alpha: 0.07),
-                          side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
-                          onPressed: () => submit(cmd),
+                        TactilePress(
+                          child: ActionChip(
+                            label: Text(cmd, style: const TextStyle(fontSize: 11.5, color: Colors.white)),
+                            backgroundColor: Colors.white.withValues(alpha: 0.07),
+                            side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                            onPressed: () => submit(cmd),
+                          ),
                         ),
                     ],
                   ),
@@ -297,14 +306,16 @@ Future<void> showVoiceCommandSheet({
                         ),
                       ),
                       const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: () => submit(controller.text),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: accentColor,
-                          minimumSize: const Size(74, 48),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      TactilePress(
+                        child: FilledButton(
+                          onPressed: () => submit(controller.text),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: accentColor,
+                            minimumSize: const Size(74, 48),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          ),
+                          child: Text(lang == LangCode.tr ? 'Uygula' : 'Run'),
                         ),
-                        child: Text(lang == LangCode.tr ? 'Uygula' : 'Run'),
                       ),
                     ],
                   ),
