@@ -9,6 +9,7 @@ class TactileFocusTarget {
   final Object token;
   final Rect globalRect;
   final bool isCircle;
+  final bool isPressed;
   final double borderRadius;
   final double? overrideCircleRadius;
 
@@ -16,6 +17,7 @@ class TactileFocusTarget {
     required this.token,
     required this.globalRect,
     this.isCircle = false,
+    this.isPressed = true,
     this.borderRadius = 18.0,
     this.overrideCircleRadius,
   });
@@ -26,7 +28,7 @@ class TactileFocusTarget {
 }
 
 /// App-wide inherited scope controlling whether buttons & the thermostat dial
-/// display tactile hover/press animations and surrounding press-focus blur,
+/// display tactile hover/press animations and surrounding hover/press-focus blur,
 /// plus wheel-event coordination for the thermostat dial.
 class TactileMotionScope extends InheritedNotifier<ValueNotifier<bool>> {
   static final ValueNotifier<bool> globalEnabled = ValueNotifier<bool>(true);
@@ -72,12 +74,13 @@ class TactileMotionScope extends InheritedNotifier<ValueNotifier<bool>> {
     return false;
   }
 
-  /// Registers a pressed tactile target in global viewport coordinates so
-  /// [TactileFocusBlurHost] subtly blurs everything outside it.
+  /// Registers a hovered or pressed tactile target in global viewport coordinates
+  /// so [TactileFocusBlurHost] subtly blurs everything outside it.
   static void beginFocus(
     BuildContext context, {
     required Object token,
     bool isCircle = false,
+    bool isPressed = true,
     double borderRadius = 18.0,
     double? overrideCircleRadius,
   }) {
@@ -94,6 +97,7 @@ class TactileMotionScope extends InheritedNotifier<ValueNotifier<bool>> {
       token: token,
       globalRect: globalRect,
       isCircle: isCircle,
+      isPressed: isPressed,
       borderRadius: borderRadius,
       overrideCircleRadius: overrideCircleRadius,
     );
@@ -107,8 +111,8 @@ class TactileMotionScope extends InheritedNotifier<ValueNotifier<bool>> {
   }
 }
 
-/// Renders an inverse-clipped subtle backdrop blur around the currently pressed
-/// tactile element while keeping the element itself razor-sharp.
+/// Renders an inverse-clipped subtle backdrop blur around the currently hovered
+/// or pressed tactile element while keeping the element itself razor-sharp.
 class TactileFocusBlurHost extends StatefulWidget {
   final Widget child;
   final double maxBlurSigma;
@@ -116,7 +120,7 @@ class TactileFocusBlurHost extends StatefulWidget {
   const TactileFocusBlurHost({
     super.key,
     required this.child,
-    this.maxBlurSigma = 2.8,
+    this.maxBlurSigma = 3.0,
   });
 
   @override
@@ -133,8 +137,8 @@ class _TactileFocusBlurHostState extends State<TactileFocusBlurHost>
     super.initState();
     _blurCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 110),
-      reverseDuration: const Duration(milliseconds: 155),
+      duration: const Duration(milliseconds: 135),
+      reverseDuration: const Duration(milliseconds: 165),
     );
     TactileMotionScope.activeFocus.addListener(_syncFocus);
     TactileMotionScope.globalEnabled.addListener(_syncEnabled);
@@ -162,7 +166,12 @@ class _TactileFocusBlurHostState extends State<TactileFocusBlurHost>
       setState(() {
         _renderTarget = next;
       });
-      _blurCtrl.forward();
+      final targetWeight = next.isPressed ? 1.0 : 0.78;
+      _blurCtrl.animateTo(
+        targetWeight,
+        duration: Duration(milliseconds: next.isPressed ? 95 : 135),
+        curve: Curves.easeOutCubic,
+      );
     } else {
       _blurCtrl.reverse().then((_) {
         if (mounted && TactileMotionScope.activeFocus.value == null) {
@@ -353,11 +362,29 @@ class _TactilePressState extends State<TactilePress>
     super.dispose();
   }
 
+  void _syncFocusBlur() {
+    if (!mounted || !widget.enabled || !TactileMotionScope.isEnabled(context)) {
+      TactileMotionScope.endFocus(_focusToken);
+      return;
+    }
+    if (!_hovered && !_pressed) {
+      TactileMotionScope.endFocus(_focusToken);
+      return;
+    }
+    TactileMotionScope.beginFocus(
+      context,
+      token: _focusToken,
+      isCircle: widget.focusCircle,
+      isPressed: _pressed,
+      borderRadius: widget.focusBorderRadius,
+    );
+  }
+
   void _clearPressed({required bool isRelease}) {
     if (!_pressed) return;
     _pressed = false;
     _pointerDownPos = null;
-    TactileMotionScope.endFocus(_focusToken);
+    _syncFocusBlur();
     _animateToTarget(isRelease: isRelease);
   }
 
@@ -412,6 +439,7 @@ class _TactilePressState extends State<TactilePress>
       cursor: widget.cursor ?? SystemMouseCursors.click,
       onEnter: (_) {
         _hovered = true;
+        _syncFocusBlur();
         if (!_pressed) _animateToTarget(isRelease: false);
       },
       onExit: (_) {
@@ -419,7 +447,7 @@ class _TactilePressState extends State<TactilePress>
         _hovered = false;
         _pressed = false;
         _pointerDownPos = null;
-        TactileMotionScope.endFocus(_focusToken);
+        _syncFocusBlur();
         _animateToTarget(isRelease: wasPressed);
       },
       child: Listener(
@@ -427,12 +455,7 @@ class _TactilePressState extends State<TactilePress>
         onPointerDown: (event) {
           _pointerDownPos = event.position;
           _pressed = true;
-          TactileMotionScope.beginFocus(
-            context,
-            token: _focusToken,
-            isCircle: widget.focusCircle,
-            borderRadius: widget.focusBorderRadius,
-          );
+          _syncFocusBlur();
           _animateToTarget(isRelease: false);
         },
         onPointerMove: (event) {

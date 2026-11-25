@@ -1611,8 +1611,19 @@ void main() {
     await outsideTouch.up();
     await tester.pumpAndSettle();
 
-    // 3. Mouse wheel (vertical & horizontal) inside the dial circle raises/lowers temp
-    //    and suppresses BOTH outer page wheel listener AND PageView Scrollable.
+    // 3. Hovering cursor inside the dial circle activates surrounding focus blur,
+    //    and mouse wheel (vertical & horizontal) raises/lowers temp without scrolling PageView.
+    final hoverMouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await hoverMouse.addPointer(location: Offset.zero);
+    addTearDown(hoverMouse.removePointer);
+    await tester.pump();
+    await hoverMouse.moveTo(dialCenter);
+    await tester.pumpAndSettle();
+    expect(TactileMotionScope.activeFocus.value, isNotNull);
+    expect(TactileMotionScope.activeFocus.value!.isCircle, isTrue);
+    expect(TactileMotionScope.activeFocus.value!.isPressed, isFalse);
+    expect(find.byType(BackdropFilter), findsOneWidget);
+
     final mouse = TestPointer(7, PointerDeviceKind.mouse);
     await tester.sendEventToBinding(mouse.hover(dialCenter));
     await tester.pump();
@@ -1634,7 +1645,13 @@ void main() {
     expect(outerWheelCount, 0);
     expect(pageController.page, 0.0);
 
-    // 4. Mouse wheel outside outerTickRadius passes to outer wheel listener without changing temp
+    // 4. Moving cursor outside outerTickRadius clears hover focus blur,
+    //    and mouse wheel passes to outer wheel listener without changing temp.
+    await hoverMouse.moveTo(cornerOutsideTick);
+    await tester.pumpAndSettle();
+    expect(TactileMotionScope.activeFocus.value, isNull);
+    expect(find.byType(BackdropFilter), findsNothing);
+
     final afterWheelTemp = targetTemp;
     await tester.sendEventToBinding(mouse.hover(cornerOutsideTick));
     await tester.pump();

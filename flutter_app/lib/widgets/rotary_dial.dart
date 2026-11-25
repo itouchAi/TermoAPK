@@ -102,20 +102,34 @@ class _RotaryDialState extends State<RotaryDial>
     }
   }
 
+  void _syncDialFocus() {
+    if (!mounted || !TactileMotionScope.isEnabled(context)) {
+      TactileMotionScope.endFocus(_dialFocusToken);
+      return;
+    }
+    if (!_hovered && !_pressed) {
+      TactileMotionScope.endFocus(_dialFocusToken);
+      return;
+    }
+    final dialCtx = _dialCircleKey.currentContext ?? context;
+    final outerRadius = RotaryDial.outerTickRadiusForSize(widget.sizePx);
+    final activeScale = _pressed ? _pressScale : _hoverScale;
+    TactileMotionScope.beginFocus(
+      dialCtx,
+      token: _dialFocusToken,
+      isCircle: true,
+      isPressed: _pressed,
+      overrideCircleRadius: outerRadius * activeScale + 6.0,
+    );
+  }
+
   void _beginDialPress() {
     if (!_pressed) {
       setState(() => _pressed = true);
     }
     if (TactileMotionScope.isEnabled(context)) {
       _animateTactile(isRelease: false);
-      final dialCtx = _dialCircleKey.currentContext ?? context;
-      final outerRadius = RotaryDial.outerTickRadiusForSize(widget.sizePx);
-      TactileMotionScope.beginFocus(
-        dialCtx,
-        token: _dialFocusToken,
-        isCircle: true,
-        overrideCircleRadius: outerRadius * _pressScale + 6.0,
-      );
+      _syncDialFocus();
     }
   }
 
@@ -124,7 +138,7 @@ class _RotaryDialState extends State<RotaryDial>
       setState(() => _pressed = false);
       _animateTactile(isRelease: true);
     }
-    TactileMotionScope.endFocus(_dialFocusToken);
+    _syncDialFocus();
   }
 
   void _handlePointerSignal(PointerSignalEvent event) {
@@ -410,8 +424,11 @@ class _RotaryDialState extends State<RotaryDial>
                     if (!_hovered) {
                       setState(() => _hovered = true);
                     }
-                    if (!_pressed && tactileActive) {
-                      _animateTactile(isRelease: false);
+                    if (tactileActive) {
+                      _syncDialFocus();
+                      if (!_pressed) {
+                        _animateTactile(isRelease: false);
+                      }
                     }
                   },
                   onExit: (_) {
@@ -422,7 +439,7 @@ class _RotaryDialState extends State<RotaryDial>
                         _pressed = false;
                       });
                     }
-                    TactileMotionScope.endFocus(_dialFocusToken);
+                    _syncDialFocus();
                     if (tactileActive) {
                       _animateTactile(isRelease: wasPressed);
                     }

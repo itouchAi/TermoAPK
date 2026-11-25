@@ -240,12 +240,18 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
                       builder: (tabCtx) => MouseRegion(
                         onEnter: (_) {
                           if (_hoveredTab != i) setState(() => _hoveredTab = i);
+                          if (TactileMotionScope.isEnabled(tabCtx)) {
+                            TactileMotionScope.beginFocus(
+                              tabCtx,
+                              token: _tabFocusToken,
+                              isPressed: _pressedTab == i,
+                              borderRadius: 24.0,
+                            );
+                          }
                         },
                         onExit: (_) {
                           if (_hoveredTab == i || _pressedTab == i) {
-                            if (_pressedTab == i) {
-                              TactileMotionScope.endFocus(_tabFocusToken);
-                            }
+                            TactileMotionScope.endFocus(_tabFocusToken);
                             setState(() {
                               if (_hoveredTab == i) _hoveredTab = null;
                               if (_pressedTab == i) {
@@ -263,6 +269,7 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
                               TactileMotionScope.beginFocus(
                                 tabCtx,
                                 token: _tabFocusToken,
+                                isPressed: true,
                                 borderRadius: 24.0,
                               );
                             }
@@ -275,7 +282,17 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
                             if (_pressedTab == i &&
                                 _pressOrigin != null &&
                                 (ev.position - _pressOrigin!).distance > 14.0) {
-                              TactileMotionScope.endFocus(_tabFocusToken);
+                              if (_hoveredTab == i &&
+                                  TactileMotionScope.isEnabled(tabCtx)) {
+                                TactileMotionScope.beginFocus(
+                                  tabCtx,
+                                  token: _tabFocusToken,
+                                  isPressed: false,
+                                  borderRadius: 24.0,
+                                );
+                              } else {
+                                TactileMotionScope.endFocus(_tabFocusToken);
+                              }
                               setState(() {
                                 _pressedTab = null;
                                 _pressOrigin = null;
@@ -284,7 +301,17 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
                           },
                           onPointerUp: (_) {
                             if (_pressedTab == i) {
-                              TactileMotionScope.endFocus(_tabFocusToken);
+                              if (_hoveredTab == i &&
+                                  TactileMotionScope.isEnabled(tabCtx)) {
+                                TactileMotionScope.beginFocus(
+                                  tabCtx,
+                                  token: _tabFocusToken,
+                                  isPressed: false,
+                                  borderRadius: 24.0,
+                                );
+                              } else {
+                                TactileMotionScope.endFocus(_tabFocusToken);
+                              }
                               setState(() {
                                 _pressedTab = null;
                                 _pressOrigin = null;
@@ -293,7 +320,17 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
                           },
                           onPointerCancel: (_) {
                             if (_pressedTab == i) {
-                              TactileMotionScope.endFocus(_tabFocusToken);
+                              if (_hoveredTab == i &&
+                                  TactileMotionScope.isEnabled(tabCtx)) {
+                                TactileMotionScope.beginFocus(
+                                  tabCtx,
+                                  token: _tabFocusToken,
+                                  isPressed: false,
+                                  borderRadius: 24.0,
+                                );
+                              } else {
+                                TactileMotionScope.endFocus(_tabFocusToken);
+                              }
                               setState(() {
                                 _pressedTab = null;
                                 _pressOrigin = null;
