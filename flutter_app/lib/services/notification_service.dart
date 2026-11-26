@@ -79,11 +79,15 @@ class NotificationService {
 
   static SafetyGuardStatus evaluateSafetyThresholds({
     required double roomTemp,
-    required double outsideTemp,
+    double? outsideTemp,
     required BoilerTelemetry boiler,
+    BoilerHardwareSensors? sensors,
   }) {
-    final lowPressure = boiler.waterPressureBar < 1.0;
-    final freezeRisk = roomTemp < 5.0 || outsideTemp < 5.0;
+    final effectivePressure = sensors != null
+        ? (sensors.isConnected ? sensors.waterPressureBar : null)
+        : boiler.waterPressureBar;
+    final lowPressure = effectivePressure != null && effectivePressure < 1.0;
+    final freezeRisk = roomTemp < 5.0 || (outsideTemp != null && outsideTemp < 5.0);
     final overheat = roomTemp >= 28.5;
     final flameHealthy = !boiler.isHeating || boiler.flamePercent > 0;
     return SafetyGuardStatus(
@@ -91,9 +95,9 @@ class NotificationService {
       freezeRisk: freezeRisk,
       overheat: overheat,
       flameHealthy: flameHealthy,
-      waterPressureBar: boiler.waterPressureBar,
+      waterPressureBar: effectivePressure ?? boiler.waterPressureBar,
       roomTemp: roomTemp,
-      outsideTemp: outsideTemp,
+      outsideTemp: outsideTemp ?? roomTemp,
     );
   }
 
@@ -112,7 +116,9 @@ class NotificationService {
     required String locationName,
     required double roomTemp,
     required double targetTemp,
+    double? outsideTemp,
     required BoilerTelemetry boiler,
+    BoilerHardwareSensors sensors = const BoilerHardwareSensors.disconnected(),
     required SystemSettingsState settings,
     String? customTitle,
     String? customBody,
@@ -123,21 +129,25 @@ class NotificationService {
     final tr = lang == LangCode.tr;
     final guard = evaluateSafetyThresholds(
       roomTemp: roomTemp,
-      outsideTemp: 17.7,
+      outsideTemp: outsideTemp,
       boiler: boiler,
+      sensors: sensors,
     );
     final severity = severityOverride ??
         (guard.hasCriticalAlert ? AlertSeverity.critical : AlertSeverity.info);
     final isCritical = severity == AlertSeverity.critical;
 
+    final pressurePart = (sensors.isConnected && sensors.waterPressureBar != null)
+        ? ' · ${sensors.waterPressureBar!.toStringAsFixed(1)} Bar'
+        : '';
     final title = customTitle ??
         (isCritical
             ? (tr ? '⚠️ Kritik Kombi Emniyet Uyarısı' : '⚠️ Critical Boiler Safety Alert')
             : (tr ? '🔔 Termostat 3 Saatlik Durum & Test Bildirimi' : '🔔 Thermostat 3h Status & Test Alert'));
     final body = customBody ??
         (tr
-            ? '$locationName · Oda ${roomTemp.toStringAsFixed(1)}°C / Hedef ${targetTemp.toStringAsFixed(1)}°C · ${boiler.waterPressureBar.toStringAsFixed(1)} Bar · ${boiler.statusTextTr}'
-            : '$locationName · Room ${roomTemp.toStringAsFixed(1)}°C / Target ${targetTemp.toStringAsFixed(1)}°C · ${boiler.waterPressureBar.toStringAsFixed(1)} Bar · ${boiler.statusTextEn}');
+            ? '$locationName · Oda ${roomTemp.toStringAsFixed(1)}°C / Hedef ${targetTemp.toStringAsFixed(1)}°C$pressurePart · ${boiler.statusTextTr}'
+            : '$locationName · Room ${roomTemp.toStringAsFixed(1)}°C / Target ${targetTemp.toStringAsFixed(1)}°C$pressurePart · ${boiler.statusTextEn}');
 
     if (settings.hapticEnabled && !suppressChime) {
       HardwareService.vibrateMs(isCritical ? 140 : 55, amplitude: isCritical ? 230 : 150);

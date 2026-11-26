@@ -898,7 +898,7 @@ class AiCallService {
           checkNow.difference(lastPassiveNotifyAt) < passiveCooldown) {
         return const BoilerEventAlertDecision(shouldNotify: false);
       }
-      final pressureStr = nextBoiler.waterPressureBar.toStringAsFixed(1);
+      final pressureStr = safety.waterPressureBar.toStringAsFixed(1);
       return BoilerEventAlertDecision(
         shouldNotify: true,
         kind: BoilerEventAlertKind.safetyAlert,

@@ -15,6 +15,7 @@ class BootCeremonyOverlay extends StatefulWidget {
   final double roomTemp;
   final double targetTemp;
   final BoilerTelemetry boiler;
+  final BoilerHardwareSensors sensors;
   final String locationName;
   final Color accentColor;
   final ThemePaletteSpec palette;
@@ -31,6 +32,7 @@ class BootCeremonyOverlay extends StatefulWidget {
     required this.roomTemp,
     required this.targetTemp,
     required this.boiler,
+    this.sensors = const BoilerHardwareSensors.disconnected(),
     required this.locationName,
     required this.accentColor,
     required this.palette,
@@ -285,8 +287,9 @@ class _BootCeremonyOverlayState extends State<BootCeremonyOverlay> with SingleTi
                                         isLight: isLight,
                                       ),
                                       _DiagnosticChip(
-                                        label:
-                                            '${tr ? 'Basınç' : 'Press'}: ${widget.boiler.waterPressureBar.toStringAsFixed(1)} Bar',
+                                        label: (widget.sensors.isConnected && widget.sensors.waterPressureBar != null)
+                                            ? '${tr ? 'Basınç' : 'Press'}: ${widget.sensors.waterPressureBar!.toStringAsFixed(1)} Bar'
+                                            : '${tr ? 'Basınç' : 'Press'}: --',
                                         active: t >= 0.45,
                                         color: const Color(0xFF10B981),
                                         isLight: isLight,

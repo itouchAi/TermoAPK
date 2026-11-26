@@ -9,6 +9,7 @@ class FirebaseSyncResult {
   final String messageTr;
   final String messageEn;
   final double? remoteTargetTemp;
+  final double? remoteRoomTemp;
   final BoilerHardwareSensors? remoteSensors;
 
   const FirebaseSyncResult({
@@ -18,6 +19,7 @@ class FirebaseSyncResult {
     required this.messageTr,
     required this.messageEn,
     this.remoteTargetTemp,
+    this.remoteRoomTemp,
     this.remoteSensors,
   });
 }
@@ -97,20 +99,19 @@ class FirebaseSyncService {
     return Uri.tryParse('$trimmed$suffix');
   }
 
+  /// Builds only command fields owned by the app so ESP32 telemetry (roomTemp,
+  /// pressureBar, supplyTemp, returnTemp, etc.) is never overwritten.
   static Map<String, dynamic> buildPayload({
     required String roomName,
     required String espDeviceId,
-    required double roomTemp,
     required double targetTemp,
     required BoilerTelemetry boiler,
     DateTime? timestamp,
   }) {
     return {
-      'roomTemp': roomTemp,
       'targetTemp': targetTemp,
       'boilerActive': boiler.isHeating,
       'flamePercent': boiler.flamePercent,
-      'pressureBar': boiler.waterPressureBar,
       'roomName': roomName,
       'espDeviceId': espDeviceId,
       'updatedAt': (timestamp ?? DateTime.now()).toUtc().toIso8601String(),
@@ -120,7 +121,6 @@ class FirebaseSyncService {
   static String buildPayloadPreviewJson({
     required String roomName,
     required String espDeviceId,
-    required double roomTemp,
     required double targetTemp,
     required BoilerTelemetry boiler,
     DateTime? timestamp,
@@ -129,7 +129,6 @@ class FirebaseSyncService {
       buildPayload(
         roomName: roomName,
         espDeviceId: espDeviceId,
-        roomTemp: roomTemp,
         targetTemp: targetTemp,
         boiler: boiler,
         timestamp: timestamp,
@@ -137,14 +136,88 @@ class FirebaseSyncService {
     );
   }
 
-  /// Pushes live thermostat & boiler telemetry to Firebase Realtime Database via HTTP PATCH.
+  /// Parses an HTTP 200 RTDB JSON snapshot into target command, room temp, and OpenTherm bus telemetry.
+  static FirebaseSyncResult parsePullResponseBody(
+    String body, {
+    required String safeNode,
+    int? statusCode,
+    int? latencyMs,
+  }) {
+    final decoded = jsonDecode(body);
+    double? target;
+    double? room;
+    BoilerHardwareSensors? sensors;
+
+    if (decoded is Map<String, dynamic>) {
+      if (decoded['targetTemp'] is num) {
+        final rawTarget = (decoded['targetTemp'] as num).toDouble();
+        if (rawTarget.isFinite) {
+          target = ThermostatMath.snapTemperature(rawTarget);
+        }
+      }
+      if (decoded['roomTemp'] is num) {
+        final rawRoom = (decoded['roomTemp'] as num).toDouble();
+        if (rawRoom.isFinite && rawRoom >= -20.0 && rawRoom <= 60.0) {
+          room = double.parse(rawRoom.toStringAsFixed(1));
+        }
+      }
+      final hasHardwareBus = decoded['hardwareConnected'] == true ||
+          decoded['supplyTemp'] is num ||
+          decoded['returnTemp'] is num ||
+          decoded['ionizationUa'] is num;
+      if (hasHardwareBus) {
+        sensors = BoilerHardwareSensors(
+          isConnected: true,
+          supplyTempC: (decoded['supplyTemp'] as num?)?.toDouble(),
+          returnTempC: (decoded['returnTemp'] as num?)?.toDouble(),
+          flamePercent: (decoded['flamePercent'] as num?)?.round(),
+          pumpRpm: (decoded['pumpRpm'] as num?)?.round(),
+          waterPressureBar: (decoded['pressureBar'] as num?)?.toDouble(),
+          ionizationUa: (decoded['ionizationUa'] as num?)?.toDouble(),
+          roomHumidityPercent: (decoded['humidity'] as num?)?.toDouble(),
+          protocolLabel: (decoded['protocol'] as String?) ?? 'ESP32 / OpenTherm',
+        );
+      } else if (decoded['hardwareConnected'] == false) {
+        sensors = const BoilerHardwareSensors.disconnected();
+      }
+    }
+
+    final msSuffix = latencyMs != null ? ' (${latencyMs}ms)' : '';
+    final String msgTr;
+    final String msgEn;
+    if (target != null && room != null) {
+      msgTr = 'RTDB /$safeNode çekildi: Oda ${room.toStringAsFixed(1)}°C · Hedef ${target.toStringAsFixed(1)}°C$msSuffix';
+      msgEn = 'Pulled from /$safeNode: Room ${room.toStringAsFixed(1)}°C · Target ${target.toStringAsFixed(1)}°C$msSuffix';
+    } else if (target != null) {
+      msgTr = 'RTDB /$safeNode çekildi: Hedef ${target.toStringAsFixed(1)}°C$msSuffix';
+      msgEn = 'Pulled from /$safeNode: Target ${target.toStringAsFixed(1)}°C$msSuffix';
+    } else if (room != null) {
+      msgTr = 'RTDB /$safeNode çekildi: Oda ${room.toStringAsFixed(1)}°C$msSuffix';
+      msgEn = 'Pulled from /$safeNode: Room ${room.toStringAsFixed(1)}°C$msSuffix';
+    } else {
+      msgTr = 'Firebase bağlı (/$safeNode düğümü henüz boş$msSuffix).';
+      msgEn = 'Firebase connected (/$safeNode node empty$msSuffix).';
+    }
+
+    return FirebaseSyncResult(
+      ok: true,
+      statusCode: statusCode,
+      latencyMs: latencyMs,
+      remoteTargetTemp: target,
+      remoteRoomTemp: room,
+      remoteSensors: sensors,
+      messageTr: msgTr,
+      messageEn: msgEn,
+    );
+  }
+
+  /// Pushes thermostat command state to Firebase Realtime Database via HTTP PATCH.
   static Future<FirebaseSyncResult> pushState({
     required String baseUrl,
     String? apiKey,
     String nodePath = 'kombi',
     required String roomName,
     required String espDeviceId,
-    required double roomTemp,
     required double targetTemp,
     required BoilerTelemetry boiler,
   }) async {
@@ -175,7 +248,6 @@ class FirebaseSyncService {
               buildPayload(
                 roomName: roomName,
                 espDeviceId: espDeviceId,
-                roomTemp: roomTemp,
                 targetTemp: targetTemp,
                 boiler: boiler,
               ),
@@ -217,7 +289,7 @@ class FirebaseSyncService {
     }
   }
 
-  /// Pulls remote targetTemp from Firebase Realtime Database via HTTP GET.
+  /// Pulls remote targetTemp, roomTemp, and ESP hardware telemetry from Firebase RTDB via HTTP GET.
   static Future<FirebaseSyncResult> pullState({
     required String baseUrl,
     String? apiKey,
@@ -252,43 +324,11 @@ class FirebaseSyncService {
       }
 
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
-        final decoded = jsonDecode(resp.body);
-        double? target;
-        BoilerHardwareSensors? sensors;
-        if (decoded is Map<String, dynamic>) {
-          if (decoded['targetTemp'] is num) {
-            target = ThermostatMath.snapTemperature((decoded['targetTemp'] as num).toDouble());
-          }
-          final hasHardwareBus = decoded['hardwareConnected'] == true ||
-              decoded['supplyTemp'] is num ||
-              decoded['returnTemp'] is num ||
-              decoded['ionizationUa'] is num;
-          if (hasHardwareBus) {
-            sensors = BoilerHardwareSensors(
-              isConnected: true,
-              supplyTempC: (decoded['supplyTemp'] as num?)?.toDouble(),
-              returnTempC: (decoded['returnTemp'] as num?)?.toDouble(),
-              flamePercent: (decoded['flamePercent'] as num?)?.round(),
-              pumpRpm: (decoded['pumpRpm'] as num?)?.round(),
-              waterPressureBar: (decoded['pressureBar'] as num?)?.toDouble(),
-              ionizationUa: (decoded['ionizationUa'] as num?)?.toDouble(),
-              roomHumidityPercent: (decoded['humidity'] as num?)?.toDouble(),
-              protocolLabel: (decoded['protocol'] as String?) ?? 'ESP32 / OpenTherm',
-            );
-          }
-        }
-        return FirebaseSyncResult(
-          ok: true,
+        return parsePullResponseBody(
+          resp.body,
+          safeNode: safeNode,
           statusCode: resp.statusCode,
           latencyMs: ms,
-          remoteTargetTemp: target,
-          remoteSensors: sensors,
-          messageTr: target != null
-              ? 'RTDB /$safeNode çekildi: Hedef ${target.toStringAsFixed(1)}°C (${ms}ms)'
-              : 'Firebase bağlı (/$safeNode düğümü henüz boş · ${ms}ms).',
-          messageEn: target != null
-              ? 'Pulled from /$safeNode: Target ${target.toStringAsFixed(1)}°C (${ms}ms)'
-              : 'Firebase connected (/$safeNode node empty · ${ms}ms).',
         );
       }
       return FirebaseSyncResult(

@@ -120,6 +120,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   Map<String, DailyThermalLog> _dailyLogs = const {};
   double _gasUnitPriceTl = 10.25;
   BoilerHardwareSensors _hardwareSensors = const BoilerHardwareSensors.disconnected();
+  bool _remoteRoomTempActive = false;
   WeatherReport? _weatherReport;
   bool _weatherLoading = false;
   String? _weatherError;
@@ -205,7 +206,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       _thermalTicks++;
-      final shouldDrift = _thermalTicks % 15 == 0;
+      final shouldDrift = !_remoteRoomTempActive &&
+          !_hardwareSensors.isConnected &&
+          _thermalTicks % 15 == 0;
       double? driftedRoom;
       if (shouldDrift) {
         final boiler = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp);
@@ -292,7 +295,11 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
       final syncInterval = _settings.cloudSyncIntervalSeconds;
       if (_settings.cloudSyncEnabled && syncInterval > 0 && _thermalTicks % syncInterval == 0) {
-        _syncFirebaseBackground(_targetTemp, allowAutoPull: _settings.cloudAutoPullEnabled);
+        _syncFirebaseBackground(
+          _targetTemp,
+          allowAutoPull: _settings.cloudAutoPullEnabled,
+          pushCommand: !_settings.cloudAutoPullEnabled,
+        );
       }
     });
     _automationTimer = Timer.periodic(const Duration(hours: 3), (_) {
@@ -333,7 +340,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
         locationName: _locationName,
         roomTemp: _roomTemp,
         targetTemp: _targetTemp,
+        outsideTemp: _weatherReport?.currentTempC,
         boiler: b,
+        sensors: _hardwareSensors,
         settings: _settings,
         customTitle: _lang == LangCode.tr ? '⏱ 3 Saatlik Asistan Özeti' : '⏱ 3h Assistant Summary',
         customBody: _lang == LangCode.tr ? summaryTr : summaryEn,
@@ -476,6 +485,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     _lastScheduleMinuteKey = ScheduleEngine.minuteKey(nowTick);
     _evaluateScheduledActions(nowTick);
     unawaited(_fetchWeather(_locationName));
+    if (_settings.cloudSyncEnabled && _settings.cloudAutoPullEnabled) {
+      _syncFirebaseBackground(_targetTemp, allowAutoPull: true, pushCommand: false);
+    }
 
     if (bootOn && mounted) {
       setState(() => _showBootCeremony = true);
@@ -613,7 +625,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       accentColor: activeColor,
       roomTemp: _roomTemp,
       targetTemp: _targetTemp,
+      outsideTemp: _weatherReport?.currentTempC,
       boiler: boiler,
+      sensors: _hardwareSensors,
       initialSettings: _settings,
       initialExpandedId: initialExpandedId,
       onChangeLang: (l) {
@@ -650,11 +664,25 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       onReplayBootCeremony: () => setState(() {
         _showBootCeremony = true;
       }),
+      onApplyRemoteRoomTemp: (rt) {
+        if (!mounted) return;
+        setState(() {
+          _roomTemp = rt;
+          _remoteRoomTempActive = true;
+        });
+        _persist();
+      },
+      onApplyRemoteSensors: (s) {
+        if (!mounted) return;
+        setState(() => _hardwareSensors = s);
+      },
       onResetTelemetryHistory: () {
         setState(() {
           _schedule = ThermostatMath.defaultSchedule;
           _customScheduleRules = const [];
           _dailyLogs = const {};
+          _hardwareSensors = const BoilerHardwareSensors.disconnected();
+          _remoteRoomTempActive = false;
           _targetTemp = 22.5;
           _activePreset = PresetId.konfor;
           _settings = _settings.copyWith(
@@ -720,12 +748,15 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           ? DateTime.now().difference(started).inSeconds.clamp(1, 86400)
           : 0;
       final addedMin = elapsedSec >= 60 ? (elapsedSec / 60).round() : 0;
+      final pressureSuffix = (_hardwareSensors.isConnected && _hardwareSensors.waterPressureBar != null)
+          ? ' · ${_hardwareSensors.waterPressureBar!.toStringAsFixed(1)} Bar'
+          : '';
       if (_settings.espOfflineBufferEnabled) {
         _appendEspLog(
           EspLogEntry(
             timestamp: NotificationService.formatNowTime(),
             event: tr ? 'Yanma Döngüsü Tamamlandı' : 'Burn Cycle Completed',
-            detail: '${_roomTemp.toStringAsFixed(1)}°C → ${nextTargetTemp.toStringAsFixed(1)}°C · ${nextBoiler.waterPressureBar.toStringAsFixed(1)} Bar',
+            detail: '${_roomTemp.toStringAsFixed(1)}°C → ${nextTargetTemp.toStringAsFixed(1)}°C$pressureSuffix',
             category: EspLogCategory.burner,
             durationSeconds: elapsedSec,
           ),
@@ -735,8 +766,104 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     }
   }
 
-  void _syncFirebaseBackground(double target, {bool allowAutoPull = false}) {
+  void _recordSyncFailure(FirebaseSyncResult res) {
+    if (!mounted) return;
+    final nowLabel = NotificationService.formatNowTime();
+    final wasOnline = _settings.espOnline;
+    final syncMsg = _lang == LangCode.tr ? res.messageTr : res.messageEn;
+    setState(() {
+      _settings = _settings.copyWith(
+        espOnline: false,
+        cloudLastSyncAt: nowLabel,
+        cloudLastSyncOk: false,
+        cloudLastSyncMessage: syncMsg,
+      );
+    });
+    _persist();
+    if (wasOnline) {
+      _appendEspLog(
+        EspLogEntry(
+          timestamp: nowLabel,
+          event: _lang == LangCode.tr ? 'WDT Bulut Bağlantı Kesintisi' : 'WDT Cloud Link Drop',
+          detail: res.messageTr,
+          isWarning: true,
+          category: EspLogCategory.watchdog,
+        ),
+        espOnline: false,
+        addWdtCount: _settings.espWdtEnabled ? 1 : 0,
+      );
+    }
+  }
+
+  void _applyPullSyncResult(FirebaseSyncResult pullRes) {
+    if (!mounted) return;
+    final nowLabel = NotificationService.formatNowTime();
+    final wasOnline = _settings.espOnline;
+    final syncMsg = _lang == LangCode.tr ? pullRes.messageTr : pullRes.messageEn;
+    final remoteTarget = pullRes.remoteTargetTemp;
+    final remoteTargetChanged = remoteTarget != null && (remoteTarget - _targetTemp).abs() >= 0.05;
+    final remoteRoom = pullRes.remoteRoomTemp;
+    final remoteRoomChanged = remoteRoom != null && ((remoteRoom - _roomTemp).abs() >= 0.05 || !_remoteRoomTempActive);
+    final hasSensorUpdate = pullRes.remoteSensors != null;
+
+    if (!wasOnline) {
+      _appendEspLog(
+        EspLogEntry(
+          timestamp: nowLabel,
+          event: _lang == LangCode.tr ? 'RTDB Senkronizasyon Sağlandı' : 'RTDB Sync Restored',
+          detail: '${_settings.espDeviceId} · ${(remoteTarget ?? _targetTemp).toStringAsFixed(1)}°C',
+          category: EspLogCategory.sync,
+        ),
+        espOnline: true,
+        espLastPingAt: nowLabel,
+      );
+    }
+    setState(() {
+      if (remoteTargetChanged) {
+        _targetTemp = remoteTarget;
+        _activePreset = ThermostatMath.findMatchingPreset(remoteTarget)?.id;
+      }
+      if (remoteRoomChanged) {
+        _roomTemp = remoteRoom;
+        _remoteRoomTempActive = true;
+      }
+      if (hasSensorUpdate) {
+        _hardwareSensors = pullRes.remoteSensors!;
+      }
+      _settings = _settings.copyWith(
+        espOnline: true,
+        espLastPingAt: nowLabel,
+        cloudLastSyncAt: nowLabel,
+        cloudLastSyncOk: true,
+        cloudLastSyncMessage: syncMsg,
+      );
+    });
+    _persist();
+  }
+
+  void _syncFirebaseBackground(
+    double target, {
+    bool allowAutoPull = false,
+    bool pushCommand = true,
+  }) {
     if (!_settings.googleHomeLinked && !_settings.cloudSyncEnabled) return;
+
+    if (allowAutoPull && _settings.cloudAutoPullEnabled && !pushCommand) {
+      FirebaseSyncService.pullState(
+        baseUrl: _settings.firebaseRtdbUrl,
+        apiKey: _settings.firebaseApiKey,
+        nodePath: _settings.firebaseNodePath,
+      ).then((pullRes) {
+        if (!mounted) return;
+        if (pullRes.ok) {
+          _applyPullSyncResult(pullRes);
+        } else {
+          _recordSyncFailure(pullRes);
+        }
+      });
+      return;
+    }
+
     final b = ThermostatMath.computeBoilerTelemetry(_roomTemp, target);
     FirebaseSyncService.pushState(
       baseUrl: _settings.firebaseRtdbUrl,
@@ -744,7 +871,6 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       nodePath: _settings.firebaseNodePath,
       roomName: _settings.googleHomeRoom,
       espDeviceId: _settings.espDeviceId,
-      roomTemp: _roomTemp,
       targetTemp: target,
       boiler: b,
     ).then((res) {
@@ -783,51 +909,11 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             nodePath: _settings.firebaseNodePath,
           ).then((pullRes) {
             if (!mounted || !pullRes.ok) return;
-            final remoteTemp = pullRes.remoteTargetTemp;
-            final remoteTempChanged = remoteTemp != null && (remoteTemp - _targetTemp).abs() >= 0.05;
-            final hasSensorUpdate = pullRes.remoteSensors != null;
-            if (remoteTempChanged || hasSensorUpdate) {
-              setState(() {
-                if (remoteTempChanged) {
-                  _targetTemp = remoteTemp;
-                  _activePreset = ThermostatMath.findMatchingPreset(remoteTemp)?.id;
-                }
-                if (hasSensorUpdate) {
-                  _hardwareSensors = pullRes.remoteSensors!;
-                }
-                _settings = _settings.copyWith(
-                  cloudLastSyncAt: NotificationService.formatNowTime(),
-                  cloudLastSyncOk: true,
-                  cloudLastSyncMessage: _lang == LangCode.tr ? pullRes.messageTr : pullRes.messageEn,
-                );
-              });
-              _persist();
-            }
+            _applyPullSyncResult(pullRes);
           });
         }
       } else {
-        setState(() {
-          _settings = _settings.copyWith(
-            espOnline: false,
-            cloudLastSyncAt: nowLabel,
-            cloudLastSyncOk: false,
-            cloudLastSyncMessage: syncMsg,
-          );
-        });
-        _persist();
-        if (wasOnline) {
-          _appendEspLog(
-            EspLogEntry(
-              timestamp: nowLabel,
-              event: _lang == LangCode.tr ? 'WDT Bulut Bağlantı Kesintisi' : 'WDT Cloud Link Drop',
-              detail: res.messageTr,
-              isWarning: true,
-              category: EspLogCategory.watchdog,
-            ),
-            espOnline: false,
-            addWdtCount: _settings.espWdtEnabled ? 1 : 0,
-          );
-        }
+        _recordSyncFailure(res);
       }
     });
   }
@@ -981,8 +1067,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     final nextBoiler = ThermostatMath.computeBoilerTelemetry(_roomTemp, nextTargetTemp);
     final safety = NotificationService.evaluateSafetyThresholds(
       roomTemp: _roomTemp,
-      outsideTemp: _weatherReport?.currentTempC ?? 17.7,
+      outsideTemp: _weatherReport?.currentTempC,
       boiler: nextBoiler,
+      sensors: _hardwareSensors,
     );
 
     bool callLaunched = false;
@@ -1051,7 +1138,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           locationName: _locationName,
           roomTemp: _roomTemp,
           targetTemp: nextTargetTemp,
+          outsideTemp: _weatherReport?.currentTempC,
           boiler: nextBoiler,
+          sensors: _hardwareSensors,
           settings: _settings,
           severityOverride: eventDecision.severity,
           customTitle: tr ? eventDecision.titleTr : eventDecision.titleEn,
@@ -1119,7 +1208,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     });
     _persist();
     _recordBoilerTransitionEspLog(prevHeating: prevHeating, nextTargetTemp: snapped);
-    _syncFirebaseBackground(snapped);
+    _syncFirebaseBackground(snapped, pushCommand: true);
     final isScheduleEvent =
         scheduleTitleTr != null && scheduleTitleTr.trim().isNotEmpty;
     if (!suppressAiCall &&
@@ -1144,7 +1233,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     });
     _persist();
     _recordBoilerTransitionEspLog(prevHeating: prevHeating, nextTargetTemp: preset.temp);
-    _syncFirebaseBackground(preset.temp);
+    _syncFirebaseBackground(preset.temp, pushCommand: true);
     _scheduleSettledAiCallEvaluation(
       prevHeating: prevHeating,
       prevTarget: prevTarget,
@@ -1203,6 +1292,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             roomTemp: _roomTemp,
             targetTemp: _targetTemp,
             boiler: boiler,
+            sensors: _hardwareSensors,
             settings: _settings,
             performanceMode: _visual.performanceMode,
             weatherReport: _weatherReport,
@@ -1795,8 +1885,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                 boiler: boiler,
                 safety: NotificationService.evaluateSafetyThresholds(
                   roomTemp: _roomTemp,
-                  outsideTemp: _weatherReport?.currentTempC ?? 17.7,
+                  outsideTemp: _weatherReport?.currentTempC,
                   boiler: boiler,
+                  sensors: _hardwareSensors,
                 ),
                 lang: _lang,
                 scheduleTitleTr: _activeCallScheduleTr,
@@ -1811,7 +1902,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                     locationName: _locationName,
                     roomTemp: _roomTemp,
                     targetTemp: _targetTemp,
+                    outsideTemp: _weatherReport?.currentTempC,
                     boiler: boiler,
+                    sensors: _hardwareSensors,
                     settings: _settings,
                     severityOverride: _aiCallUrgent ? AlertSeverity.critical : AlertSeverity.warning,
                     customTitle: tr
@@ -1939,6 +2032,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                   roomTemp: _roomTemp,
                   targetTemp: _targetTemp,
                   boiler: boiler,
+                  sensors: _hardwareSensors,
                   locationName: _locationName,
                   accentColor: activeColor,
                   palette: palette,

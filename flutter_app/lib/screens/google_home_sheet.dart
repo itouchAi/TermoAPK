@@ -13,6 +13,8 @@ Future<void> showGoogleHomeSheet({
   required SystemSettingsState initialSettings,
   required ValueChanged<SystemSettingsState> onUpdateSettings,
   required ValueChanged<double> onApplyTargetTemp,
+  ValueChanged<double>? onApplyRemoteRoomTemp,
+  ValueChanged<BoilerHardwareSensors>? onApplyRemoteSensors,
 }) {
   return showModalBottomSheet<void>(
     context: context,
@@ -26,6 +28,8 @@ Future<void> showGoogleHomeSheet({
       initialSettings: initialSettings,
       onUpdateSettings: onUpdateSettings,
       onApplyTargetTemp: onApplyTargetTemp,
+      onApplyRemoteRoomTemp: onApplyRemoteRoomTemp,
+      onApplyRemoteSensors: onApplyRemoteSensors,
     ),
   );
 }
@@ -38,6 +42,8 @@ class _GoogleHomeModal extends StatefulWidget {
   final SystemSettingsState initialSettings;
   final ValueChanged<SystemSettingsState> onUpdateSettings;
   final ValueChanged<double> onApplyTargetTemp;
+  final ValueChanged<double>? onApplyRemoteRoomTemp;
+  final ValueChanged<BoilerHardwareSensors>? onApplyRemoteSensors;
 
   const _GoogleHomeModal({
     required this.lang,
@@ -47,6 +53,8 @@ class _GoogleHomeModal extends StatefulWidget {
     required this.initialSettings,
     required this.onUpdateSettings,
     required this.onApplyTargetTemp,
+    this.onApplyRemoteRoomTemp,
+    this.onApplyRemoteSensors,
   });
 
   @override
@@ -55,6 +63,7 @@ class _GoogleHomeModal extends StatefulWidget {
 
 class _GoogleHomeModalState extends State<_GoogleHomeModal> {
   late SystemSettingsState _settings;
+  late double _liveRoom;
   late double _liveTarget;
   late BoilerTelemetry _liveBoiler;
   String? _assistantReply;
@@ -105,6 +114,7 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
   void initState() {
     super.initState();
     _settings = widget.initialSettings;
+    _liveRoom = widget.roomTemp;
     _liveTarget = widget.targetTemp;
     _liveBoiler = widget.boiler;
   }
@@ -127,7 +137,6 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
       nodePath: _settings.firebaseNodePath,
       roomName: _settings.googleHomeRoom,
       espDeviceId: _settings.espDeviceId,
-      roomTemp: widget.roomTemp,
       targetTemp: _liveTarget,
       boiler: _liveBoiler,
     );
@@ -152,10 +161,19 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
       nodePath: _settings.firebaseNodePath,
     );
     if (!mounted) return;
-    if (res.ok && res.remoteTargetTemp != null) {
-      widget.onApplyTargetTemp(res.remoteTargetTemp!);
-      _liveTarget = res.remoteTargetTemp!;
-      _liveBoiler = ThermostatMath.computeBoilerTelemetry(widget.roomTemp, _liveTarget);
+    if (res.ok) {
+      if (res.remoteRoomTemp != null) {
+        _liveRoom = res.remoteRoomTemp!;
+        widget.onApplyRemoteRoomTemp?.call(res.remoteRoomTemp!);
+      }
+      if (res.remoteTargetTemp != null) {
+        widget.onApplyTargetTemp(res.remoteTargetTemp!);
+        _liveTarget = res.remoteTargetTemp!;
+      }
+      if (res.remoteSensors != null) {
+        widget.onApplyRemoteSensors?.call(res.remoteSensors!);
+      }
+      _liveBoiler = ThermostatMath.computeBoilerTelemetry(_liveRoom, _liveTarget);
     }
     setState(() {
       _syncing = false;

@@ -763,9 +763,21 @@ void main() {
     expect(report.contains('Çevrimiçi (14:05)'), isTrue);
     expect(report.contains('120 dk yanma'), isTrue);
     expect(report.contains('WDT Kontrolü #45'), isTrue);
+    expect(report.contains('| --'), isTrue);
+    expect(report.contains('1.6 Bar'), isFalse);
+
+    final connectedReport = EspLogService.exportLogsReport(
+      settings: restored,
+      roomTemp: 21.8,
+      targetTemp: 22.5,
+      boiler: boiler,
+      sensors: const BoilerHardwareSensors(isConnected: true, waterPressureBar: 1.7),
+      lang: LangCode.tr,
+    );
+    expect(connectedReport.contains('1.7 Bar'), isTrue);
   });
 
-  test('FirebaseSyncService validates URLs, sanitizes node paths, builds JSON preview, and persists Cloud Sync settings', () {
+  test('FirebaseSyncService validates URLs, sanitizes node paths, builds command-only JSON, and parses bidirectional pull telemetry', () {
     expect(FirebaseSyncService.sanitizeNodePath(' /kombi.json '), 'kombi');
     expect(FirebaseSyncService.sanitizeNodePath('/ev/salon/'), 'ev/salon');
     expect(FirebaseSyncService.sanitizeNodePath('   '), 'kombi');
@@ -784,17 +796,48 @@ void main() {
     final preview = FirebaseSyncService.buildPayloadPreviewJson(
       roomName: 'Salon',
       espDeviceId: 'ESP32-KOMBI-01',
-      roomTemp: 21.8,
       targetTemp: 22.5,
       boiler: boiler,
       timestamp: DateTime.utc(2026, 11, 22, 12, 0, 0),
     );
     final parsed = jsonDecode(preview) as Map<String, dynamic>;
-    expect(parsed['roomTemp'], 21.8);
+    expect(parsed.containsKey('roomTemp'), isFalse);
+    expect(parsed.containsKey('pressureBar'), isFalse);
     expect(parsed['targetTemp'], 22.5);
     expect(parsed['boilerActive'], isTrue);
     expect(parsed['roomName'], 'Salon');
     expect(parsed['espDeviceId'], 'ESP32-KOMBI-01');
+
+    final pulled = FirebaseSyncService.parsePullResponseBody(
+      jsonEncode({
+        'targetTemp': 23.0,
+        'roomTemp': 21.4,
+        'hardwareConnected': true,
+        'supplyTemp': 52.3,
+        'returnTemp': 44.8,
+        'pressureBar': 1.5,
+        'pumpRpm': 2100,
+        'ionizationUa': 4.1,
+      }),
+      safeNode: 'kombi',
+      statusCode: 200,
+      latencyMs: 42,
+    );
+    expect(pulled.ok, isTrue);
+    expect(pulled.remoteTargetTemp, 23.0);
+    expect(pulled.remoteRoomTemp, 21.4);
+    expect(pulled.remoteSensors?.isConnected, isTrue);
+    expect(pulled.remoteSensors?.supplyTempC, 52.3);
+    expect(pulled.remoteSensors?.waterPressureBar, 1.5);
+
+    final disconnectedGuard = NotificationService.evaluateSafetyThresholds(
+      roomTemp: 21.4,
+      outsideTemp: null,
+      boiler: boiler,
+      sensors: const BoilerHardwareSensors.disconnected(),
+    );
+    expect(disconnectedGuard.lowPressure, isFalse);
+    expect(disconnectedGuard.freezeRisk, isFalse);
 
     final settings = SystemSettingsState.defaults().copyWith(
       firebaseApiKey: 'secret-token-123',

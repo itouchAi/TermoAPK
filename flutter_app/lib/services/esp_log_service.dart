@@ -99,9 +99,13 @@ class EspLogService {
     required double roomTemp,
     required double targetTemp,
     required BoilerTelemetry boiler,
+    BoilerHardwareSensors sensors = const BoilerHardwareSensors.disconnected(),
     required LangCode lang,
   }) {
     final tr = lang == LangCode.tr;
+    final pressureText = (sensors.isConnected && sensors.waterPressureBar != null)
+        ? '${sensors.waterPressureBar!.toStringAsFixed(1)} Bar'
+        : '--';
     final buffer = StringBuffer();
     buffer.writeln(tr ? '=== ESP32 DONANIM & WDT RAPORU ===' : '=== ESP32 HARDWARE & WDT REPORT ===');
     buffer.writeln('${tr ? 'Cihaz Kimliği' : 'Device ID'}: ${settings.espDeviceId}');
@@ -122,7 +126,7 @@ class EspLogService {
       '${tr ? 'Anlık Telemetri' : 'Live Telemetry'}: '
       '${roomTemp.toStringAsFixed(1)}°C → ${targetTemp.toStringAsFixed(1)}°C | '
       '${tr ? 'Alev' : 'Flame'} %${boiler.flamePercent} | '
-      '${boiler.waterPressureBar.toStringAsFixed(1)} Bar',
+      '$pressureText',
     );
     buffer.writeln(tr ? '--- Son Kayıtlar (${settings.espLogs.length}) ---' : '--- Recent Logs (${settings.espLogs.length}) ---');
     if (settings.espLogs.isEmpty) {
@@ -164,7 +168,6 @@ class EspLogService {
         nodePath: nodePath,
         roomName: roomName,
         espDeviceId: espDeviceId,
-        roomTemp: roomTemp,
         targetTemp: targetTemp,
         boiler: boiler,
       );
