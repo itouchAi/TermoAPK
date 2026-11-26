@@ -10,6 +10,7 @@ class ThermostatScreen extends StatelessWidget {
   final PresetId? activePreset;
   final Color accentColor;
   final BoilerTelemetry boiler;
+  final BoilerHardwareSensors sensors;
   final LangCode lang;
   final ThemePaletteSpec palette;
   final DialRingStyle dialRingStyle;
@@ -24,6 +25,7 @@ class ThermostatScreen extends StatelessWidget {
     required this.activePreset,
     required this.accentColor,
     required this.boiler,
+    this.sensors = const BoilerHardwareSensors.disconnected(),
     required this.lang,
     required this.palette,
     this.dialRingStyle = DialRingStyle.classic,
@@ -93,7 +95,9 @@ class ThermostatScreen extends StatelessWidget {
                   Text('|', style: TextStyle(color: dividerColor)),
                   _TelemetryCell(
                     label: lang == LangCode.tr ? 'BASINÇ:' : 'PRESS:',
-                    value: '${boiler.waterPressureBar.toStringAsFixed(1)} Bar',
+                    value: sensors.waterPressureBar != null
+                        ? '${sensors.waterPressureBar!.toStringAsFixed(1)} Bar'
+                        : '--',
                     palette: palette,
                   ),
                   Text('|', style: TextStyle(color: dividerColor)),
@@ -126,7 +130,9 @@ class ThermostatScreen extends StatelessWidget {
                         style: TextStyle(fontSize: 11, color: palette.textSecondary),
                       ),
                       Text(
-                        '%48',
+                        sensors.roomHumidityPercent != null
+                            ? '%${sensors.roomHumidityPercent!.round()}'
+                            : '--',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
@@ -147,7 +153,7 @@ class ThermostatScreen extends StatelessWidget {
                         style: TextStyle(fontSize: 11, color: palette.textSecondary),
                       ),
                       Text(
-                        boiler.isHeating ? '${boiler.pumpRpm} RPM' : '0 RPM',
+                        sensors.pumpRpm != null ? '${sensors.pumpRpm} RPM' : '--',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,

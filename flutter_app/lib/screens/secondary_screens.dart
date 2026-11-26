@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/thermostat_state.dart';
 import '../services/notification_service.dart';
 import '../services/schedule_engine.dart';
+import '../services/weather_service.dart';
 import '../widgets/tactile_button.dart';
 
 enum _WeatherAnimKind {
@@ -416,6 +417,10 @@ class WeatherScreen extends StatefulWidget {
   final PerformanceMode performanceMode;
   final ValueChanged<bool>? onToggleWeatherAlerts;
   final ValueChanged<String>? onChangeLocation;
+  final WeatherReport? weatherReport;
+  final bool isLoadingWeather;
+  final String? weatherError;
+  final VoidCallback? onRefreshWeather;
 
   const WeatherScreen({
     super.key,
@@ -431,6 +436,10 @@ class WeatherScreen extends StatefulWidget {
     this.performanceMode = PerformanceMode.ultra60fps,
     this.onToggleWeatherAlerts,
     this.onChangeLocation,
+    this.weatherReport,
+    this.isLoadingWeather = false,
+    this.weatherError,
+    this.onRefreshWeather,
   });
 
   @override
@@ -457,6 +466,10 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
   @override
   void didUpdateWidget(covariant WeatherScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.locationName != widget.locationName) {
+      _selectedDay = 0;
+      _hourlyExpanded = false;
+    }
     if (oldWidget.performanceMode != widget.performanceMode) {
       if (widget.performanceMode == PerformanceMode.ecoBattery) {
         _weatherAnimCtrl.duration = const Duration(milliseconds: 4800);
@@ -474,7 +487,26 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
     super.dispose();
   }
 
-  void _showPrecautionsModal(bool tr, ThemePaletteSpec p) {
+  void _showPrecautionsModal(bool tr, ThemePaletteSpec p, WeatherReport? report) {
+    final city = report?.cityName ?? SystemSettingsState.extractCityName(widget.locationName);
+    final nextDays = report?.days ?? const <DailyWeatherForecast>[];
+    final minUpcoming = nextDays.isEmpty
+        ? null
+        : nextDays.map((d) => d.lowTemp).reduce((a, b) => a < b ? a : b);
+    final maxRain = nextDays.isEmpty
+        ? null
+        : nextDays
+            .map((d) => int.tryParse(d.rainChance.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0)
+            .reduce((a, b) => a > b ? a : b);
+
+    final bodyText = report == null
+        ? (tr
+            ? '$city için canlı hava tahmini henüz alınamadı. Yenile düğmesine basarak güncel tahmini çektikten sonra dış ısı kompanzasyonu önerileri oluşturulur.'
+            : 'Live forecast for $city is not loaded yet. Tap Refresh to load forecast data for outdoor compensation guidance.')
+        : (tr
+            ? '$city şu an ${report.currentTempC.toStringAsFixed(1)}°C (${report.conditionTr}). Önümüzdeki 5 gün en düşük sıcaklık ${minUpcoming ?? report.currentTempC.round()}°C ve en yüksek yağış ihtimali %${maxRain ?? 0} bekleniyor. Eko dengeleme ile kombi ön ısıtması dengelenebilir.'
+            : '$city is currently ${report.currentTempC.toStringAsFixed(1)}°C (${report.conditionEn}). 5-day low is ${minUpcoming ?? report.currentTempC.round()}°C with up to ${maxRain ?? 0}% rain probability. Eco weather compensation can balance pre-heating.');
+
     showDialog<void>(
       context: context,
       builder: (dCtx) => AlertDialog(
@@ -493,9 +525,7 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
           ],
         ),
         content: Text(
-          tr
-              ? 'Yarın ve Pazartesi için %90 üzeri yağış ve gece 11-13°C ısı düşüşü öngörülüyor. Kombi su sıcaklığı modülasyon eğrisi +%6 ön ısıtmaya ve Eko dengelemeye ayarlanabilir.'
-              : 'Over 90% rain and 11-13°C night drop expected. Boiler modulation curve can apply +6% pre-heat and Eco compensation.',
+          bodyText,
           style: TextStyle(fontSize: 13, color: p.textSecondary, height: 1.45),
         ),
         actions: [
@@ -530,14 +560,16 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
     final wideRow = width >= 660;
     final tr = widget.lang == LangCode.tr;
     final p = widget.palette;
-    final days = DailyWeatherForecast.sample5Days;
-    final activeDay = days[_selectedDay];
+    final report = widget.weatherReport;
+    final days = report?.days ?? const <DailyWeatherForecast>[];
+    final safeSelectedIdx = days.isEmpty ? 0 : _selectedDay.clamp(0, days.length - 1);
+    final activeDay = days.isEmpty ? null : days[safeSelectedIdx];
     final skyAccent = p.isLight ? const Color(0xFF0284C7) : const Color(0xFF7DD3FC);
     const amberAccent = Color(0xFFF59E0B);
 
     Widget buildDayCard(int i) {
       final day = days[i];
-      final selected = i == _selectedDay;
+      final selected = i == safeSelectedIdx;
       return TactilePress.card(
         child: GestureDetector(
           onTap: () {
@@ -551,130 +583,139 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
             });
           },
           child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            gradient: selected
-                ? LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      const Color(0xFFEA580C).withValues(alpha: 0.72),
-                      const Color(0xFF7C2D12).withValues(alpha: 0.65),
-                    ],
-                  )
-                : null,
-            color: selected ? null : p.cardBg,
-            border: Border.all(
-              color: selected ? amberAccent : p.cardBorder,
-              width: selected ? 1.4 : 1.0,
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              gradient: selected
+                  ? LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        const Color(0xFFEA580C).withValues(alpha: 0.72),
+                        const Color(0xFF7C2D12).withValues(alpha: 0.65),
+                      ],
+                    )
+                  : null,
+              color: selected ? null : p.cardBg,
+              border: Border.all(
+                color: selected ? amberAccent : p.cardBorder,
+                width: selected ? 1.4 : 1.0,
+              ),
+              boxShadow: selected
+                  ? [BoxShadow(color: amberAccent.withValues(alpha: 0.25), blurRadius: 16)]
+                  : null,
             ),
-            boxShadow: selected
-                ? [BoxShadow(color: amberAccent.withValues(alpha: 0.25), blurRadius: 16)]
-                : null,
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Flexible(
-                    child: Text(
-                      tr ? day.dayTr : day.dayEn,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        tr ? day.dayTr : day.dayEn,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: selected ? Colors.white : p.textPrimary,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (selected) ...[
+                      const SizedBox(width: 4),
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFFBBF24)),
+                      ),
+                    ],
+                  ],
+                ),
+                Text(
+                  day.dateLabel,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: selected ? Colors.white70 : p.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _AnimatedWeatherIcon(
+                  conditionTr: day.conditionTr,
+                  conditionEn: day.conditionEn,
+                  fallbackIcon: day.icon,
+                  size: 24,
+                  color: selected ? Colors.white : skyAccent,
+                  animation: _weatherAnimCtrl,
+                  selected: selected,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  tr ? day.conditionTr : day.conditionEn,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: selected ? Colors.white.withValues(alpha: 0.90) : p.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      '${day.highTemp}°',
                       style: TextStyle(
-                        fontSize: 12.5,
+                        fontSize: 13.5,
                         fontWeight: FontWeight.w700,
                         color: selected ? Colors.white : p.textPrimary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
-                      overflow: TextOverflow.ellipsis,
                     ),
-                  ),
-                  if (selected) ...[
                     const SizedBox(width: 4),
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFFFBBF24)),
+                    Text(
+                      '${day.lowTemp}°',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: selected ? Colors.white70 : p.textSecondary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
                     ),
                   ],
-                ],
-              ),
-              Text(
-                day.dateLabel,
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: selected ? Colors.white70 : p.textSecondary,
                 ),
-              ),
-              const SizedBox(height: 10),
-              _AnimatedWeatherIcon(
-                conditionTr: day.conditionTr,
-                conditionEn: day.conditionEn,
-                fallbackIcon: day.icon,
-                size: 24,
-                color: selected ? Colors.white : skyAccent,
-                animation: _weatherAnimCtrl,
-                selected: selected,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                tr ? day.conditionTr : day.conditionEn,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10.5,
-                  color: selected ? Colors.white.withValues(alpha: 0.90) : p.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    '${day.highTemp}°',
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: selected ? Colors.white : amberAccent.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    day.rainChance,
                     style: TextStyle(
-                      fontSize: 13.5,
+                      fontSize: 10,
                       fontWeight: FontWeight.w700,
-                      color: selected ? Colors.white : p.textPrimary,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                      color: selected ? const Color(0xFF9A3412) : amberAccent,
                     ),
                   ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${day.lowTemp}°',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: selected ? Colors.white70 : p.textSecondary,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: selected ? Colors.white : amberAccent.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text(
-                  day.rainChance,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: selected ? const Color(0xFF9A3412) : amberAccent,
-                  ),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
       );
     }
+
+    final currentTempStr = report != null ? '${report.currentTempC.toStringAsFixed(1)}°C' : '--.-°C';
+    final currentMetaStr = report != null
+        ? '%${report.humidityPercent} · ${report.windKmh.round()} km/s'
+        : (widget.isLoadingWeather ? (tr ? 'Yükleniyor...' : 'Loading...') : '-- · --');
+    final cityTitle = report?.cityName ?? SystemSettingsState.extractCityName(widget.locationName);
+    final updatedTimeLabel = report != null
+        ? '${report.fetchedAt.hour.toString().padLeft(2, '0')}:${report.fetchedAt.minute.toString().padLeft(2, '0')}'
+        : null;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -692,9 +733,9 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
                     child: Row(
                       children: [
                         _AnimatedWeatherIcon(
-                          conditionTr: 'Güneşli',
-                          conditionEn: 'Sunny',
-                          fallbackIcon: Icons.wb_sunny_outlined,
+                          conditionTr: report?.conditionTr ?? 'Parçalı Bulutlu',
+                          conditionEn: report?.conditionEn ?? 'Partly Cloudy',
+                          fallbackIcon: report?.icon ?? Icons.wb_sunny_outlined,
                           size: 18,
                           color: const Color(0xFFFBBF24),
                           animation: _weatherAnimCtrl,
@@ -702,7 +743,7 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
                         const SizedBox(width: 7),
                         Flexible(
                           child: Text(
-                            tr ? 'Bölgesel Hava Durumu & 5 Günlük Tahmin' : 'Regional Weather & 5-Day Forecast',
+                            tr ? 'Canlı Hava Durumu · $cityTitle' : 'Live Weather · $cityTitle',
                             style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: p.textPrimary),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -710,9 +751,50 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
                       ],
                     ),
                   ),
-                  Text(
-                    tr ? 'Saatlik için güne dokunun' : 'Tap day for hourly',
-                    style: TextStyle(fontSize: 10.5, color: p.textSecondary),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (updatedTimeLabel != null)
+                        Text(
+                          updatedTimeLabel,
+                          style: TextStyle(fontSize: 10.5, color: p.textSecondary),
+                        ),
+                      const SizedBox(width: 6),
+                      TactilePress(
+                        child: GestureDetector(
+                          onTap: widget.isLoadingWeather ? null : widget.onRefreshWeather,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: p.cardBg,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: p.cardBorder),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (widget.isLoadingWeather)
+                                  SizedBox(
+                                    width: 12,
+                                    height: 12,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 1.8,
+                                      color: skyAccent,
+                                    ),
+                                  )
+                                else
+                                  Icon(Icons.refresh_rounded, size: 13, color: skyAccent),
+                                const SizedBox(width: 4),
+                                Text(
+                                  tr ? 'Yenile' : 'Refresh',
+                                  style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: p.textPrimary),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -802,7 +884,7 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
                       ),
                       const SizedBox(width: 10),
                       Text(
-                        '17.7°C',
+                        currentTempStr,
                         style: TextStyle(
                           fontSize: 14.5,
                           fontWeight: FontWeight.w700,
@@ -811,127 +893,193 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
                         ),
                       ),
                       const SizedBox(width: 6),
-                      Text('%58 · 15 km/s', style: TextStyle(fontSize: 11, color: skyAccent)),
+                      Text(currentMetaStr, style: TextStyle(fontSize: 11, color: skyAccent)),
                     ],
                   ),
                 ],
               ),
               const SizedBox(height: 12),
 
-              // 5-Day Horizontal Cards
-              if (wideRow)
-                Row(
-                  children: [
-                    for (int i = 0; i < days.length; i++) ...[
-                      if (i > 0) const SizedBox(width: 8),
-                      Expanded(child: buildDayCard(i)),
-                    ],
-                  ],
-                )
-              else
-                SizedBox(
-                  height: 162,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: days.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 8),
-                    itemBuilder: (_, i) => SizedBox(width: 114, child: buildDayCard(i)),
+              if (widget.weatherError != null && days.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: p.cardBg,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.45)),
                   ),
-                ),
-
-              // Hourly Forecast Drawer / Panel on Day Tap
-              ClipRect(
-                child: AnimatedSize(
-                  duration: const Duration(milliseconds: 220),
-                  curve: Curves.easeOutCubic,
-                  alignment: Alignment.topCenter,
-                  child: _hourlyExpanded
-                      ? Container(
-                          width: double.infinity,
-                          margin: const EdgeInsets.only(top: 12),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: p.cardBg,
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(color: amberAccent.withValues(alpha: 0.40)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.cloud_off_rounded, size: 18, color: Color(0xFFF87171)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              widget.weatherError!,
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: p.textPrimary),
+                            ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        ],
+                      ),
+                      if (widget.onRefreshWeather != null) ...[
+                        const SizedBox(height: 10),
+                        TactilePress(
+                          child: OutlinedButton.icon(
+                            onPressed: widget.onRefreshWeather,
+                            icon: const Icon(Icons.refresh_rounded, size: 15),
+                            label: Text(tr ? 'Tekrar Dene' : 'Retry'),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                )
+              else if (days.isEmpty)
+                Container(
+                  height: 162,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: p.cardBg,
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: p.cardBorder),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(strokeWidth: 2.2, color: skyAccent),
+                      const SizedBox(height: 10),
+                      Text(
+                        tr ? '$cityTitle için canlı hava verisi çekiliyor...' : 'Fetching live forecast for $cityTitle...',
+                        style: TextStyle(fontSize: 12, color: p.textSecondary),
+                      ),
+                    ],
+                  ),
+                )
+              else ...[
+                // 5-Day Horizontal Cards
+                if (wideRow)
+                  Row(
+                    children: [
+                      for (int i = 0; i < days.length; i++) ...[
+                        if (i > 0) const SizedBox(width: 8),
+                        Expanded(child: buildDayCard(i)),
+                      ],
+                    ],
+                  )
+                else
+                  SizedBox(
+                    height: 162,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: days.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (_, i) => SizedBox(width: 114, child: buildDayCard(i)),
+                    ),
+                  ),
+
+                // Hourly Forecast Drawer / Panel on Day Tap
+                if (activeDay != null)
+                  ClipRect(
+                    child: AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.topCenter,
+                      child: _hourlyExpanded
+                          ? Container(
+                              width: double.infinity,
+                              margin: const EdgeInsets.only(top: 12),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: p.cardBg,
+                                borderRadius: BorderRadius.circular(18),
+                                border: Border.all(color: amberAccent.withValues(alpha: 0.40)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    '${tr ? activeDay.dayTr : activeDay.dayEn} (${activeDay.dateLabel}) · ${tr ? 'Saat Bazlı Tahmin' : 'Hourly Forecast'}',
-                                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: p.textPrimary),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        '${tr ? activeDay.dayTr : activeDay.dayEn} (${activeDay.dateLabel}) · ${tr ? 'Saat Bazlı Tahmin' : 'Hourly Forecast'}',
+                                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: p.textPrimary),
+                                      ),
+                                      TactilePress(
+                                        child: GestureDetector(
+                                          onTap: () => setState(() => _hourlyExpanded = false),
+                                          child: Icon(Icons.keyboard_arrow_up_rounded, color: p.textSecondary, size: 20),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  TactilePress(
-                                    child: GestureDetector(
-                                      onTap: () => setState(() => _hourlyExpanded = false),
-                                      child: Icon(Icons.keyboard_arrow_up_rounded, color: p.textSecondary, size: 20),
+                                  const SizedBox(height: 10),
+                                  if (activeDay.hourly.isEmpty)
+                                    Text(
+                                      tr ? 'Bu gün için saatlik tahmin verisi yok.' : 'No hourly data available for this day.',
+                                      style: TextStyle(fontSize: 11, color: p.textSecondary),
+                                    )
+                                  else
+                                    SizedBox(
+                                      height: 98,
+                                      child: ListView.separated(
+                                        scrollDirection: Axis.horizontal,
+                                        itemCount: activeDay.hourly.length,
+                                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                                        itemBuilder: (_, hi) {
+                                          final h = activeDay.hourly[hi];
+                                          return Container(
+                                            width: 88,
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                            decoration: BoxDecoration(
+                                              color: p.scaffoldBg.withValues(alpha: 0.45),
+                                              borderRadius: BorderRadius.circular(14),
+                                              border: Border.all(color: p.cardBorder),
+                                            ),
+                                            child: Column(
+                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                Text(h.hour, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: p.textSecondary)),
+                                                _AnimatedWeatherIcon(
+                                                  conditionTr: h.conditionTr,
+                                                  conditionEn: h.conditionEn,
+                                                  fallbackIcon: h.icon,
+                                                  size: 18,
+                                                  color: skyAccent,
+                                                  animation: _weatherAnimCtrl,
+                                                ),
+                                                Text(
+                                                  '${h.temp}°C',
+                                                  style: TextStyle(
+                                                    fontSize: 13.5,
+                                                    fontWeight: FontWeight.w700,
+                                                    color: p.textPrimary,
+                                                    fontFeatures: const [FontFeature.tabularFigures()],
+                                                  ),
+                                                ),
+                                                Text(
+                                                  '${h.rainChance} · ${h.windKmh}',
+                                                  style: TextStyle(fontSize: 9.5, color: p.textSecondary),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        },
+                                      ),
                                     ),
-                                  ),
                                 ],
                               ),
-                              const SizedBox(height: 10),
-                              SizedBox(
-                                height: 98,
-                                child: ListView.separated(
-                                  scrollDirection: Axis.horizontal,
-                                  itemCount: activeDay.hourly.length,
-                                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                                  itemBuilder: (_, hi) {
-                                    final h = activeDay.hourly[hi];
-                                    return Container(
-                                      width: 88,
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                      decoration: BoxDecoration(
-                                        color: p.scaffoldBg.withValues(alpha: 0.45),
-                                        borderRadius: BorderRadius.circular(14),
-                                        border: Border.all(color: p.cardBorder),
-                                      ),
-                                      child: Column(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(h.hour, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: p.textSecondary)),
-                                          _AnimatedWeatherIcon(
-                                            conditionTr: h.conditionTr,
-                                            conditionEn: h.conditionEn,
-                                            fallbackIcon: h.icon,
-                                            size: 18,
-                                            color: skyAccent,
-                                            animation: _weatherAnimCtrl,
-                                          ),
-                                          Text(
-                                            '${h.temp}°C',
-                                            style: TextStyle(
-                                              fontSize: 13.5,
-                                              fontWeight: FontWeight.w700,
-                                              color: p.textPrimary,
-                                              fontFeatures: const [FontFeature.tabularFigures()],
-                                            ),
-                                          ),
-                                          Text(
-                                            '${h.rainChance} · ${h.windKmh}',
-                                            style: TextStyle(fontSize: 9.5, color: p.textSecondary),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      : const SizedBox(width: double.infinity, height: 0),
-                ),
-              ),
+                            )
+                          : const SizedBox(width: double.infinity, height: 0),
+                    ),
+                  ),
+              ],
 
               const SizedBox(height: 12),
 
-              // Bottom 3-Hour Notification & Smart Precautions Banner
+              // Bottom Notification & Smart Precautions Banner
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
@@ -957,9 +1105,17 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
                                 style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: amberAccent),
                               ),
                               Text(
-                                tr
-                                    ? 'Önümüzdeki günlerde yağış ve ani ısı düşüşü bekleniyor. Tedbirler hazır.'
-                                    : 'Rain and sudden temperature drop ahead. Smart precautions ready.',
+                                report == null
+                                    ? (tr
+                                        ? '$cityTitle canlı hava raporu bekleniyor.'
+                                        : 'Waiting for live weather report for $cityTitle.')
+                                    : (report.hasRainRiskSoon || report.hasColdDropSoon)
+                                        ? (tr
+                                            ? '$cityTitle için yağış veya serinleme öngörülüyor (${report.conditionTr}). Tedbirler hazır.'
+                                            : 'Rain or cooling trend forecast for $cityTitle (${report.conditionEn}). Precautions ready.')
+                                        : (tr
+                                            ? '$cityTitle (${report.conditionTr}, ${report.currentTempC.toStringAsFixed(1)}°C) stabil seyrediyor.'
+                                            : '$cityTitle (${report.conditionEn}, ${report.currentTempC.toStringAsFixed(1)}°C) is steady.'),
                                 style: TextStyle(fontSize: 10.5, color: p.textSecondary),
                               ),
                             ],
@@ -973,7 +1129,7 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
                       children: [
                         TactilePress(
                           child: FilledButton(
-                            onPressed: () => _showPrecautionsModal(tr, p),
+                            onPressed: () => _showPrecautionsModal(tr, p, report),
                             style: FilledButton.styleFrom(
                               backgroundColor: amberAccent,
                               foregroundColor: Colors.white,
@@ -991,6 +1147,9 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
                             onPressed: () async {
                               final activeBoiler = widget.boiler ??
                                   ThermostatMath.computeBoilerTelemetry(widget.roomTemp, widget.targetTemp);
+                              final weatherDesc = report != null
+                                  ? '${report.cityName} ${report.currentTempC.toStringAsFixed(1)}°C (${tr ? report.conditionTr : report.conditionEn})'
+                                  : widget.locationName;
                               final res = await NotificationService.dispatchNotification(
                                 context: context,
                                 lang: widget.lang,
@@ -1003,8 +1162,8 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
                                     ? '🌧️ Hava & Donma Koruma Test Bildirimi'
                                     : '🌧️ Weather & Freeze Guard Test Alert',
                                 customBody: tr
-                                    ? '${widget.locationName}: Yarın %90 yağış & gece 11-13°C düşüş bekleniyor. Oda ${widget.roomTemp.toStringAsFixed(1)}°C.'
-                                    : '${widget.locationName}: 90% rain & 11-13°C night drop ahead. Room ${widget.roomTemp.toStringAsFixed(1)}°C.',
+                                    ? '$weatherDesc · Oda ${widget.roomTemp.toStringAsFixed(1)}°C.'
+                                    : '$weatherDesc · Room ${widget.roomTemp.toStringAsFixed(1)}°C.',
                                 severityOverride: AlertSeverity.warning,
                               );
                               if (!mounted) return;
@@ -1045,6 +1204,10 @@ class ReportScreen extends StatefulWidget {
   final double roomTemp;
   final double targetTemp;
   final BoilerTelemetry boiler;
+  final BoilerHardwareSensors sensors;
+  final Map<String, DailyThermalLog> dailyLogs;
+  final double gasUnitPriceTl;
+  final ValueChanged<double>? onUpdateGasUnitPrice;
   final List<ReportSubTab> subTabOrder;
   final ThemePaletteSpec palette;
   final PerformanceMode performanceMode;
@@ -1057,6 +1220,10 @@ class ReportScreen extends StatefulWidget {
     required this.roomTemp,
     required this.targetTemp,
     required this.boiler,
+    this.sensors = const BoilerHardwareSensors.disconnected(),
+    this.dailyLogs = const {},
+    this.gasUnitPriceTl = 10.25,
+    this.onUpdateGasUnitPrice,
     required this.subTabOrder,
     required this.palette,
     this.performanceMode = PerformanceMode.ultra60fps,
@@ -1070,10 +1237,18 @@ class ReportScreen extends StatefulWidget {
 
 class _ReportScreenState extends State<ReportScreen> {
   int _periodIndex = 0; // 0: Günlük, 1: Haftalık, 2: Aylık
-  int _dayOptionIdx = 0;
+  DateTime _selectedDate = DateTime.now();
   int _selectedHourIdx = 0;
   ReportSubTab? _selectedSubTab;
   DateTime? _lastSubSwitchAt;
+  final ScrollController _scrollController = ScrollController();
+  bool _canVertScroll = false;
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   ReportSubTab get _activeSubTab {
     if (_selectedSubTab != null && widget.subTabOrder.contains(_selectedSubTab)) {
@@ -1093,7 +1268,10 @@ class _ReportScreenState extends State<ReportScreen> {
     final curIdx = order.indexOf(_activeSubTab).clamp(0, order.length - 1);
     final nextIdx = curIdx + dir;
     if (nextIdx >= 0 && nextIdx < order.length) {
-      setState(() => _selectedSubTab = order[nextIdx]);
+      setState(() {
+        _selectedSubTab = order[nextIdx];
+        _canVertScroll = false;
+      });
     } else if (nextIdx < 0) {
       widget.onBoundaryPrevMainTab?.call();
     } else {
@@ -1105,9 +1283,172 @@ class _ReportScreenState extends State<ReportScreen> {
     if (event is! PointerScrollEvent) return;
     final dx = event.scrollDelta.dx;
     final dy = event.scrollDelta.dy;
-    final dir = (dx.abs() > dy.abs() ? dx : dy);
+    final useHorizontal = dx.abs() > dy.abs();
+    if (!useHorizontal && _canVertScroll && _scrollController.hasClients) {
+      final pos = _scrollController.position;
+      final atTop = pos.pixels <= 1.0 && dy < 0;
+      final atBottom = pos.pixels >= pos.maxScrollExtent - 1.0 && dy > 0;
+      if (!atTop && !atBottom) return;
+    }
+    final dir = useHorizontal ? dx : dy;
     if (dir.abs() < 6.0) return;
     _stepSubTab(dir > 0 ? 1 : -1);
+  }
+
+  DateTime _cleanDate(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  String _formatDateButtonLabel(DateTime date, bool tr) {
+    final clean = _cleanDate(date);
+    final now = _cleanDate(DateTime.now());
+    final yesterday = now.subtract(const Duration(days: 1));
+    final iso = ThermalLogAggregator.formatDateIso(clean);
+    if (_periodIndex == 2) {
+      const monthsTr = [
+        'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+        'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık',
+      ];
+      const monthsEn = [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      ];
+      final mName = (tr ? monthsTr : monthsEn)[(clean.month - 1).clamp(0, 11)];
+      return '$mName ${clean.year}';
+    }
+    if (_periodIndex == 1) {
+      final start = clean.subtract(const Duration(days: 6));
+      return '${start.day}.${start.month.toString().padLeft(2, '0')} – ${clean.day}.${clean.month.toString().padLeft(2, '0')}';
+    }
+    if (clean == now) return '$iso (${tr ? 'Bugün' : 'Today'})';
+    if (clean == yesterday) return '$iso (${tr ? 'Dün' : 'Yesterday'})';
+    return iso;
+  }
+
+  String _formatShortDayLabel(String iso, bool tr) {
+    final parsed = ScheduleEngine.parseDateIso(iso);
+    if (parsed == null) return iso;
+    const monthsTr = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+    const monthsEn = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    final m = (tr ? monthsTr : monthsEn)[(parsed.month - 1).clamp(0, 11)];
+    return '${parsed.day} $m';
+  }
+
+  Future<void> _pickReportDate() async {
+    final now = _cleanDate(DateTime.now());
+    final first = DateTime(now.year - 2, 1, 1);
+    final current = _cleanDate(_selectedDate);
+    final initial = current.isAfter(now) ? now : (current.isBefore(first) ? first : current);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: first,
+      lastDate: now,
+    );
+    if (picked != null && mounted) {
+      setState(() => _selectedDate = _cleanDate(picked));
+    }
+  }
+
+  void _stepSelectedDate(int deltaDays) {
+    final now = _cleanDate(DateTime.now());
+    final first = DateTime(now.year - 2, 1, 1);
+    final candidate = _cleanDate(_selectedDate).add(Duration(days: deltaDays));
+    if (candidate.isAfter(now) || candidate.isBefore(first)) return;
+    setState(() => _selectedDate = candidate);
+  }
+
+  Future<void> _openGasRateEditor() async {
+    final tr = widget.lang == LangCode.tr;
+    final p = widget.palette;
+    final themeAccent = p.themeOverrideAccent?.toColor() ??
+        (p.isLight ? const Color(0xFF6D28D9) : const Color(0xFFA78BFA));
+    final ctrl = TextEditingController(text: widget.gasUnitPriceTl.toStringAsFixed(2));
+    String? errorText;
+
+    final updated = await showDialog<double>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: p.isLight ? const Color(0xFFF8FAFC) : const Color(0xFF10131C),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(color: themeAccent.withValues(alpha: 0.45)),
+          ),
+          title: Text(
+            tr ? 'Doğalgaz m³ Birim Fiyatı' : 'Natural Gas Unit Rate (m³)',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: p.textPrimary),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                tr
+                    ? 'Faturanızdaki güncel doğalgaz birim fiyatını girin. Tüm aylık tahminler bu değerle hesaplanır.'
+                    : 'Enter your current natural gas m³ rate. Monthly bill estimates use this rate.',
+                style: TextStyle(fontSize: 11.5, color: p.textSecondary, height: 1.35),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: p.textPrimary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+                decoration: InputDecoration(
+                  suffixText: '₺ / m³',
+                  suffixStyle: TextStyle(color: themeAccent, fontWeight: FontWeight.w700),
+                  errorText: errorText,
+                  isDense: true,
+                  filled: true,
+                  fillColor: p.scaffoldBg.withValues(alpha: p.isLight ? 0.55 : 0.42),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: themeAccent, width: 1.4),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              child: Text(
+                tr ? 'İptal' : 'Cancel',
+                style: TextStyle(color: p.textSecondary, fontWeight: FontWeight.w600),
+              ),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                final raw = ctrl.text.trim().replaceAll(',', '.');
+                final parsed = double.tryParse(raw);
+                if (parsed == null || !parsed.isFinite || parsed <= 0 || parsed > 500) {
+                  setDialogState(() {
+                    errorText = tr ? 'Geçerli bir fiyat girin (0.01 - 500)' : 'Enter valid rate (0.01 - 500)';
+                  });
+                  return;
+                }
+                Navigator.of(dialogCtx).pop(double.parse(parsed.toStringAsFixed(2)));
+              },
+              icon: const Icon(Icons.check_rounded, size: 16),
+              label: Text(tr ? 'Kaydet' : 'Save', style: const TextStyle(fontWeight: FontWeight.w700)),
+              style: FilledButton.styleFrom(
+                backgroundColor: themeAccent,
+                foregroundColor: Colors.black,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    ctrl.dispose();
+    if (updated != null && mounted) {
+      widget.onUpdateGasUnitPrice?.call(updated);
+    }
   }
 
   String _subTabLabel(ReportSubTab t, bool tr) {
@@ -1132,103 +1473,380 @@ class _ReportScreenState extends State<ReportScreen> {
     final themeAccent = p.themeOverrideAccent?.toColor() ??
         (p.isLight ? const Color(0xFF6D28D9) : const Color(0xFFA78BFA));
     final emerald = p.isLight ? const Color(0xFF059669) : const Color(0xFF34D399);
-    final multiplier = _periodIndex == 0 ? 1 : (_periodIndex == 1 ? 7 : 30);
-    final gasM3 = (widget.boiler.isHeating ? 1.85 : 1.12) * multiplier;
-    final costTl = gasM3 * 10.25;
-    final savedTl = costTl * 0.28;
+    final safeGasRate = widget.gasUnitPriceTl > 0 ? widget.gasUnitPriceTl : 10.25;
+    final nowClean = _cleanDate(DateTime.now());
+    final anchorDate = _cleanDate(_selectedDate).isAfter(nowClean) ? nowClean : _cleanDate(_selectedDate);
+    final canStepForward = anchorDate.isBefore(nowClean);
 
-    final dayOptions = [
-      (tr ? '2026-11-23 (Bugün)' : '2026-11-23 (Today)', '1s 30d', '22s 30d', [21.8, 20.6, 21.0, 21.4, 21.6, 21.8], [true, false, true, false, true, true]),
-      (tr ? '2026-11-22 (Dün)' : '2026-11-22 (Yesterday)', '2s 15d', '21s 45d', [20.9, 20.1, 21.2, 21.5, 21.8, 21.3], [false, false, true, true, true, false]),
-      (tr ? '2026-11-21 (Cmt)' : '2026-11-21 (Sat)', '3s 05d', '20s 55d', [21.4, 21.0, 21.8, 22.0, 22.1, 21.6], [true, false, true, true, true, false]),
-    ];
-    final dayEntry = dayOptions[_dayOptionIdx % dayOptions.length];
-    const hours = ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'];
+    final periodSummary = ThermalLogAggregator.summarize(
+      logs: widget.dailyLogs,
+      anchorDate: anchorDate,
+      periodIndex: _periodIndex,
+      gasUnitPriceTl: safeGasRate,
+    );
+    final monthlySummary = ThermalLogAggregator.summarize(
+      logs: widget.dailyLogs,
+      anchorDate: anchorDate,
+      periodIndex: 2,
+      gasUnitPriceTl: safeGasRate,
+    );
+
+    final selectedIso = ThermalLogAggregator.formatDateIso(anchorDate);
+    final dayLog = widget.dailyLogs[selectedIso] ?? DailyThermalLog.empty(selectedIso);
+    final periodBurnLabel = ThermalLogAggregator.formatDuration(periodSummary.activeBurnSeconds, widget.lang);
+    final periodStandbyLabel = ThermalLogAggregator.formatDuration(periodSummary.standbySeconds, widget.lang);
+    const hours = DailyThermalLog.blockLabels;
 
     Widget buildHeatMapView() {
       Widget buildHourTile(int i) {
         final selected = i == _selectedHourIdx;
-        final activeBurn = dayEntry.$5[i];
-        final tVal = dayEntry.$4[i];
+        final bucket = i < dayLog.buckets.length ? dayLog.buckets[i] : ThermalHourBucket(blockIndex: i);
+        final hasData = bucket.hasData;
+        final activeBurn = bucket.hadActiveBurn;
+        final tVal = bucket.avgTemp;
+        final tempStr = tVal != null ? '${tVal.toStringAsFixed(1)}°' : '--';
         return TactilePress.card(
           child: GestureDetector(
             onTap: () => setState(() => _selectedHourIdx = i),
             child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-            decoration: BoxDecoration(
-              color: selected
-                  ? themeAccent.withValues(alpha: 0.20)
-                  : p.scaffoldBg.withValues(alpha: p.isLight ? 0.55 : 0.36),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: selected ? themeAccent : p.cardBorder,
-                width: selected ? 1.4 : 1.0,
-              ),
-              boxShadow: selected
-                  ? [BoxShadow(color: themeAccent.withValues(alpha: 0.22), blurRadius: 14)]
-                  : null,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  hours[i],
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: selected ? p.textPrimary : p.textSecondary,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+              decoration: BoxDecoration(
+                color: selected
+                    ? themeAccent.withValues(alpha: 0.20)
+                    : p.scaffoldBg.withValues(alpha: p.isLight ? 0.55 : 0.36),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: selected ? themeAccent : p.cardBorder,
+                  width: selected ? 1.4 : 1.0,
                 ),
-                const SizedBox(height: 5),
-                if (selected)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: emerald.withValues(alpha: 0.24),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: emerald.withValues(alpha: 0.45)),
-                    ),
-                    child: Text(
-                      '${tVal.toStringAsFixed(1)}°',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        color: p.isLight ? const Color(0xFF065F46) : Colors.white,
-                        fontFeatures: const [FontFeature.tabularFigures()],
-                      ),
-                    ),
-                  )
-                else
+                boxShadow: selected
+                    ? [BoxShadow(color: themeAccent.withValues(alpha: 0.22), blurRadius: 14)]
+                    : null,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Text(
-                    '${tVal.toStringAsFixed(1)}°',
+                    hours[i],
                     style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: p.textSecondary,
+                      fontSize: 10.5,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected ? p.textPrimary : p.textSecondary,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
-                const SizedBox(height: 5),
-                Text(
-                  activeBurn
-                      ? (tr ? '🔥 Aktif' : '🔥 Active')
-                      : (tr ? '❄️ Bekleme' : '❄️ Idle'),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    color: activeBurn ? themeAccent : p.textSecondary,
+                  const SizedBox(height: 5),
+                  if (selected)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: emerald.withValues(alpha: 0.24),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: emerald.withValues(alpha: 0.45)),
+                      ),
+                      child: Text(
+                        tempStr,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: p.isLight ? const Color(0xFF065F46) : Colors.white,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    )
+                  else
+                    Text(
+                      tempStr,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: hasData ? p.textSecondary : p.textSecondary.withValues(alpha: 0.55),
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  const SizedBox(height: 5),
+                  Text(
+                    !hasData
+                        ? (tr ? 'Kayıt yok' : 'No log')
+                        : (activeBurn ? (tr ? '🔥 Aktif' : '🔥 Active') : (tr ? '❄️ Bekleme' : '❄️ Idle')),
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: !hasData
+                          ? p.textSecondary.withValues(alpha: 0.65)
+                          : (activeBurn ? themeAccent : p.textSecondary),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+
+      Widget buildWeeklyBreakdown() {
+        final days = periodSummary.dayBreakdown;
+        final maxBurn = days.fold<int>(1, (m, d) => d.activeBurnSeconds > m ? d.activeBurnSeconds : m);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  tr ? 'Haftalık Log Analizi' : 'Weekly Log Analytics',
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: p.textPrimary),
+                ),
+                Text(
+                  tr
+                      ? '${periodSummary.daysWithData}/7 gün kayıtlı · ${periodSummary.gasM3.toStringAsFixed(2)} m³'
+                      : '${periodSummary.daysWithData}/7 days logged · ${periodSummary.gasM3.toStringAsFixed(2)} m³',
+                  style: TextStyle(fontSize: 10, color: themeAccent, fontWeight: FontWeight.w600),
                 ),
               ],
             ),
-          ),
-        ),
+            const SizedBox(height: 8),
+            for (final d in days) ...[
+              TactilePress.card(
+                child: GestureDetector(
+                  onTap: () {
+                    final parsed = ScheduleEngine.parseDateIso(d.dateIso);
+                    if (parsed != null) {
+                      setState(() => _selectedDate = parsed);
+                    }
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 5),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: d.dateIso == selectedIso
+                          ? themeAccent.withValues(alpha: 0.16)
+                          : p.scaffoldBg.withValues(alpha: p.isLight ? 0.42 : 0.32),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: d.dateIso == selectedIso ? themeAccent.withValues(alpha: 0.65) : p.cardBorder,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 48,
+                          child: Text(
+                            _formatShortDayLabel(d.dateIso, tr),
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              color: d.dateIso == selectedIso ? p.textPrimary : p.textSecondary,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(999),
+                            child: Container(
+                              height: 6,
+                              color: p.cardBorder.withValues(alpha: 0.45),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: FractionallySizedBox(
+                                  widthFactor: d.activeBurnSeconds > 0
+                                      ? (d.activeBurnSeconds / maxBurn).clamp(0.08, 1.0)
+                                      : 0.0,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: themeAccent,
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 58,
+                          child: Text(
+                            d.hasData
+                                ? ThermalLogAggregator.formatDuration(d.activeBurnSeconds, widget.lang)
+                                : '--',
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              color: d.hasData ? p.textPrimary : p.textSecondary,
+                              fontFeatures: const [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(
+                          width: 48,
+                          child: Text(
+                            d.hasData ? '${d.gasM3.toStringAsFixed(2)}m³' : '--',
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: emerald,
+                              fontFeatures: const [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        SizedBox(
+                          width: 34,
+                          child: Text(
+                            d.avgTemp != null ? '${d.avgTemp!.toStringAsFixed(1)}°' : '--',
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: p.textSecondary,
+                              fontFeatures: const [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
         );
       }
+
+      Widget buildMonthlyBreakdown() {
+        final days = periodSummary.dayBreakdown;
+        final weeks = <({String label, int burnSec, double gasM3, int activeDays})>[];
+        for (int start = 0; start < days.length; start += 7) {
+          final end = (start + 7).clamp(0, days.length);
+          final slice = days.sublist(start, end);
+          int burnSec = 0;
+          double gas = 0.0;
+          int logged = 0;
+          for (final d in slice) {
+            burnSec += d.activeBurnSeconds;
+            gas += d.gasM3;
+            if (d.hasData) logged++;
+          }
+          final firstDay = start + 1;
+          final lastDay = end;
+          weeks.add((
+            label: tr ? '$firstDay–$lastDay. Gün' : 'Days $firstDay–$lastDay',
+            burnSec: burnSec,
+            gasM3: gas,
+            activeDays: logged,
+          ));
+        }
+        final maxWeekBurn = weeks.fold<int>(1, (m, w) => w.burnSec > m ? w.burnSec : m);
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  tr ? 'Aylık Hafta Dağılımı' : 'Monthly Week Breakdown',
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: p.textPrimary),
+                ),
+                Text(
+                  tr
+                      ? '${periodSummary.daysWithData}/${periodSummary.totalDaysInPeriod} gün kayıtlı'
+                      : '${periodSummary.daysWithData}/${periodSummary.totalDaysInPeriod} days logged',
+                  style: TextStyle(fontSize: 10, color: themeAccent, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            for (final w in weeks)
+              Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: p.scaffoldBg.withValues(alpha: p.isLight ? 0.42 : 0.34),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: p.cardBorder),
+                ),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 72,
+                      child: Text(
+                        w.label,
+                        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: p.textPrimary),
+                      ),
+                    ),
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: Container(
+                          height: 6,
+                          color: p.cardBorder.withValues(alpha: 0.45),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: FractionallySizedBox(
+                              widthFactor: w.burnSec > 0 ? (w.burnSec / maxWeekBurn).clamp(0.08, 1.0) : 0.0,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: themeAccent,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      w.activeDays > 0
+                          ? ThermalLogAggregator.formatDuration(w.burnSec, widget.lang)
+                          : '--',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: p.textPrimary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${w.gasM3.toStringAsFixed(2)} m³',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: emerald,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 4),
+            Text(
+              periodSummary.hasAnyData
+                  ? (tr
+                      ? 'Ay ort. oda: ${periodSummary.avgTemp != null ? '${periodSummary.avgTemp!.toStringAsFixed(1)}°C' : '--'} · Toplam: ${periodSummary.gasM3.toStringAsFixed(2)} m³ (${periodSummary.costTl.toStringAsFixed(2)} ₺)'
+                      : 'Month avg room: ${periodSummary.avgTemp != null ? '${periodSummary.avgTemp!.toStringAsFixed(1)}°C' : '--'} · Total: ${periodSummary.gasM3.toStringAsFixed(2)} m³ (${periodSummary.costTl.toStringAsFixed(2)} ₺)')
+                  : (tr
+                      ? 'Bu ay için henüz log kaydı yok — sistem çalıştıkça veriler otomatik yazılır.'
+                      : 'No logs recorded for this month yet — telemetry logs automatically while running.'),
+              style: TextStyle(fontSize: 10, color: p.textSecondary),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        );
+      }
+
+      final selectedBucket = _selectedHourIdx < dayLog.buckets.length
+          ? dayLog.buckets[_selectedHourIdx]
+          : ThermalHourBucket(blockIndex: _selectedHourIdx);
 
       return Container(
         key: const ValueKey(ReportSubTab.heatMap),
@@ -1286,7 +1904,7 @@ class _ReportScreenState extends State<ReportScreen> {
             ),
             const SizedBox(height: 10),
 
-            // Full-width Segmented Günlük / Haftalık / Aylık bar matching Screenshot 3
+            // Segmented Günlük / Haftalık / Aylık bar
             Container(
               padding: const EdgeInsets.all(3),
               decoration: BoxDecoration(
@@ -1304,7 +1922,10 @@ class _ReportScreenState extends State<ReportScreen> {
                     Expanded(
                       child: TactilePress(
                         child: GestureDetector(
-                          onTap: () => setState(() => _periodIndex = seg.$1),
+                          onTap: () => setState(() {
+                            _periodIndex = seg.$1;
+                            _canVertScroll = false;
+                          }),
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 180),
                             padding: const EdgeInsets.symmetric(vertical: 7),
@@ -1335,7 +1956,7 @@ class _ReportScreenState extends State<ReportScreen> {
             ),
             const SizedBox(height: 10),
 
-            // Examined Day + Active Burn Summary Box
+            // Examined Day Date Picker + Active Burn Summary Box
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
               decoration: BoxDecoration(
@@ -1353,38 +1974,76 @@ class _ReportScreenState extends State<ReportScreen> {
                           Icon(Icons.calendar_today_outlined, size: 13, color: themeAccent),
                           const SizedBox(width: 6),
                           Text(
-                            tr ? 'İncelenen Gün:' : 'Selected Day:',
+                            _periodIndex == 0
+                                ? (tr ? 'İncelenen Gün:' : 'Selected Day:')
+                                : _periodIndex == 1
+                                    ? (tr ? 'Bitiş Tarihi:' : 'Week Ending:')
+                                    : (tr ? 'İncelenen Ay:' : 'Selected Month:'),
                             style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: p.textSecondary),
                           ),
                         ],
                       ),
-                      TactilePress(
-                        child: GestureDetector(
-                          onTap: () => setState(() => _dayOptionIdx = (_dayOptionIdx + 1) % dayOptions.length),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: themeAccent.withValues(alpha: 0.24),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: themeAccent.withValues(alpha: 0.65)),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  dayEntry.$1,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: p.textPrimary,
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: p.textPrimary),
-                              ],
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TactilePress(
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: () => _stepSelectedDate(_periodIndex == 2 ? -30 : -1),
+                              child: Padding(
+                                padding: const EdgeInsets.all(4),
+                                child: Icon(Icons.chevron_left_rounded, size: 17, color: p.textSecondary),
+                              ),
                             ),
                           ),
-                        ),
+                          TactilePress(
+                            child: GestureDetector(
+                              onTap: _pickReportDate,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: themeAccent.withValues(alpha: 0.24),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: themeAccent.withValues(alpha: 0.65)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      _formatDateButtonLabel(anchorDate, tr),
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: p.textPrimary,
+                                        fontFeatures: const [FontFeature.tabularFigures()],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Icon(Icons.calendar_month_rounded, size: 13, color: p.textPrimary),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          TactilePress(
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: canStepForward
+                                  ? () => _stepSelectedDate(_periodIndex == 2 ? 30 : 1)
+                                  : null,
+                              child: Padding(
+                                padding: const EdgeInsets.all(4),
+                                child: Icon(
+                                  Icons.chevron_right_rounded,
+                                  size: 17,
+                                  color: canStepForward
+                                      ? p.textSecondary
+                                      : p.textSecondary.withValues(alpha: 0.28),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -1401,7 +2060,7 @@ class _ReportScreenState extends State<ReportScreen> {
                             style: TextStyle(fontSize: 11, color: p.textSecondary),
                           ),
                           Text(
-                            dayEntry.$2,
+                            periodBurnLabel,
                             style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: themeAccent),
                           ),
                         ],
@@ -1419,7 +2078,7 @@ class _ReportScreenState extends State<ReportScreen> {
                             style: TextStyle(fontSize: 11, color: p.textSecondary),
                           ),
                           Text(
-                            dayEntry.$3,
+                            periodStandbyLabel,
                             style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: p.textPrimary),
                           ),
                         ],
@@ -1431,51 +2090,87 @@ class _ReportScreenState extends State<ReportScreen> {
             ),
             const SizedBox(height: 14),
 
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  tr ? 'Sıcaklık Haritası' : 'Hourly Heat Map',
-                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: p.textPrimary),
-                ),
-                Flexible(
-                  child: Text(
-                    tr ? '(Saat kutucuklarına dokunarak detayları inceleyin)' : '(Tap hour blocks for details)',
-                    style: TextStyle(fontSize: 10, color: p.textSecondary),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-
-            if (wideHourStrip)
+            if (_periodIndex == 1)
+              buildWeeklyBreakdown()
+            else if (_periodIndex == 2)
+              buildMonthlyBreakdown()
+            else ...[
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  for (int i = 0; i < hours.length; i++) ...[
-                    if (i > 0) const SizedBox(width: 8),
-                    Expanded(child: buildHourTile(i)),
-                  ],
-                ],
-              )
-            else
-              GridView.count(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisCount: 3,
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 1.32,
-                children: [
-                  for (int i = 0; i < hours.length; i++) buildHourTile(i),
+                  Text(
+                    tr ? 'Sıcaklık Haritası' : 'Hourly Heat Map',
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: p.textPrimary),
+                  ),
+                  Flexible(
+                    child: Text(
+                      tr ? '(Saat kutucuklarına dokunarak detayları inceleyin)' : '(Tap hour blocks for details)',
+                      style: TextStyle(fontSize: 10, color: p.textSecondary),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ],
               ),
+              const SizedBox(height: 10),
+              if (wideHourStrip)
+                Row(
+                  children: [
+                    for (int i = 0; i < hours.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 8),
+                      Expanded(child: buildHourTile(i)),
+                    ],
+                  ],
+                )
+              else
+                GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 3,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                  childAspectRatio: 1.32,
+                  children: [
+                    for (int i = 0; i < hours.length; i++) buildHourTile(i),
+                  ],
+                ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: p.scaffoldBg.withValues(alpha: p.isLight ? 0.36 : 0.28),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: p.cardBorder),
+                ),
+                child: Text(
+                  selectedBucket.hasData
+                      ? (tr
+                          ? '${hours[_selectedHourIdx]} dilimi · Aktif yanma: ${ThermalLogAggregator.formatDuration(selectedBucket.activeBurnSeconds, widget.lang)} · Bekleme: ${ThermalLogAggregator.formatDuration(selectedBucket.standbySeconds, widget.lang)}'
+                          : '${hours[_selectedHourIdx]} slot · Active burn: ${ThermalLogAggregator.formatDuration(selectedBucket.activeBurnSeconds, widget.lang)} · Standby: ${ThermalLogAggregator.formatDuration(selectedBucket.standbySeconds, widget.lang)}')
+                      : (tr
+                          ? '${hours[_selectedHourIdx]} dilimi için henüz log kaydedilmedi.'
+                          : 'No log recorded for the ${hours[_selectedHourIdx]} slot yet.'),
+                  style: TextStyle(fontSize: 10.5, color: p.textSecondary),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
           ],
         ),
       );
     }
 
     Widget buildUsageBillView() {
+      final monthlyBurnLabel = ThermalLogAggregator.formatDuration(monthlySummary.activeBurnSeconds, widget.lang);
+      const monthsTr = [
+        'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+        'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık',
+      ];
+      const monthsEn = [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      ];
+      final monthTitle = '${(tr ? monthsTr : monthsEn)[(anchorDate.month - 1).clamp(0, 11)]} ${anchorDate.year}';
+
       return Container(
         key: const ValueKey(ReportSubTab.usageBill),
         padding: const EdgeInsets.all(14),
@@ -1508,11 +2203,7 @@ class _ReportScreenState extends State<ReportScreen> {
                     border: Border.all(color: themeAccent.withValues(alpha: 0.45)),
                   ),
                   child: Text(
-                    _periodIndex == 0
-                        ? (tr ? 'Seçili Gün Özeti' : 'Selected Day')
-                        : _periodIndex == 1
-                            ? (tr ? 'Haftalık Özet' : 'Weekly Summary')
-                            : (tr ? 'Aylık Özet' : 'Monthly Summary'),
+                    tr ? 'Aylık · $monthTitle' : 'Monthly · $monthTitle',
                     style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: themeAccent),
                   ),
                 ),
@@ -1520,7 +2211,7 @@ class _ReportScreenState extends State<ReportScreen> {
             ),
             const SizedBox(height: 10),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: p.scaffoldBg.withValues(alpha: p.isLight ? 0.40 : 0.36),
                 borderRadius: BorderRadius.circular(12),
@@ -1529,17 +2220,43 @@ class _ReportScreenState extends State<ReportScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    tr ? 'Doğalgaz m³ Birim Fiyatı' : 'Natural Gas Unit Rate',
-                    style: TextStyle(fontSize: 11.5, color: p.textSecondary),
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          tr ? 'Doğalgaz m³ Birim Fiyatı' : 'Natural Gas Unit Rate',
+                          style: TextStyle(fontSize: 11.5, color: p.textSecondary),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${safeGasRate.toStringAsFixed(2)} ₺ / m³',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: themeAccent,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  Text(
-                    '10.25 ₺ / m³',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: themeAccent,
-                      fontFeatures: const [FontFeature.tabularFigures()],
+                  TactilePress(
+                    child: OutlinedButton.icon(
+                      onPressed: _openGasRateEditor,
+                      icon: Icon(Icons.edit_outlined, size: 14, color: themeAccent),
+                      label: Text(
+                        tr ? 'Düzenle' : 'Edit',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: themeAccent),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: themeAccent.withValues(alpha: 0.55)),
+                        backgroundColor: themeAccent.withValues(alpha: 0.12),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
                     ),
                   ),
                 ],
@@ -1550,9 +2267,11 @@ class _ReportScreenState extends State<ReportScreen> {
               children: [
                 Expanded(
                   child: _MetricCard(
-                    title: tr ? 'SAYAÇ TÜKETİMİ' : 'GAS METER USAGE',
-                    value: '${gasM3.toStringAsFixed(2)} m³',
-                    sub: tr ? 'Aktif yanma: ${dayEntry.$2}' : 'Active burn: ${dayEntry.$2}',
+                    title: tr ? 'SAYAÇ TÜKETİMİ (AYLIK)' : 'MONTHLY GAS USAGE',
+                    value: '${monthlySummary.gasM3.toStringAsFixed(2)} m³',
+                    sub: tr
+                        ? 'Aktif yanma: $monthlyBurnLabel (${monthlySummary.daysWithData} gün)'
+                        : 'Active burn: $monthlyBurnLabel (${monthlySummary.daysWithData}d)',
                     palette: p,
                     accentTextColor: p.isLight ? const Color(0xFF0284C7) : const Color(0xFF38BDF8),
                   ),
@@ -1560,20 +2279,44 @@ class _ReportScreenState extends State<ReportScreen> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: _MetricCard(
-                    title: tr ? 'TAHMİNİ TUTAR' : 'ESTIMATED BILL',
-                    value: '${costTl.toStringAsFixed(2)} ₺',
-                    sub: tr ? '↘ ~${savedTl.toStringAsFixed(2)} ₺ Tasarruf' : '↘ ~${savedTl.toStringAsFixed(2)} ₺ Saved',
+                    title: tr ? 'TAHMİNİ TUTAR (AYLIK)' : 'MONTHLY EST. BILL',
+                    value: '${monthlySummary.costTl.toStringAsFixed(2)} ₺',
+                    sub: tr
+                        ? '↘ ~${monthlySummary.savedTl.toStringAsFixed(2)} ₺ Modülasyon tasarrufu'
+                        : '↘ ~${monthlySummary.savedTl.toStringAsFixed(2)} ₺ Modulated savings',
                     palette: p,
                     accentTextColor: emerald,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            if (_periodIndex != 2) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: p.scaffoldBg.withValues(alpha: p.isLight ? 0.35 : 0.28),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: p.cardBorder),
+                ),
+                child: Text(
+                  tr
+                      ? 'Seçili dönem (${_periodIndex == 0 ? 'Günlük' : 'Haftalık'}): ${periodSummary.gasM3.toStringAsFixed(2)} m³ · ${periodSummary.costTl.toStringAsFixed(2)} ₺ ($periodBurnLabel)'
+                      : 'Selected (${_periodIndex == 0 ? 'Daily' : 'Weekly'}): ${periodSummary.gasM3.toStringAsFixed(2)} m³ · ${periodSummary.costTl.toStringAsFixed(2)} ₺ ($periodBurnLabel)',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    color: p.textSecondary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 10),
             Text(
               tr
-                  ? '💡 Modülasyonlu kombi alev kontrolü ile standart on/off termostatlara göre ~%28 tasarruf sağlanır.'
-                  : '💡 Modulated boiler flame control achieves ~28% savings compared to standard on/off thermostats.',
+                  ? '💡 Değerler önceki sayfadaki kaydedilen termal loglardan ve girdiğiniz m³ birim fiyatından aylık olarak hesaplanır.'
+                  : '💡 Figures are calculated monthly from persisted thermal logs and your configured m³ unit rate.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 10.5, color: p.textSecondary),
             ),
@@ -1583,6 +2326,19 @@ class _ReportScreenState extends State<ReportScreen> {
     }
 
     Widget buildSensorsView() {
+      final s = widget.sensors;
+      final connected = s.isConnected;
+      final supplyText = (connected && s.supplyTempC != null) ? '${s.supplyTempC!.toStringAsFixed(1)}°C' : '--';
+      final returnText = (connected && s.returnTempC != null) ? '${s.returnTempC!.toStringAsFixed(1)}°C' : '--';
+      final flameText = (connected && s.flamePercent != null) ? '%${s.flamePercent}' : '--';
+      final pumpText = (connected && s.pumpRpm != null) ? '${s.pumpRpm} RPM' : '--';
+      final pressureText = (connected && s.waterPressureBar != null)
+          ? '${s.waterPressureBar!.toStringAsFixed(1)} Bar'
+          : '--';
+      final ionizationText = (connected && s.ionizationUa != null)
+          ? '${s.ionizationUa!.toStringAsFixed(1)} µA'
+          : '--';
+
       return Container(
         key: const ValueKey(ReportSubTab.boilerSensors),
         padding: const EdgeInsets.all(14),
@@ -1610,26 +2366,49 @@ class _ReportScreenState extends State<ReportScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
                   decoration: BoxDecoration(
-                    color: emerald.withValues(alpha: 0.16),
+                    color: (connected ? emerald : p.textSecondary).withValues(alpha: 0.14),
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: emerald.withValues(alpha: 0.45)),
+                    border: Border.all(color: (connected ? emerald : p.textSecondary).withValues(alpha: 0.40)),
                   ),
                   child: Text(
-                    widget.boiler.modulationActive ? 'OpenTherm v4.2' : 'Standby',
-                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: emerald),
+                    connected
+                        ? (s.protocolLabel.isNotEmpty ? s.protocolLabel : 'OpenTherm')
+                        : (tr ? 'Sensör Bağlı Değil' : 'No Sensor'),
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      color: connected ? emerald : p.textSecondary,
+                    ),
                   ),
                 ),
               ],
             ),
+            if (!connected) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: p.scaffoldBg.withValues(alpha: p.isLight ? 0.40 : 0.30),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: p.cardBorder),
+                ),
+                child: Text(
+                  tr
+                      ? 'Fiziksel kombi sensörü (ESP32 / OpenTherm) bağlı olmadığı için ölçümler boş gösterilir.'
+                      : 'No physical boiler sensor bus connected; hardware readings remain empty (--).',
+                  style: TextStyle(fontSize: 10.5, color: p.textSecondary),
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
             Divider(color: p.cardBorder, height: 1),
             const SizedBox(height: 8),
-            _SensorRow(label: tr ? 'Gidiş Suyu Sıcaklığı' : 'Supply Water Temp', value: widget.boiler.isHeating ? '54.2°C' : '29.4°C', palette: p),
-            _SensorRow(label: tr ? 'Dönüş Suyu Sıcaklığı' : 'Return Water Temp', value: widget.boiler.isHeating ? '42.6°C' : '26.8°C', palette: p),
-            _SensorRow(label: tr ? 'Alev Gücü' : 'Flame Power', value: '%${widget.boiler.flamePercent}', palette: p),
-            _SensorRow(label: tr ? 'Sirkülasyon Pompası' : 'Circulation Pump', value: '${widget.boiler.pumpRpm} RPM', palette: p),
-            _SensorRow(label: tr ? 'Tesisat Basıncı' : 'Loop Water Pressure', value: '${widget.boiler.waterPressureBar} Bar (Normal)', palette: p),
-            _SensorRow(label: tr ? 'İyonizasyon Alev Sensörü' : 'Ionization Flame Sensor', value: widget.boiler.isHeating ? '18.4 µA OK' : '0.0 µA', palette: p),
+            _SensorRow(label: tr ? 'Gidiş Suyu Sıcaklığı' : 'Supply Water Temp', value: supplyText, palette: p),
+            _SensorRow(label: tr ? 'Dönüş Suyu Sıcaklığı' : 'Return Water Temp', value: returnText, palette: p),
+            _SensorRow(label: tr ? 'Alev Gücü' : 'Flame Power', value: flameText, palette: p),
+            _SensorRow(label: tr ? 'Sirkülasyon Pompası' : 'Circulation Pump', value: pumpText, palette: p),
+            _SensorRow(label: tr ? 'Tesisat Basıncı' : 'Loop Water Pressure', value: pressureText, palette: p),
+            _SensorRow(label: tr ? 'İyonizasyon Alev Sensörü' : 'Ionization Flame Sensor', value: ionizationText, palette: p),
           ],
         ),
       );
@@ -1647,115 +2426,127 @@ class _ReportScreenState extends State<ReportScreen> {
       child: GestureDetector(
         behavior: HitTestBehavior.translucent,
         onVerticalDragEnd: (details) {
+          if (_canVertScroll) return;
           final v = details.primaryVelocity ?? 0.0;
           if (v.abs() < 160) return;
           _stepSubTab(v < 0 ? 1 : -1);
         },
-        child: LayoutBuilder(
-          builder: (context, constraints) => SingleChildScrollView(
-            physics: constraints.maxHeight < 460
-                ? const ClampingScrollPhysics()
-                : const NeverScrollableScrollPhysics(),
+        child: NotificationListener<ScrollMetricsNotification>(
+          onNotification: (notification) {
+            if (notification.metrics.axis == Axis.vertical) {
+              final nextCan = notification.metrics.maxScrollExtent > 4.0;
+              if (nextCan != _canVertScroll) {
+                _canVertScroll = nextCan;
+              }
+            }
+            return false;
+          },
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            physics: const ClampingScrollPhysics(),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
             child: Center(
               child: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: isLandscape ? 920 : 480),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Flexible(
-                        child: Row(
-                          children: [
-                            Icon(Icons.analytics_outlined, size: 17, color: themeAccent),
-                            const SizedBox(width: 7),
-                            Flexible(
-                              child: Text(
-                                tr ? '24s Sıcaklık & Tüketim Analitiği' : '24h Heat & Usage Analytics',
-                                style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: p.textPrimary),
-                                overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Flexible(
+                          child: Row(
+                            children: [
+                              Icon(Icons.analytics_outlined, size: 17, color: themeAccent),
+                              const SizedBox(width: 7),
+                              Flexible(
+                                child: Text(
+                                  tr ? '24s Sıcaklık & Tüketim Analitiği' : '24h Heat & Usage Analytics',
+                                  style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: p.textPrimary),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          tr ? '👆 Parmakla Kaydırın / Wheel' : '👆 Swipe / Mouse Wheel',
+                          style: TextStyle(fontSize: 10, color: p.textSecondary),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Centered Floating Capsule Sub-Tab Switcher
+                    Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: p.cardBg,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: p.cardBorder),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: p.isLight ? 0.08 : 0.25),
+                              blurRadius: 14,
+                              offset: const Offset(0, 4),
                             ),
                           ],
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        tr ? '👆 Parmakla Kaydırın / Wheel' : '👆 Swipe / Mouse Wheel',
-                        style: TextStyle(fontSize: 10, color: p.textSecondary),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-
-                  // Centered Floating Capsule Sub-Tab Switcher (Screenshot 3 & 4)
-                  Center(
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: p.cardBg,
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: p.cardBorder),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: p.isLight ? 0.08 : 0.25),
-                            blurRadius: 14,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            for (final sub in widget.subTabOrder) ...[
-                              TactilePress(
-                                child: GestureDetector(
-                                  onTap: () => setState(() => _selectedSubTab = sub),
-                                  child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 200),
-                                    margin: const EdgeInsets.symmetric(horizontal: 2),
-                                    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
-                                    decoration: BoxDecoration(
-                                      color: _activeSubTab == sub
-                                          ? themeAccent.withValues(alpha: 0.28)
-                                          : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(999),
-                                      border: Border.all(
-                                        color: _activeSubTab == sub ? themeAccent : Colors.transparent,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              for (final sub in widget.subTabOrder) ...[
+                                TactilePress(
+                                  child: GestureDetector(
+                                    onTap: () => setState(() {
+                                      _selectedSubTab = sub;
+                                      _canVertScroll = false;
+                                    }),
+                                    child: AnimatedContainer(
+                                      duration: const Duration(milliseconds: 200),
+                                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                                      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+                                      decoration: BoxDecoration(
+                                        color: _activeSubTab == sub
+                                            ? themeAccent.withValues(alpha: 0.28)
+                                            : Colors.transparent,
+                                        borderRadius: BorderRadius.circular(999),
+                                        border: Border.all(
+                                          color: _activeSubTab == sub ? themeAccent : Colors.transparent,
+                                        ),
                                       ),
-                                    ),
-                                    child: Text(
-                                      _subTabLabel(sub, tr),
-                                      style: TextStyle(
-                                        fontSize: 11.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: _activeSubTab == sub ? p.textPrimary : p.textSecondary,
+                                      child: Text(
+                                        _subTabLabel(sub, tr),
+                                        style: TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: _activeSubTab == sub ? p.textPrimary : p.textSecondary,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
+                    const SizedBox(height: 12),
 
-                  _BlurredDepthSubTabSwitcher(
-                    disableBlur: widget.performanceMode == PerformanceMode.ecoBattery,
-                    child: activePanel,
-                  ),
-                ],
+                    _BlurredDepthSubTabSwitcher(
+                      disableBlur: widget.performanceMode == PerformanceMode.ecoBattery,
+                      child: activePanel,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
         ),
       ),
     );
@@ -1852,6 +2643,9 @@ class ScheduleScreen extends StatefulWidget {
   final List<ScheduleSubTab> subTabOrder;
   final ThemePaletteSpec palette;
   final BoilerTelemetry? boiler;
+  final BoilerHardwareSensors sensors;
+  final DailyThermalLog? todayLog;
+  final double gasUnitPriceTl;
   final PerformanceMode performanceMode;
   final void Function(String id, {String? time, bool? enabled, double? targetTemp}) onUpdateSlot;
   final ValueChanged<CustomScheduleRule>? onAddCustomRule;
@@ -1870,6 +2664,9 @@ class ScheduleScreen extends StatefulWidget {
     required this.subTabOrder,
     required this.palette,
     this.boiler,
+    this.sensors = const BoilerHardwareSensors.disconnected(),
+    this.todayLog,
+    this.gasUnitPriceTl = 10.25,
     this.performanceMode = PerformanceMode.ultra60fps,
     required this.onUpdateSlot,
     this.onAddCustomRule,
@@ -2651,9 +3448,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     final emerald = p.isLight ? const Color(0xFF059669) : const Color(0xFF34D399);
     final themeAccent = p.themeOverrideAccent?.toColor() ?? emerald;
     final liveBoiler = widget.boiler ?? ThermostatMath.computeBoilerTelemetry(21.8, 22.5);
-    final gasEstimate = liveBoiler.isHeating ? 1.42 : 1.08;
-    final tlEstimate = gasEstimate * 10.28;
-    final savedTl = tlEstimate * 0.28;
+    final burnSeconds = widget.todayLog?.activeBurnSeconds ?? 0;
+    final burnDurationText = ThermalLogAggregator.formatDuration(burnSeconds, widget.lang);
+    final gasEstimate = widget.todayLog?.gasM3 ?? 0.0;
+    final safeGasRate = widget.gasUnitPriceTl > 0 ? widget.gasUnitPriceTl : 10.25;
+    final tlEstimate = gasEstimate * safeGasRate;
+    final savedTl = (widget.todayLog?.modulatedSavingsM3 ?? 0.0) * safeGasRate;
     final flameFrac = (liveBoiler.flamePercent / 100.0).clamp(0.08, 1.0);
 
     Widget buildSmartScheduleCard() {
@@ -3010,7 +3810,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                '1s 30d',
+                burnDurationText,
                 style: TextStyle(
                   fontSize: 17.5,
                   fontWeight: FontWeight.w800,
@@ -3051,7 +3851,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 text: TextSpan(
                   children: [
                     TextSpan(
-                      text: '~${gasEstimate.toStringAsFixed(2)} ',
+                      text: '${gasEstimate.toStringAsFixed(2)} ',
                       style: TextStyle(
                         fontSize: 17.5,
                         fontWeight: FontWeight.w800,
@@ -3067,7 +3867,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 ),
               ),
               const SizedBox(height: 3),
-              Text(tr ? '24 kW brülör' : '24 kW burner', style: TextStyle(fontSize: 10.5, color: p.textSecondary)),
+              Text(tr ? '24 kW modülasyon' : '24 kW modulated', style: TextStyle(fontSize: 10.5, color: p.textSecondary)),
             ],
           ),
         ),
@@ -3099,7 +3899,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 text: TextSpan(
                   children: [
                     TextSpan(
-                      text: '~${tlEstimate.toStringAsFixed(1)} ',
+                      text: '${tlEstimate.toStringAsFixed(2)} ',
                       style: TextStyle(
                         fontSize: 17.5,
                         fontWeight: FontWeight.w800,
@@ -3116,7 +3916,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               ),
               const SizedBox(height: 3),
               Text(
-                tr ? '↘ ~${savedTl.toStringAsFixed(1)} TL tasarruf' : '↘ ~${savedTl.toStringAsFixed(1)} TL saved',
+                tr ? '↘ ${savedTl.toStringAsFixed(2)} TL tasarruf' : '↘ ${savedTl.toStringAsFixed(2)} TL saved',
                 style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: emerald),
               ),
             ],
@@ -3294,7 +4094,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           ],
                         ),
                         Text(
-                          '${liveBoiler.waterPressureBar} Bar',
+                          (widget.sensors.isConnected && widget.sensors.waterPressureBar != null)
+                              ? '${widget.sensors.waterPressureBar!.toStringAsFixed(1)} Bar'
+                              : '--',
                           style: TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w700,
@@ -3336,7 +4138,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          '${liveBoiler.pumpRpm} RPM',
+                          (widget.sensors.isConnected && widget.sensors.pumpRpm != null)
+                              ? '${widget.sensors.pumpRpm} RPM'
+                              : '--',
                           style: TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w700,

@@ -21,6 +21,7 @@ import 'services/media_storage_service.dart';
 import 'services/notification_service.dart';
 import 'services/schedule_engine.dart';
 import 'services/voice_speech_service.dart';
+import 'services/weather_service.dart';
 import 'widgets/ai_phone_call_overlay.dart';
 import 'widgets/boot_ceremony_overlay.dart';
 import 'widgets/flow_tab_bar.dart';
@@ -116,6 +117,13 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   int _slideTicks = 0;
   int _ambientElapsedSeconds = 0;
   int _thermalTicks = 0;
+  Map<String, DailyThermalLog> _dailyLogs = const {};
+  double _gasUnitPriceTl = 10.25;
+  BoilerHardwareSensors _hardwareSensors = const BoilerHardwareSensors.disconnected();
+  WeatherReport? _weatherReport;
+  bool _weatherLoading = false;
+  String? _weatherError;
+  int _weatherFetchSeq = 0;
 
   Timer? _clockTimer;
   Timer? _idleTimer;
@@ -129,6 +137,31 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   DateTime? _heatingCycleStartedAt;
   DateTime? _lastWheelNavAt;
   bool _activeTabCanVertScroll = false;
+
+  Future<void> _fetchWeather(String locationName, {bool force = false}) async {
+    final seq = ++_weatherFetchSeq;
+    final coords = WeatherService.coordinatesForLocation(locationName);
+    final cached = !force ? WeatherService.getCached(locationName) : null;
+    if (mounted) {
+      setState(() {
+        _weatherReport = cached ?? (_weatherReport?.cityName == coords.displayCity ? _weatherReport : null);
+        _weatherLoading = true;
+        _weatherError = null;
+      });
+    }
+    final res = await WeatherService.fetchForecast(locationName, lang: _lang);
+    if (!mounted || seq != _weatherFetchSeq) return;
+    if (WeatherService.coordinatesForLocation(_locationName).cityKey != coords.cityKey) return;
+    setState(() {
+      _weatherLoading = false;
+      if (res.ok) {
+        _weatherReport = res.report;
+        _weatherError = null;
+      } else {
+        _weatherError = _lang == LangCode.tr ? res.errorTr : res.errorEn;
+      }
+    });
+  }
 
   void _enqueueUnreadAlert(AiCallLogEntry entry) {
     if (!mounted) return;
@@ -183,12 +216,35 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
         }
       }
 
-      if (driftedRoom != null || _ambientMode || _visual.theme == AppThemeMode.autoSmart) {
+      final tickNow = DateTime.now();
+      final effectiveRoom = driftedRoom ?? _roomTemp;
+      final tickBoiler = ThermostatMath.computeBoilerTelemetry(effectiveRoom, _targetTemp);
+      Map<String, DailyThermalLog>? updatedLogs;
+      if (_persistedLoaded) {
+        updatedLogs = ThermalLogAggregator.recordSample(
+          logs: _dailyLogs,
+          timestamp: tickNow,
+          roomTemp: effectiveRoom,
+          boiler: tickBoiler,
+          seconds: 1,
+        );
+      }
+
+      final shouldRefreshUi = driftedRoom != null ||
+          _ambientMode ||
+          _visual.theme == AppThemeMode.autoSmart ||
+          (_persistedLoaded &&
+              (_activeTab == TabId.rapor || _activeTab == TabId.prog || _thermalTicks % 5 == 0));
+
+      if (shouldRefreshUi) {
         setState(() {
           if (driftedRoom != null) {
             _roomTemp = driftedRoom;
           }
-          _now = DateTime.now();
+          if (updatedLogs != null) {
+            _dailyLogs = updatedLogs;
+          }
+          _now = tickNow;
           if (_ambientMode) {
             _ambientElapsedSeconds++;
             final sleepMinutes = _settings.displaySleepMinutes;
@@ -209,10 +265,16 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             }
           }
         });
+      } else if (updatedLogs != null) {
+        _dailyLogs = updatedLogs;
+      }
+
+      if (_persistedLoaded && _thermalTicks % 15 == 0) {
+        _persist();
       }
 
       if (driftedRoom != null && _thermalTicks % 60 == 0) {
-        final curHeating = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating;
+        final curHeating = tickBoiler.isHeating;
         _evaluateBoilerAlertsAndCalls(
           wasHeating: curHeating,
           nextTargetTemp: _targetTemp,
@@ -221,7 +283,6 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       }
 
       if (_persistedLoaded) {
-        final tickNow = DateTime.now();
         final minuteKey = ScheduleEngine.minuteKey(tickNow);
         if (minuteKey != _lastScheduleMinuteKey) {
           _lastScheduleMinuteKey = minuteKey;
@@ -384,6 +445,14 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                 if (item is Map<String, dynamic>) AiCallLogEntry.fromJson(item),
             ];
           }
+          final rawRate = (map['gasUnitPriceTl'] as num?)?.toDouble();
+          if (rawRate != null && rawRate.isFinite && rawRate > 0 && rawRate <= 500) {
+            _gasUnitPriceTl = rawRate;
+          }
+          final rawLogs = map['dailyLogs'];
+          if (rawLogs is Map) {
+            _dailyLogs = ThermalLogAggregator.decodeLogs(rawLogs);
+          }
         });
         if (ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating) {
           _heatingCycleStartedAt ??= DateTime.now();
@@ -406,6 +475,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     final nowTick = DateTime.now();
     _lastScheduleMinuteKey = ScheduleEngine.minuteKey(nowTick);
     _evaluateScheduledActions(nowTick);
+    unawaited(_fetchWeather(_locationName));
 
     if (bootOn && mounted) {
       setState(() => _showBootCeremony = true);
@@ -421,6 +491,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
         'presetIndex': _activePreset?.index,
         'lang': _lang == LangCode.en ? 'en' : 'tr',
         'locationName': _locationName,
+        'gasUnitPriceTl': _gasUnitPriceTl,
+        'dailyLogs': ThermalLogAggregator.encodeLogs(_dailyLogs),
         'schedule': _schedule.map((s) => s.toJson()).toList(),
         'customScheduleRules': _customScheduleRules.map((r) => r.toJson()).toList(),
         'unreadAlerts': _unreadAlerts.map((a) => a.toJson()).toList(),
@@ -544,8 +616,16 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       boiler: boiler,
       initialSettings: _settings,
       initialExpandedId: initialExpandedId,
-      onChangeLang: (l) => setState(() => _lang = l),
-      onChangeLocation: (loc) => setState(() => _locationName = loc),
+      onChangeLang: (l) {
+        setState(() => _lang = l);
+        _persist();
+        _fetchWeather(_locationName);
+      },
+      onChangeLocation: (loc) {
+        setState(() => _locationName = loc);
+        _persist();
+        _fetchWeather(loc);
+      },
       onChangeTargetTemp: _changeTarget,
       onSaveSettings: (updated) {
         setState(() {
@@ -574,6 +654,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
         setState(() {
           _schedule = ThermostatMath.defaultSchedule;
           _customScheduleRules = const [];
+          _dailyLogs = const {};
           _targetTemp = 22.5;
           _activePreset = PresetId.konfor;
           _settings = _settings.copyWith(
@@ -701,12 +782,19 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             apiKey: _settings.firebaseApiKey,
             nodePath: _settings.firebaseNodePath,
           ).then((pullRes) {
-            if (!mounted || !pullRes.ok || pullRes.remoteTargetTemp == null) return;
-            final remoteTemp = pullRes.remoteTargetTemp!;
-            if ((remoteTemp - _targetTemp).abs() >= 0.05) {
+            if (!mounted || !pullRes.ok) return;
+            final remoteTemp = pullRes.remoteTargetTemp;
+            final remoteTempChanged = remoteTemp != null && (remoteTemp - _targetTemp).abs() >= 0.05;
+            final hasSensorUpdate = pullRes.remoteSensors != null;
+            if (remoteTempChanged || hasSensorUpdate) {
               setState(() {
-                _targetTemp = remoteTemp;
-                _activePreset = ThermostatMath.findMatchingPreset(remoteTemp)?.id;
+                if (remoteTempChanged) {
+                  _targetTemp = remoteTemp;
+                  _activePreset = ThermostatMath.findMatchingPreset(remoteTemp)?.id;
+                }
+                if (hasSensorUpdate) {
+                  _hardwareSensors = pullRes.remoteSensors!;
+                }
                 _settings = _settings.copyWith(
                   cloudLastSyncAt: NotificationService.formatNowTime(),
                   cloudLastSyncOk: true,
@@ -893,7 +981,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     final nextBoiler = ThermostatMath.computeBoilerTelemetry(_roomTemp, nextTargetTemp);
     final safety = NotificationService.evaluateSafetyThresholds(
       roomTemp: _roomTemp,
-      outsideTemp: 17.7,
+      outsideTemp: _weatherReport?.currentTempC ?? 17.7,
       boiler: nextBoiler,
     );
 
@@ -1095,6 +1183,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             activePreset: _activePreset,
             accentColor: activeColor,
             boiler: boiler,
+            sensors: _hardwareSensors,
             lang: _lang,
             palette: palette,
             dialRingStyle: _visual.dialRingStyle,
@@ -1116,6 +1205,10 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             boiler: boiler,
             settings: _settings,
             performanceMode: _visual.performanceMode,
+            weatherReport: _weatherReport,
+            isLoadingWeather: _weatherLoading,
+            weatherError: _weatherError,
+            onRefreshWeather: () => _fetchWeather(_locationName, force: true),
             onToggleWeatherAlerts: (v) {
               _triggerHaptic();
               setState(() => _settings = _settings.copyWith(weatherAlertsEnabled: v));
@@ -1125,6 +1218,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
               _triggerHaptic();
               setState(() => _locationName = loc);
               _persist();
+              _fetchWeather(loc);
             },
             onApplyEcoCompensation: () => _selectPreset(ThermostatMath.presets.first),
           ),
@@ -1137,6 +1231,14 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             roomTemp: _roomTemp,
             targetTemp: _targetTemp,
             boiler: boiler,
+            sensors: _hardwareSensors,
+            dailyLogs: _dailyLogs,
+            gasUnitPriceTl: _gasUnitPriceTl,
+            onUpdateGasUnitPrice: (nextRate) {
+              _triggerHaptic();
+              setState(() => _gasUnitPriceTl = nextRate);
+              _persist();
+            },
             subTabOrder: _visual.reportSubTabOrder,
             palette: palette,
             performanceMode: _visual.performanceMode,
@@ -1154,6 +1256,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             subTabOrder: _visual.scheduleSubTabOrder,
             palette: palette,
             boiler: boiler,
+            sensors: _hardwareSensors,
+            todayLog: _dailyLogs[ThermalLogAggregator.formatDateIso(_now)],
+            gasUnitPriceTl: _gasUnitPriceTl,
             performanceMode: _visual.performanceMode,
             savedNotice: _savedNotice,
             onBoundaryPrevMainTab: () => _stepTab(-1),
@@ -1355,13 +1460,14 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                                   // Flag Language Quick Toggle (TR / EN)
                                   _TopActionButton(
                                     palette: palette,
-                                    onTap: () {
-                                      _triggerHaptic();
-                                      setState(() {
-                                        _lang = _lang == LangCode.tr ? LangCode.en : LangCode.tr;
-                                      });
-                                      _persist();
-                                    },
+                                      onTap: () {
+                                        _triggerHaptic();
+                                        setState(() {
+                                          _lang = _lang == LangCode.tr ? LangCode.en : LangCode.tr;
+                                        });
+                                        _persist();
+                                        _fetchWeather(_locationName);
+                                      },
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
@@ -1689,7 +1795,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                 boiler: boiler,
                 safety: NotificationService.evaluateSafetyThresholds(
                   roomTemp: _roomTemp,
-                  outsideTemp: 17.7,
+                  outsideTemp: _weatherReport?.currentTempC ?? 17.7,
                   boiler: boiler,
                 ),
                 lang: _lang,

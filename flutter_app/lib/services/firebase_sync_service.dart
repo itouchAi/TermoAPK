@@ -9,6 +9,7 @@ class FirebaseSyncResult {
   final String messageTr;
   final String messageEn;
   final double? remoteTargetTemp;
+  final BoilerHardwareSensors? remoteSensors;
 
   const FirebaseSyncResult({
     required this.ok,
@@ -17,6 +18,7 @@ class FirebaseSyncResult {
     required this.messageTr,
     required this.messageEn,
     this.remoteTargetTemp,
+    this.remoteSensors,
   });
 }
 
@@ -252,14 +254,35 @@ class FirebaseSyncService {
       if (resp.statusCode >= 200 && resp.statusCode < 300) {
         final decoded = jsonDecode(resp.body);
         double? target;
-        if (decoded is Map<String, dynamic> && decoded['targetTemp'] is num) {
-          target = ThermostatMath.snapTemperature((decoded['targetTemp'] as num).toDouble());
+        BoilerHardwareSensors? sensors;
+        if (decoded is Map<String, dynamic>) {
+          if (decoded['targetTemp'] is num) {
+            target = ThermostatMath.snapTemperature((decoded['targetTemp'] as num).toDouble());
+          }
+          final hasHardwareBus = decoded['hardwareConnected'] == true ||
+              decoded['supplyTemp'] is num ||
+              decoded['returnTemp'] is num ||
+              decoded['ionizationUa'] is num;
+          if (hasHardwareBus) {
+            sensors = BoilerHardwareSensors(
+              isConnected: true,
+              supplyTempC: (decoded['supplyTemp'] as num?)?.toDouble(),
+              returnTempC: (decoded['returnTemp'] as num?)?.toDouble(),
+              flamePercent: (decoded['flamePercent'] as num?)?.round(),
+              pumpRpm: (decoded['pumpRpm'] as num?)?.round(),
+              waterPressureBar: (decoded['pressureBar'] as num?)?.toDouble(),
+              ionizationUa: (decoded['ionizationUa'] as num?)?.toDouble(),
+              roomHumidityPercent: (decoded['humidity'] as num?)?.toDouble(),
+              protocolLabel: (decoded['protocol'] as String?) ?? 'ESP32 / OpenTherm',
+            );
+          }
         }
         return FirebaseSyncResult(
           ok: true,
           statusCode: resp.statusCode,
           latencyMs: ms,
           remoteTargetTemp: target,
+          remoteSensors: sensors,
           messageTr: target != null
               ? 'RTDB /$safeNode çekildi: Hedef ${target.toStringAsFixed(1)}°C (${ms}ms)'
               : 'Firebase bağlı (/$safeNode düğümü henüz boş · ${ms}ms).',

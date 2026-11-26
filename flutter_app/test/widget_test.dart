@@ -3,7 +3,9 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:termostat_flow/models/thermostat_state.dart';
+import 'package:termostat_flow/screens/secondary_screens.dart';
 import 'package:termostat_flow/screens/theme_effects_sheet.dart';
+import 'package:termostat_flow/screens/thermostat_screen.dart';
 import 'package:termostat_flow/services/ai_call_service.dart';
 import 'package:termostat_flow/services/ambient_audio_service.dart';
 import 'package:termostat_flow/services/audio_tempo_analyzer.dart';
@@ -16,6 +18,7 @@ import 'package:termostat_flow/services/schedule_engine.dart';
 import 'package:termostat_flow/services/vault_crypto_service.dart';
 import 'package:termostat_flow/services/voice_gender_classifier.dart';
 import 'package:termostat_flow/services/voice_speech_service.dart';
+import 'package:termostat_flow/services/weather_service.dart';
 import 'package:termostat_flow/widgets/dial_ring_effects.dart';
 import 'package:termostat_flow/widgets/missed_call_alert.dart';
 import 'package:termostat_flow/widgets/rotary_dial.dart';
@@ -1842,5 +1845,331 @@ void main() {
     await tester.tap(find.text('Sıvı Termal Hazne').last);
     await tester.pump(const Duration(milliseconds: 120));
     expect(latestVisual.dialRingStyle, DialRingStyle.thermoMercury);
+  });
+
+  test('WeatherService maps Izmir & Ankara to distinct coordinates and parses Open-Meteo forecasts', () {
+    final izmirCoords = WeatherService.coordinatesForLocation('Yazlık · İzmir');
+    final ankaraCoords = WeatherService.coordinatesForLocation('Ofis · Ankara');
+    expect(izmirCoords.cityKey, 'izmir');
+    expect(ankaraCoords.cityKey, 'ankara');
+    expect(izmirCoords.latitude, isNot(ankaraCoords.latitude));
+
+    Map<String, dynamic> buildPayload(double currentTemp, int code, int maxTemp, int minTemp) => {
+          'current': {
+            'temperature_2m': currentTemp,
+            'relative_humidity_2m': 61,
+            'wind_speed_10m': 14.2,
+            'weather_code': code,
+            'is_day': 1,
+          },
+          'hourly': {
+            'time': ['2026-11-26T00:00', '2026-11-26T03:00', '2026-11-26T06:00'],
+            'temperature_2m': [currentTemp - 2, currentTemp - 1, currentTemp],
+            'precipitation_probability': [10, 20, 65],
+            'wind_speed_10m': [11.0, 12.5, 14.2],
+            'weather_code': [code, code, code],
+          },
+          'daily': {
+            'time': ['2026-11-26', '2026-11-27', '2026-11-28', '2026-11-29', '2026-11-30'],
+            'weather_code': [code, 1, 2, 3, 61],
+            'temperature_2m_max': [maxTemp, maxTemp + 1, maxTemp - 1, maxTemp, maxTemp - 2],
+            'temperature_2m_min': [minTemp, minTemp, minTemp - 1, minTemp + 1, minTemp - 2],
+            'precipitation_probability_max': [15, 20, 30, 40, 80],
+          },
+        };
+
+    final izmirReport = WeatherService.parseOpenMeteoJson(
+      buildPayload(19.4, 0, 22, 13),
+      locationName: 'Yazlık · İzmir',
+      lang: LangCode.tr,
+    );
+    final ankaraReport = WeatherService.parseOpenMeteoJson(
+      buildPayload(4.2, 71, 6, -2),
+      locationName: 'Ofis · Ankara',
+      lang: LangCode.tr,
+    );
+
+    expect(izmirReport.currentTempC, 19.4);
+    expect(izmirReport.conditionTr, 'Güneşli');
+    expect(ankaraReport.currentTempC, 4.2);
+    expect(ankaraReport.conditionTr, 'Karlı');
+    expect(izmirReport.days.length, 5);
+    expect(izmirReport.days.first.hourly.length, 3);
+  });
+
+  test('ThermalLogAggregator records ticks, round-trips JSON, and distinguishes Daily/Weekly/Monthly summaries', () {
+    const heating = BoilerTelemetry(
+      isHeating: true,
+      flamePercent: 50,
+      pumpRpm: 1450,
+      waterPressureBar: 1.6,
+      modulationActive: true,
+      statusTextTr: 'Aktif',
+      statusTextEn: 'Active',
+    );
+    const standby = BoilerTelemetry(
+      isHeating: false,
+      flamePercent: 0,
+      pumpRpm: 0,
+      waterPressureBar: 1.6,
+      modulationActive: false,
+      statusTextTr: 'Bekleme',
+      statusTextEn: 'Standby',
+    );
+
+    var logs = <String, DailyThermalLog>{};
+    // Today: 1800s active burn at 50% flame
+    logs = ThermalLogAggregator.recordSample(
+      logs: logs,
+      timestamp: DateTime(2026, 11, 26, 9, 0),
+      roomTemp: 21.8,
+      boiler: heating,
+      seconds: 1800,
+    );
+    logs = ThermalLogAggregator.recordSample(
+      logs: logs,
+      timestamp: DateTime(2026, 11, 26, 13, 0),
+      roomTemp: 22.4,
+      boiler: standby,
+      seconds: 600,
+    );
+    // 3 days earlier (inside weekly & monthly)
+    logs = ThermalLogAggregator.recordSample(
+      logs: logs,
+      timestamp: DateTime(2026, 11, 23, 20, 0),
+      roomTemp: 20.5,
+      boiler: heating,
+      seconds: 3600,
+    );
+    // 16 days earlier (outside 7-day weekly window, inside November monthly)
+    logs = ThermalLogAggregator.recordSample(
+      logs: logs,
+      timestamp: DateTime(2026, 11, 10, 8, 0),
+      roomTemp: 19.5,
+      boiler: heating,
+      seconds: 3600,
+    );
+
+    final decoded = ThermalLogAggregator.decodeLogs(ThermalLogAggregator.encodeLogs(logs));
+    expect(decoded.length, 3);
+
+    final anchor = DateTime(2026, 11, 26);
+    final daily = ThermalLogAggregator.summarize(
+      logs: decoded,
+      anchorDate: anchor,
+      periodIndex: 0,
+      gasUnitPriceTl: 12.0,
+    );
+    final weekly = ThermalLogAggregator.summarize(
+      logs: decoded,
+      anchorDate: anchor,
+      periodIndex: 1,
+      gasUnitPriceTl: 12.0,
+    );
+    final monthly = ThermalLogAggregator.summarize(
+      logs: decoded,
+      anchorDate: anchor,
+      periodIndex: 2,
+      gasUnitPriceTl: 12.0,
+    );
+
+    expect(daily.activeBurnSeconds, 1800);
+    expect(weekly.activeBurnSeconds, 5400);
+    expect(monthly.activeBurnSeconds, 9000);
+    expect(daily.gasM3, lessThan(weekly.gasM3));
+    expect(weekly.gasM3, lessThan(monthly.gasM3));
+    expect(monthly.costTl, closeTo(monthly.gasM3 * 12.0, 0.001));
+    expect(daily.singleDayLog!.buckets[2].avgTemp, 21.8);
+    expect(daily.singleDayLog!.buckets[3].avgTemp, 22.4);
+  });
+
+  testWidgets('ReportScreen, ScheduleScreen, and ThermostatScreen show empty sensors (--), date picker, and editable monthly gas bill', (tester) async {
+    final palette = VisualCustomizationState.defaults().resolvePalette();
+    const boiler = BoilerTelemetry(
+      isHeating: true,
+      flamePercent: 65,
+      pumpRpm: 1850,
+      waterPressureBar: 1.6,
+      modulationActive: true,
+      statusTextTr: 'Aktif',
+      statusTextEn: 'Active',
+    );
+    final now = DateTime.now();
+    final todayIso = ThermalLogAggregator.formatDateIso(now);
+    final logs = ThermalLogAggregator.recordSample(
+      logs: const {},
+      timestamp: DateTime(now.year, now.month, now.day, 10, 0),
+      roomTemp: 21.8,
+      boiler: boiler,
+      seconds: 3600,
+    );
+
+    // 1. ThermostatScreen shows '--' for disconnected sensors
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ThermostatScreen(
+            roomTemp: 21.8,
+            targetTemp: 22.5,
+            activePreset: PresetId.konfor,
+            accentColor: const Color(0xFFFF7A24),
+            boiler: boiler,
+            sensors: const BoilerHardwareSensors.disconnected(),
+            lang: LangCode.tr,
+            palette: palette,
+            onChangeTarget: (_) {},
+            onSelectPreset: (_) {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('--'), findsNWidgets(3));
+    expect(find.text('1.6 Bar'), findsNothing);
+
+    // 2. ScheduleScreen Daily Savings shows real burn duration & '--' bottom sensors
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ScheduleScreen(
+            lang: LangCode.tr,
+            slots: ThermostatMath.defaultSchedule,
+            subTabOrder: const [ScheduleSubTab.dailySavings, ScheduleSubTab.smartSchedule],
+            palette: palette,
+            boiler: boiler,
+            sensors: const BoilerHardwareSensors.disconnected(),
+            todayLog: logs[todayIso],
+            gasUnitPriceTl: 10.25,
+            onUpdateSlot: (_, {time, enabled, targetTemp}) {},
+            onSaveSchedule: () {},
+            savedNotice: false,
+          ),
+        ),
+      ),
+    );
+    expect(find.text('1s 0d'), findsOneWidget);
+    expect(find.text('1s 30d'), findsNothing);
+    expect(find.text('--'), findsNWidgets(2));
+
+    // 3. ReportScreen: date picker, weekly/monthly tabs, gas rate editor, empty sensors
+    double updatedRate = 10.25;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ReportScreen(
+            lang: LangCode.tr,
+            roomTemp: 21.8,
+            targetTemp: 22.5,
+            boiler: boiler,
+            sensors: const BoilerHardwareSensors.disconnected(),
+            dailyLogs: logs,
+            gasUnitPriceTl: updatedRate,
+            onUpdateGasUnitPrice: (v) => updatedRate = v,
+            subTabOrder: const [
+              ReportSubTab.heatMap,
+              ReportSubTab.usageBill,
+              ReportSubTab.boilerSensors,
+            ],
+            palette: palette,
+          ),
+        ),
+      ),
+    );
+    expect(find.text('İncelenen Gün:'), findsOneWidget);
+    await tester.tap(find.text('Haftalık'));
+    await tester.pumpAndSettle();
+    expect(find.text('Haftalık Log Analizi'), findsOneWidget);
+    await tester.tap(find.text('Aylık'));
+    await tester.pumpAndSettle();
+    expect(find.text('Aylık Hafta Dağılımı'), findsOneWidget);
+
+    await tester.tap(find.text('💰 Tüketim ve Fatura'));
+    await tester.pumpAndSettle();
+    expect(find.text('Düzenle'), findsOneWidget);
+    await tester.tap(find.text('Düzenle'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '14.50');
+    await tester.tap(find.text('Kaydet'));
+    await tester.pumpAndSettle();
+    expect(updatedRate, 14.5);
+
+    await tester.tap(find.text('🔥 Kombi & Sensörler'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sensör Bağlı Değil'), findsOneWidget);
+    expect(find.text('--'), findsNWidgets(6));
+    expect(find.text('54.2°C'), findsNothing);
+
+    await tester.tap(find.text('🌡️ Sıcaklık Haritası'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Günlük'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.calendar_month_rounded));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+  });
+
+  testWidgets('WeatherScreen renders live city forecasts and error/retry state without hardcoded 17.7C', (tester) async {
+    final palette = VisualCustomizationState.defaults().resolvePalette();
+    final izmirReport = WeatherReport(
+      locationName: 'Yazlık · İzmir',
+      cityName: 'İzmir',
+      currentTempC: 24.6,
+      humidityPercent: 52,
+      windKmh: 16.4,
+      weatherCode: 0,
+      conditionTr: 'Güneşli',
+      conditionEn: 'Sunny',
+      icon: Icons.wb_sunny_outlined,
+      days: const [
+        DailyWeatherForecast(
+          dayTr: 'Bugün',
+          dayEn: 'Today',
+          dateLabel: '26 Kas',
+          conditionTr: 'Güneşli',
+          conditionEn: 'Sunny',
+          highTemp: 26,
+          lowTemp: 15,
+          rainChance: '%5',
+          icon: Icons.wb_sunny_outlined,
+          hourly: [],
+        ),
+      ],
+      fetchedAt: DateTime(2026, 11, 26, 12, 0),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: WeatherScreen(
+            lang: LangCode.tr,
+            locationName: 'Yazlık · İzmir',
+            palette: palette,
+            weatherReport: izmirReport,
+            onApplyEcoCompensation: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('24.6°C'), findsOneWidget);
+    expect(find.text('17.7°C'), findsNothing);
+
+    var retried = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: WeatherScreen(
+            lang: LangCode.tr,
+            locationName: 'Ofis · Ankara',
+            palette: palette,
+            weatherReport: null,
+            weatherError: 'Ankara canlı hava raporu alınamadı',
+            onRefreshWeather: () => retried = true,
+            onApplyEcoCompensation: () {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Ankara canlı hava raporu alınamadı'), findsOneWidget);
+    await tester.tap(find.text('Tekrar Dene'));
+    expect(retried, isTrue);
   });
 }

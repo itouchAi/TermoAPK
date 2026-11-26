@@ -91,6 +91,394 @@ class BoilerTelemetry {
   });
 }
 
+/// Real physical boiler / environmental sensor readings.
+/// All measurement fields remain null (displayed as empty / '--') when no
+/// physical hardware bus (ESP32 / OpenTherm) is connected and reporting data.
+class BoilerHardwareSensors {
+  final bool isConnected;
+  final double? supplyTempC;
+  final double? returnTempC;
+  final int? flamePercent;
+  final int? pumpRpm;
+  final double? waterPressureBar;
+  final double? ionizationUa;
+  final double? roomHumidityPercent;
+  final String protocolLabel;
+
+  const BoilerHardwareSensors({
+    required this.isConnected,
+    this.supplyTempC,
+    this.returnTempC,
+    this.flamePercent,
+    this.pumpRpm,
+    this.waterPressureBar,
+    this.ionizationUa,
+    this.roomHumidityPercent,
+    this.protocolLabel = '',
+  });
+
+  const BoilerHardwareSensors.disconnected()
+      : isConnected = false,
+        supplyTempC = null,
+        returnTempC = null,
+        flamePercent = null,
+        pumpRpm = null,
+        waterPressureBar = null,
+        ionizationUa = null,
+        roomHumidityPercent = null,
+        protocolLabel = '';
+}
+
+class ThermalHourBucket {
+  final int blockIndex; // 0..5 => 00:00, 04:00, 08:00, 12:00, 16:00, 20:00
+  final int sampleCount;
+  final double tempSum;
+  final int activeBurnSeconds;
+  final int standbySeconds;
+
+  const ThermalHourBucket({
+    required this.blockIndex,
+    this.sampleCount = 0,
+    this.tempSum = 0.0,
+    this.activeBurnSeconds = 0,
+    this.standbySeconds = 0,
+  });
+
+  bool get hasData => sampleCount > 0 || activeBurnSeconds > 0 || standbySeconds > 0;
+  bool get hadActiveBurn => activeBurnSeconds > 0;
+  double? get avgTemp => sampleCount > 0 ? tempSum / sampleCount : null;
+
+  ThermalHourBucket recordTick({
+    required double roomTemp,
+    required bool isHeating,
+    int seconds = 1,
+  }) {
+    final safeSec = seconds < 1 ? 1 : seconds;
+    return ThermalHourBucket(
+      blockIndex: blockIndex,
+      sampleCount: sampleCount + 1,
+      tempSum: tempSum + roomTemp,
+      activeBurnSeconds: activeBurnSeconds + (isHeating ? safeSec : 0),
+      standbySeconds: standbySeconds + (isHeating ? 0 : safeSec),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'b': blockIndex,
+        'n': sampleCount,
+        't': double.parse(tempSum.toStringAsFixed(2)),
+        'a': activeBurnSeconds,
+        's': standbySeconds,
+      };
+
+  factory ThermalHourBucket.fromJson(Map<String, dynamic> map) {
+    return ThermalHourBucket(
+      blockIndex: ((map['b'] as num?)?.toInt() ?? 0).clamp(0, 5),
+      sampleCount: (map['n'] as num?)?.toInt() ?? 0,
+      tempSum: (map['t'] as num?)?.toDouble() ?? 0.0,
+      activeBurnSeconds: (map['a'] as num?)?.toInt() ?? 0,
+      standbySeconds: (map['s'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class DailyThermalLog {
+  static const double burnerFullLoadM3PerHour = 2.55; // 24 kW condensing boiler max flow
+  static const List<String> blockLabels = ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'];
+
+  final String dateIso; // YYYY-MM-DD
+  final int activeBurnSeconds;
+  final int standbySeconds;
+  final double weightedFlameSeconds;
+  final double tempSampleSum;
+  final int tempSampleCount;
+  final List<ThermalHourBucket> buckets;
+
+  const DailyThermalLog({
+    required this.dateIso,
+    this.activeBurnSeconds = 0,
+    this.standbySeconds = 0,
+    this.weightedFlameSeconds = 0.0,
+    this.tempSampleSum = 0.0,
+    this.tempSampleCount = 0,
+    required this.buckets,
+  });
+
+  factory DailyThermalLog.empty(String dateIso) => DailyThermalLog(
+        dateIso: dateIso,
+        buckets: List<ThermalHourBucket>.generate(
+          6,
+          (i) => ThermalHourBucket(blockIndex: i),
+          growable: false,
+        ),
+      );
+
+  bool get hasData => activeBurnSeconds > 0 || standbySeconds > 0 || tempSampleCount > 0;
+  double? get avgTemp => tempSampleCount > 0 ? tempSampleSum / tempSampleCount : null;
+
+  /// Modulated gas consumption in m³ from logged active burner seconds & flame ratio.
+  double get gasM3 => (weightedFlameSeconds / 3600.0) * burnerFullLoadM3PerHour;
+
+  /// Estimated m³ saved vs non-modulating 100% on/off operation during the same active runtime.
+  double get modulatedSavingsM3 {
+    final fullLoadM3 = (activeBurnSeconds / 3600.0) * burnerFullLoadM3PerHour;
+    final diff = fullLoadM3 - gasM3;
+    return diff > 0 ? diff : 0.0;
+  }
+
+  DailyThermalLog recordTick({
+    required int hour,
+    required double roomTemp,
+    required bool isHeating,
+    required int flamePercent,
+    int seconds = 1,
+  }) {
+    final safeSec = seconds < 1 ? 1 : seconds;
+    final blockIdx = (hour ~/ 4).clamp(0, 5);
+    final normalizedBuckets = buckets.length == 6
+        ? buckets
+        : List<ThermalHourBucket>.generate(
+            6,
+            (i) => i < buckets.length ? buckets[i] : ThermalHourBucket(blockIndex: i),
+          );
+    final updatedBuckets = <ThermalHourBucket>[
+      for (int i = 0; i < 6; i++)
+        i == blockIdx
+            ? normalizedBuckets[i].recordTick(
+                roomTemp: roomTemp,
+                isHeating: isHeating,
+                seconds: safeSec,
+              )
+            : normalizedBuckets[i],
+    ];
+    final flameFrac = isHeating ? (flamePercent.clamp(0, 100) / 100.0) : 0.0;
+    return DailyThermalLog(
+      dateIso: dateIso,
+      activeBurnSeconds: activeBurnSeconds + (isHeating ? safeSec : 0),
+      standbySeconds: standbySeconds + (isHeating ? 0 : safeSec),
+      weightedFlameSeconds: weightedFlameSeconds + (flameFrac * safeSec),
+      tempSampleSum: tempSampleSum + roomTemp,
+      tempSampleCount: tempSampleCount + 1,
+      buckets: updatedBuckets,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'd': dateIso,
+        'a': activeBurnSeconds,
+        's': standbySeconds,
+        'w': double.parse(weightedFlameSeconds.toStringAsFixed(3)),
+        'ts': double.parse(tempSampleSum.toStringAsFixed(2)),
+        'tc': tempSampleCount,
+        'b': buckets.map((e) => e.toJson()).toList(),
+      };
+
+  factory DailyThermalLog.fromJson(Map<String, dynamic> map) {
+    final dateIso = (map['d'] as String?) ?? '';
+    final byIdx = <int, ThermalHourBucket>{};
+    final rawBuckets = map['b'];
+    if (rawBuckets is List) {
+      for (final item in rawBuckets) {
+        if (item is Map) {
+          final parsed = ThermalHourBucket.fromJson(Map<String, dynamic>.from(item));
+          byIdx[parsed.blockIndex] = parsed;
+        }
+      }
+    }
+    return DailyThermalLog(
+      dateIso: dateIso,
+      activeBurnSeconds: (map['a'] as num?)?.toInt() ?? 0,
+      standbySeconds: (map['s'] as num?)?.toInt() ?? 0,
+      weightedFlameSeconds: (map['w'] as num?)?.toDouble() ?? 0.0,
+      tempSampleSum: (map['ts'] as num?)?.toDouble() ?? 0.0,
+      tempSampleCount: (map['tc'] as num?)?.toInt() ?? 0,
+      buckets: List<ThermalHourBucket>.generate(
+        6,
+        (i) => byIdx[i] ?? ThermalHourBucket(blockIndex: i),
+        growable: false,
+      ),
+    );
+  }
+}
+
+class ThermalPeriodSummary {
+  final int periodIndex; // 0=daily, 1=weekly, 2=monthly
+  final DateTime anchorDate;
+  final int activeBurnSeconds;
+  final int standbySeconds;
+  final double gasM3;
+  final double costTl;
+  final double savedTl;
+  final int daysWithData;
+  final int totalDaysInPeriod;
+  final double? avgTemp;
+  final DailyThermalLog? singleDayLog;
+  final List<DailyThermalLog> dayBreakdown;
+
+  const ThermalPeriodSummary({
+    required this.periodIndex,
+    required this.anchorDate,
+    required this.activeBurnSeconds,
+    required this.standbySeconds,
+    required this.gasM3,
+    required this.costTl,
+    required this.savedTl,
+    required this.daysWithData,
+    required this.totalDaysInPeriod,
+    required this.avgTemp,
+    required this.singleDayLog,
+    required this.dayBreakdown,
+  });
+
+  bool get hasAnyData =>
+      activeBurnSeconds > 0 || standbySeconds > 0 || (singleDayLog?.hasData ?? false) || daysWithData > 0;
+}
+
+abstract final class ThermalLogAggregator {
+  static String formatDateIso(DateTime dt) {
+    final y = dt.year.toString().padLeft(4, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    final d = dt.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
+  }
+
+  static String formatDuration(int totalSeconds, LangCode lang) {
+    final tr = lang == LangCode.tr;
+    if (totalSeconds <= 0) return tr ? '0 dk' : '0m';
+    if (totalSeconds < 60) return tr ? '$totalSeconds sn' : '${totalSeconds}s';
+    final totalMin = totalSeconds ~/ 60;
+    final hours = totalMin ~/ 60;
+    final remMin = totalMin % 60;
+    if (hours <= 0) return tr ? '$remMin dk' : '${remMin}m';
+    return tr ? '${hours}s ${remMin}d' : '${hours}h ${remMin}m';
+  }
+
+  static Map<String, DailyThermalLog> recordSample({
+    required Map<String, DailyThermalLog> logs,
+    required DateTime timestamp,
+    required double roomTemp,
+    required BoilerTelemetry boiler,
+    int seconds = 1,
+    int maxDays = 365,
+  }) {
+    final key = formatDateIso(timestamp);
+    final current = logs[key] ?? DailyThermalLog.empty(key);
+    final updated = current.recordTick(
+      hour: timestamp.hour,
+      roomTemp: roomTemp,
+      isHeating: boiler.isHeating,
+      flamePercent: boiler.flamePercent,
+      seconds: seconds,
+    );
+    final next = Map<String, DailyThermalLog>.from(logs);
+    next[key] = updated;
+    if (next.length > maxDays) {
+      final sortedKeys = next.keys.toList()..sort();
+      while (next.length > maxDays && sortedKeys.isNotEmpty) {
+        next.remove(sortedKeys.removeAt(0));
+      }
+    }
+    return next;
+  }
+
+  static Map<String, DailyThermalLog> decodeLogs(dynamic raw) {
+    if (raw is! Map) return const {};
+    final out = <String, DailyThermalLog>{};
+    raw.forEach((key, value) {
+      if (key is String && value is Map) {
+        final parsed = DailyThermalLog.fromJson(Map<String, dynamic>.from(value));
+        final resolvedKey = parsed.dateIso.isNotEmpty ? parsed.dateIso : key;
+        out[resolvedKey] = DailyThermalLog(
+          dateIso: resolvedKey,
+          activeBurnSeconds: parsed.activeBurnSeconds,
+          standbySeconds: parsed.standbySeconds,
+          weightedFlameSeconds: parsed.weightedFlameSeconds,
+          tempSampleSum: parsed.tempSampleSum,
+          tempSampleCount: parsed.tempSampleCount,
+          buckets: parsed.buckets,
+        );
+      }
+    });
+    return out;
+  }
+
+  static Map<String, dynamic> encodeLogs(Map<String, DailyThermalLog> logs) {
+    return {
+      for (final entry in logs.entries) entry.key: entry.value.toJson(),
+    };
+  }
+
+  static ThermalPeriodSummary summarize({
+    required Map<String, DailyThermalLog> logs,
+    required DateTime anchorDate,
+    required int periodIndex,
+    required double gasUnitPriceTl,
+  }) {
+    final cleanAnchor = DateTime(anchorDate.year, anchorDate.month, anchorDate.day);
+    final safeRate = gasUnitPriceTl.isFinite && gasUnitPriceTl > 0 ? gasUnitPriceTl : 10.25;
+
+    final List<DateTime> dates;
+    if (periodIndex == 1) {
+      dates = List<DateTime>.generate(
+        7,
+        (i) => cleanAnchor.subtract(Duration(days: 6 - i)),
+      );
+    } else if (periodIndex == 2) {
+      final daysInMonth = DateTime(cleanAnchor.year, cleanAnchor.month + 1, 0).day;
+      dates = List<DateTime>.generate(
+        daysInMonth,
+        (i) => DateTime(cleanAnchor.year, cleanAnchor.month, i + 1),
+      );
+    } else {
+      dates = [cleanAnchor];
+    }
+
+    int activeSec = 0;
+    int standbySec = 0;
+    double gasM3 = 0.0;
+    double savedM3 = 0.0;
+    double tempSum = 0.0;
+    int tempCount = 0;
+    int daysWithData = 0;
+    final breakdown = <DailyThermalLog>[];
+
+    for (final d in dates) {
+      final iso = formatDateIso(d);
+      final dayLog = logs[iso] ?? DailyThermalLog.empty(iso);
+      breakdown.add(dayLog);
+      if (dayLog.hasData) {
+        daysWithData++;
+      }
+      activeSec += dayLog.activeBurnSeconds;
+      standbySec += dayLog.standbySeconds;
+      gasM3 += dayLog.gasM3;
+      savedM3 += dayLog.modulatedSavingsM3;
+      tempSum += dayLog.tempSampleSum;
+      tempCount += dayLog.tempSampleCount;
+    }
+
+    final costTl = gasM3 * safeRate;
+    final savedTl = savedM3 * safeRate;
+    final single = periodIndex == 0 ? breakdown.first : null;
+
+    return ThermalPeriodSummary(
+      periodIndex: periodIndex,
+      anchorDate: cleanAnchor,
+      activeBurnSeconds: activeSec,
+      standbySeconds: standbySec,
+      gasM3: gasM3,
+      costTl: costTl,
+      savedTl: savedTl,
+      daysWithData: daysWithData,
+      totalDaysInPeriod: dates.length,
+      avgTemp: tempCount > 0 ? tempSum / tempCount : null,
+      singleDayLog: single,
+      dayBreakdown: breakdown,
+    );
+  }
+}
+
+
 class ScheduleSlot {
   final String id;
   final String labelTr;
