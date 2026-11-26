@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import '../models/thermostat_state.dart';
+import 'dial_ring_effects.dart';
 import 'tactile_button.dart';
 
 class RotaryDial extends StatefulWidget {
@@ -15,6 +16,8 @@ class RotaryDial extends StatefulWidget {
   final ThemePaletteSpec palette;
   final double sizePx;
   final bool compact;
+  final DialRingStyle dialRingStyle;
+  final PerformanceMode performanceMode;
 
   const RotaryDial({
     super.key,
@@ -27,6 +30,8 @@ class RotaryDial extends StatefulWidget {
     required this.palette,
     this.sizePx = 232.0,
     this.compact = false,
+    this.dialRingStyle = DialRingStyle.classic,
+    this.performanceMode = PerformanceMode.ultra60fps,
   });
 
   /// Exact outermost radius of the 45 perimeter tick marks.
@@ -36,12 +41,12 @@ class RotaryDial extends StatefulWidget {
   State<RotaryDial> createState() => _RotaryDialState();
 }
 
-class _RotaryDialState extends State<RotaryDial>
-    with SingleTickerProviderStateMixin {
+class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
   static const double _hoverScale = 1.018;
   static const double _pressScale = 1.034;
 
   late final AnimationController _tactileCtrl;
+  late final AnimationController _ringAnimCtrl;
   final GlobalKey _dialCircleKey = GlobalKey();
   final Object _dialFocusToken = Object();
 
@@ -54,11 +59,46 @@ class _RotaryDialState extends State<RotaryDial>
   void initState() {
     super.initState();
     _tactileCtrl = AnimationController.unbounded(vsync: this, value: 1.0);
+    _ringAnimCtrl = AnimationController(
+      vsync: this,
+      duration: _durationForPerf(widget.performanceMode),
+    );
+    _syncRingAnimation();
+  }
+
+  Duration _durationForPerf(PerformanceMode mode) => mode == PerformanceMode.ecoBattery
+      ? const Duration(seconds: 10)
+      : const Duration(seconds: 6);
+
+  void _syncRingAnimation() {
+    if (widget.dialRingStyle == DialRingStyle.classic) {
+      if (_ringAnimCtrl.isAnimating) {
+        _ringAnimCtrl.stop();
+      }
+      return;
+    }
+    final wanted = _durationForPerf(widget.performanceMode);
+    if (_ringAnimCtrl.duration != wanted) {
+      _ringAnimCtrl.duration = wanted;
+    }
+    if (!_ringAnimCtrl.isAnimating) {
+      _ringAnimCtrl.repeat();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant RotaryDial oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dialRingStyle != widget.dialRingStyle ||
+        oldWidget.performanceMode != widget.performanceMode) {
+      _syncRingAnimation();
+    }
   }
 
   @override
   void dispose() {
     TactileMotionScope.endFocus(_dialFocusToken);
+    _ringAnimCtrl.dispose();
     _tactileCtrl.dispose();
     super.dispose();
   }
@@ -346,6 +386,10 @@ class _RotaryDialState extends State<RotaryDial>
       ),
     );
 
+    final flameIntensity = widget.boiler.isHeating
+        ? (widget.boiler.flamePercent / 100.0).clamp(0.25, 1.0)
+        : 0.25;
+
     final dialWithTicks = SizedBox(
       key: _dialCircleKey,
       width: widget.sizePx,
@@ -354,6 +398,18 @@ class _RotaryDialState extends State<RotaryDial>
         clipBehavior: Clip.none,
         alignment: Alignment.center,
         children: [
+          // Dynamic animated dial ring theme (60 FPS RepaintBoundary)
+          if (widget.dialRingStyle != DialRingStyle.classic)
+            DialRingEffectLayer(
+              style: widget.dialRingStyle,
+              animation: _ringAnimCtrl,
+              sizePx: widget.sizePx,
+              activeAngleDeg: activeAngleDeg,
+              accentColor: widget.accentColor,
+              isLight: isLight,
+              flameIntensity: flameIntensity,
+            ),
+
           // 45 Segmented radial perimeter ticks
           CustomPaint(
             size: Size(widget.sizePx, widget.sizePx),

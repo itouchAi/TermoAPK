@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:termostat_flow/models/thermostat_state.dart';
+import 'package:termostat_flow/screens/theme_effects_sheet.dart';
 import 'package:termostat_flow/services/ai_call_service.dart';
 import 'package:termostat_flow/services/ambient_audio_service.dart';
 import 'package:termostat_flow/services/audio_tempo_analyzer.dart';
@@ -15,6 +16,7 @@ import 'package:termostat_flow/services/schedule_engine.dart';
 import 'package:termostat_flow/services/vault_crypto_service.dart';
 import 'package:termostat_flow/services/voice_gender_classifier.dart';
 import 'package:termostat_flow/services/voice_speech_service.dart';
+import 'package:termostat_flow/widgets/dial_ring_effects.dart';
 import 'package:termostat_flow/widgets/missed_call_alert.dart';
 import 'package:termostat_flow/widgets/rotary_dial.dart';
 import 'package:termostat_flow/widgets/smart_display_overlay.dart';
@@ -1677,5 +1679,110 @@ void main() {
     expect(find.byType(BackdropFilter), findsNothing);
     await offTouch.up();
     await tester.pumpAndSettle();
+  });
+
+  test('DialRingStyle exposes 5 dynamic styles and round-trips through VisualCustomizationState', () {
+    expect(DialRingStyleInfo.dynamicFive.length, 5);
+    expect(VisualCustomizationState.defaults().dialRingStyle, DialRingStyle.classic);
+
+    for (final style in DialRingStyle.values) {
+      final state = VisualCustomizationState.defaults().copyWith(dialRingStyle: style);
+      final restored = VisualCustomizationState.fromJson(state.toJson());
+      expect(restored.dialRingStyle, style);
+    }
+
+    final unknownFallback = VisualCustomizationState.fromJson({
+      ...VisualCustomizationState.defaults().toJson(),
+      'dialRingStyle': 'non_existent_ring_theme',
+    });
+    expect(unknownFallback.dialRingStyle, DialRingStyle.classic);
+  });
+
+  testWidgets('RotaryDial renders all 5 dynamic ring styles smoothly across dark/light themes', (tester) async {
+    final boiler = ThermostatMath.computeBoilerTelemetry(20.0, 24.0);
+    final darkPalette = VisualCustomizationState.defaults().resolvePalette();
+    final lightPalette = VisualCustomizationState.defaults()
+        .copyWith(theme: AppThemeMode.lightDay)
+        .resolvePalette();
+
+    for (final palette in [darkPalette, lightPalette]) {
+      for (final style in DialRingStyle.values) {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Center(
+                child: RotaryDial(
+                  targetTemp: 24.0,
+                  onChangeTarget: (_) {},
+                  modeName: 'KONFOR MODU',
+                  accentColor: const Color(0xFFFF7A24),
+                  boiler: boiler,
+                  lang: LangCode.tr,
+                  palette: palette,
+                  dialRingStyle: style,
+                  performanceMode: style == DialRingStyle.thermalPulse
+                      ? PerformanceMode.ecoBattery
+                      : PerformanceMode.ultra60fps,
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 120));
+        expect(find.text('24.0°'), findsOneWidget);
+        if (style != DialRingStyle.classic) {
+          expect(find.byType(DialRingEffectLayer), findsOneWidget);
+        } else {
+          expect(find.byType(DialRingEffectLayer), findsNothing);
+        }
+      }
+    }
+  });
+
+  testWidgets('ThemeEffectsSheet shows live previews for all 5 dynamic dial ring styles and updates state on tap', (tester) async {
+    VisualCustomizationState latestVisual = VisualCustomizationState.defaults();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () {
+                showThemeEffectsSheet(
+                  context: context,
+                  lang: LangCode.tr,
+                  accentColor: const Color(0xFFFF7A24),
+                  hapticEnabled: false,
+                  initialVisual: latestVisual,
+                  onUpdateVisual: (v) => latestVisual = v,
+                );
+              },
+              child: const Text('Tema Aç'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Tema Aç'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+
+    final listScroll = find.byType(Scrollable).first;
+    for (final info in DialRingStyleInfo.dynamicFive) {
+      await tester.scrollUntilVisible(
+        find.text(info.titleTr),
+        200.0,
+        scrollable: listScroll,
+      );
+      expect(find.text(info.titleTr), findsOneWidget);
+      expect(find.byType(DialRingPreviewThumb), findsWidgets);
+    }
+
+    await tester.ensureVisible(find.text('Holografik Prizma'));
+    await tester.pump();
+    await tester.tap(find.text('Holografik Prizma'));
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(latestVisual.dialRingStyle, DialRingStyle.holoPrism);
   });
 }

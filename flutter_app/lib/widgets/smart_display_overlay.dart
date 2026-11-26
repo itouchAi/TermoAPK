@@ -25,6 +25,8 @@ class SmartDisplayOverlay extends StatefulWidget {
   final ThemePaletteSpec palette;
   final LangCode lang;
   final String paletteTag;
+  final DialRingStyle dialRingStyle;
+  final PerformanceMode performanceMode;
   final bool forcedAod;
   final VoidCallback? onWakeFromAutoAod;
   final ValueChanged<double> onChangeTargetTemp;
@@ -46,6 +48,8 @@ class SmartDisplayOverlay extends StatefulWidget {
     required this.palette,
     required this.lang,
     required this.paletteTag,
+    this.dialRingStyle = DialRingStyle.classic,
+    this.performanceMode = PerformanceMode.ultra60fps,
     this.forcedAod = false,
     this.onWakeFromAutoAod,
     required this.onChangeTargetTemp,
@@ -1236,6 +1240,8 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
                       accentColor: widget.accentColor,
                       palette: widget.palette,
                       paletteTag: widget.paletteTag,
+                      dialRingStyle: widget.dialRingStyle,
+                      performanceMode: widget.performanceMode,
                       countdownSeconds: _thermostatCountdown,
                       lang: widget.lang,
                       onInteract: _resetThermostatCountdown,
@@ -2267,6 +2273,8 @@ class _EmbeddedThermostatModal extends StatelessWidget {
   final Color accentColor;
   final ThemePaletteSpec palette;
   final String paletteTag;
+  final DialRingStyle dialRingStyle;
+  final PerformanceMode performanceMode;
   final int countdownSeconds;
   final LangCode lang;
   final VoidCallback onInteract;
@@ -2281,6 +2289,8 @@ class _EmbeddedThermostatModal extends StatelessWidget {
     required this.accentColor,
     required this.palette,
     required this.paletteTag,
+    required this.dialRingStyle,
+    required this.performanceMode,
     required this.countdownSeconds,
     required this.lang,
     required this.onInteract,
@@ -2490,6 +2500,8 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                     palette: palette,
                     sizePx: dialSize,
                     compact: true,
+                    dialRingStyle: dialRingStyle,
+                    performanceMode: performanceMode,
                   ),
                   const SizedBox(height: 8),
 

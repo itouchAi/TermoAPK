@@ -2081,6 +2081,15 @@ enum AppThemeMode {
   tactileDeck,
 }
 
+enum DialRingStyle {
+  classic,
+  liquidPlasma,
+  chronoTurbine,
+  thermalPulse,
+  holoPrism,
+  magneticFlux,
+}
+
 enum ObsidianPalette {
   pastelLavender,
   dustyLilac,
@@ -2145,6 +2154,7 @@ class ThemePaletteSpec {
 
 class VisualCustomizationState {
   final AppThemeMode theme;
+  final DialRingStyle dialRingStyle;
   final ObsidianPalette obsidianPalette;
   final PerformanceMode performanceMode;
   final WeatherEffectPreview weatherPreview;
@@ -2155,6 +2165,7 @@ class VisualCustomizationState {
 
   const VisualCustomizationState({
     required this.theme,
+    this.dialRingStyle = DialRingStyle.classic,
     required this.obsidianPalette,
     required this.performanceMode,
     required this.weatherPreview,
@@ -2184,6 +2195,7 @@ class VisualCustomizationState {
 
   factory VisualCustomizationState.defaults() => const VisualCustomizationState(
         theme: AppThemeMode.liquidGlass,
+        dialRingStyle: DialRingStyle.classic,
         obsidianPalette: ObsidianPalette.pastelLavender,
         performanceMode: PerformanceMode.ultra60fps,
         weatherPreview: WeatherEffectPreview.live,
@@ -2337,6 +2349,7 @@ class VisualCustomizationState {
 
   VisualCustomizationState copyWith({
     AppThemeMode? theme,
+    DialRingStyle? dialRingStyle,
     ObsidianPalette? obsidianPalette,
     PerformanceMode? performanceMode,
     WeatherEffectPreview? weatherPreview,
@@ -2347,6 +2360,7 @@ class VisualCustomizationState {
   }) {
     return VisualCustomizationState(
       theme: theme ?? this.theme,
+      dialRingStyle: dialRingStyle ?? this.dialRingStyle,
       obsidianPalette: obsidianPalette ?? this.obsidianPalette,
       performanceMode: performanceMode ?? this.performanceMode,
       weatherPreview: weatherPreview ?? this.weatherPreview,
@@ -2360,6 +2374,7 @@ class VisualCustomizationState {
 
   Map<String, dynamic> toJson() => {
         'theme': theme.name,
+        'dialRingStyle': dialRingStyle.name,
         'obsidianPalette': obsidianPalette.name,
         'performanceMode': performanceMode.name,
         'weatherPreview': weatherPreview.name,
@@ -2397,6 +2412,13 @@ class VisualCustomizationState {
       return d.theme;
     }
 
+    DialRingStyle parseDialRingStyle(String? n) {
+      for (final v in DialRingStyle.values) {
+        if (v.name == n) return v;
+      }
+      return d.dialRingStyle;
+    }
+
     ObsidianPalette parseObs(String? n) {
       for (final v in ObsidianPalette.values) {
         if (v.name == n) return v;
@@ -2420,6 +2442,7 @@ class VisualCustomizationState {
 
     return VisualCustomizationState(
       theme: parseTheme(map['theme'] as String?),
+      dialRingStyle: parseDialRingStyle(map['dialRingStyle'] as String?),
       obsidianPalette: parseObs(map['obsidianPalette'] as String?),
       performanceMode: parsePerf(map['performanceMode'] as String?),
       weatherPreview: parseWeather(map['weatherPreview'] as String?),

@@ -12,6 +12,8 @@ class ThermostatScreen extends StatelessWidget {
   final BoilerTelemetry boiler;
   final LangCode lang;
   final ThemePaletteSpec palette;
+  final DialRingStyle dialRingStyle;
+  final PerformanceMode performanceMode;
   final ValueChanged<double> onChangeTarget;
   final ValueChanged<ThermostatPreset> onSelectPreset;
 
@@ -24,6 +26,8 @@ class ThermostatScreen extends StatelessWidget {
     required this.boiler,
     required this.lang,
     required this.palette,
+    this.dialRingStyle = DialRingStyle.classic,
+    this.performanceMode = PerformanceMode.ultra60fps,
     required this.onChangeTarget,
     required this.onSelectPreset,
   });
@@ -179,6 +183,8 @@ class ThermostatScreen extends StatelessWidget {
                               palette: palette,
                               sizePx: dialSize,
                               compact: compactLandscape,
+                              dialRingStyle: dialRingStyle,
+                              performanceMode: performanceMode,
                             ),
                           ),
                         ),
@@ -298,6 +304,8 @@ class ThermostatScreen extends StatelessWidget {
                         palette: palette,
                         sizePx: dialSize,
                         compact: constraints.maxHeight < 520,
+                        dialRingStyle: dialRingStyle,
+                        performanceMode: performanceMode,
                       ),
 
                       Column(

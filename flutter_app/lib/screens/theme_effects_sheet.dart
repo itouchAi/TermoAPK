@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/thermostat_state.dart';
+import '../widgets/dial_ring_effects.dart';
+import '../widgets/rotary_dial.dart';
 import '../widgets/tactile_button.dart';
 
 Future<void> showThemeEffectsSheet({
@@ -44,18 +46,41 @@ class _ThemeEffectsModal extends StatefulWidget {
   State<_ThemeEffectsModal> createState() => _ThemeEffectsModalState();
 }
 
-class _ThemeEffectsModalState extends State<_ThemeEffectsModal> {
+class _ThemeEffectsModalState extends State<_ThemeEffectsModal>
+    with SingleTickerProviderStateMixin {
   late VisualCustomizationState _visual;
+  late final AnimationController _dialPreviewCtrl;
+  double _previewTemp = 23.0;
 
   @override
   void initState() {
     super.initState();
     _visual = widget.initialVisual;
+    _dialPreviewCtrl = AnimationController(
+      vsync: this,
+      duration: _previewDuration(_visual.performanceMode),
+    )..repeat();
+  }
+
+  Duration _previewDuration(PerformanceMode mode) =>
+      mode == PerformanceMode.ecoBattery
+          ? const Duration(seconds: 10)
+          : const Duration(seconds: 6);
+
+  @override
+  void dispose() {
+    _dialPreviewCtrl.dispose();
+    super.dispose();
   }
 
   void _apply(VisualCustomizationState next) {
     if (widget.hapticEnabled) HapticFeedback.selectionClick();
     TactileMotionScope.globalEnabled.value = next.buttonTactileFeedback;
+    final wantedDur = _previewDuration(next.performanceMode);
+    if (_dialPreviewCtrl.duration != wantedDur) {
+      _dialPreviewCtrl.duration = wantedDur;
+      _dialPreviewCtrl.repeat();
+    }
     setState(() => _visual = next);
     widget.onUpdateVisual(next);
   }
@@ -325,6 +350,162 @@ class _ThemeEffectsModalState extends State<_ThemeEffectsModal> {
                           ),
                         ),
                     ],
+
+                    const SizedBox(height: 14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            tr
+                                ? 'TERMOSTAT ÇEMBERİ TEMALARI (CANLI ÖNİZLEME)'
+                                : 'DIAL RING THEMES (LIVE PREVIEW)',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.0,
+                              color: textSub,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        TactilePress(
+                          child: GestureDetector(
+                            onTap: () => _apply(
+                              _visual.copyWith(
+                                dialRingStyle: DialRingStyle.classic,
+                              ),
+                            ),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 9,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _visual.dialRingStyle ==
+                                        DialRingStyle.classic
+                                    ? widget.accentColor.withValues(alpha: 0.20)
+                                    : palette.cardBg,
+                                borderRadius: BorderRadius.circular(9),
+                                border: Border.all(
+                                  color: _visual.dialRingStyle ==
+                                          DialRingStyle.classic
+                                      ? widget.accentColor
+                                      : palette.cardBorder,
+                                ),
+                              ),
+                              child: Text(
+                                tr ? 'Klasik' : 'Classic',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: _visual.dialRingStyle ==
+                                          DialRingStyle.classic
+                                      ? widget.accentColor
+                                      : textSub,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Interactive Large Stage Preview of the Active Dial Ring Theme
+                    () {
+                      final activeAccent =
+                          palette.themeOverrideAccent?.toColor() ??
+                              widget.accentColor;
+                      final activeMeta =
+                          DialRingStyleInfo.findDynamic(_visual.dialRingStyle);
+                      final stageBoiler =
+                          ThermostatMath.computeBoilerTelemetry(
+                        20.2,
+                        _previewTemp,
+                      );
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                        decoration: BoxDecoration(
+                          color: palette.cardBg,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: activeMeta != null
+                                ? activeMeta.swatchColor.withValues(alpha: 0.45)
+                                : palette.cardBorder,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    activeMeta != null
+                                        ? (tr
+                                            ? activeMeta.titleTr
+                                            : activeMeta.titleEn)
+                                        : (tr
+                                            ? 'Klasik Kadran (Standart)'
+                                            : 'Classic Dial (Standard)'),
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: textMain,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Text(
+                                  tr
+                                      ? 'Sürükle veya tekerlekle dene'
+                                      : 'Drag or scroll to test',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: textSub,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Center(
+                              child: RotaryDial(
+                                targetTemp: _previewTemp,
+                                onChangeTarget: (t) =>
+                                    setState(() => _previewTemp = t),
+                                modeName: tr ? 'CANLI ÖNİZLEME' : 'LIVE PREVIEW',
+                                accentColor:
+                                    activeMeta?.swatchColor ?? activeAccent,
+                                boiler: stageBoiler,
+                                lang: widget.lang,
+                                palette: palette,
+                                sizePx: isLandscape ? 164.0 : 154.0,
+                                compact: true,
+                                dialRingStyle: _visual.dialRingStyle,
+                                performanceMode: _visual.performanceMode,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    }(),
+
+                    // 5 Live Animated Dynamic Dial Theme Cards
+                    for (final ringInfo in DialRingStyleInfo.dynamicFive)
+                      _DialRingStyleCard(
+                        info: ringInfo,
+                        lang: widget.lang,
+                        selected: _visual.dialRingStyle == ringInfo.style,
+                        palette: palette,
+                        animation: _dialPreviewCtrl,
+                        previewTemp: _previewTemp,
+                        onTap: () => _apply(
+                          _visual.copyWith(dialRingStyle: ringInfo.style),
+                        ),
+                      ),
 
                     const SizedBox(height: 10),
                     Text(
@@ -725,6 +906,123 @@ class _PerfCard extends StatelessWidget {
           ],
         ),
       ),
+      ),
+    );
+  }
+}
+
+class _DialRingStyleCard extends StatelessWidget {
+  final DialRingStyleInfo info;
+  final LangCode lang;
+  final bool selected;
+  final ThemePaletteSpec palette;
+  final Animation<double> animation;
+  final double previewTemp;
+  final VoidCallback onTap;
+
+  const _DialRingStyleCard({
+    required this.info,
+    required this.lang,
+    required this.selected,
+    required this.palette,
+    required this.animation,
+    required this.previewTemp,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tr = lang == LangCode.tr;
+    return TactilePress.card(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          margin: const EdgeInsets.only(bottom: 9),
+          padding: const EdgeInsets.all(11),
+          decoration: BoxDecoration(
+            color: selected
+                ? info.swatchColor.withValues(alpha: 0.14)
+                : palette.cardBg,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: selected ? info.swatchColor : palette.cardBorder,
+              width: selected ? 1.5 : 1.0,
+            ),
+          ),
+          child: Row(
+            children: [
+              DialRingPreviewThumb(
+                style: info.style,
+                animation: animation,
+                sizePx: 66.0,
+                accentColor: info.swatchColor,
+                palette: palette,
+                targetTemp: previewTemp,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            tr ? info.titleTr : info.titleEn,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: palette.textPrimary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: info.swatchColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            tr ? info.badgeTr : info.badgeEn,
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w700,
+                              color: info.swatchColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      tr ? info.descriptionTr : info.descriptionEn,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: palette.textSecondary,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                selected
+                    ? Icons.check_circle_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                color: selected ? info.swatchColor : palette.textSecondary,
+                size: 20,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

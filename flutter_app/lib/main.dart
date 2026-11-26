@@ -1097,6 +1097,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             boiler: boiler,
             lang: _lang,
             palette: palette,
+            dialRingStyle: _visual.dialRingStyle,
+            performanceMode: _visual.performanceMode,
             onChangeTarget: _changeTarget,
             onSelectPreset: _selectPreset,
           ),
@@ -1626,6 +1628,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                    palette: palette,
                    lang: _lang,
                    paletteTag: _visual.theme.name,
+                   dialRingStyle: _visual.dialRingStyle,
+                   performanceMode: _visual.performanceMode,
                    forcedAod: _ambientForcedAod,
                    onWakeFromAutoAod: () {
                      setState(() {
