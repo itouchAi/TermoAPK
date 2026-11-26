@@ -2083,10 +2083,10 @@ enum AppThemeMode {
 
 enum DialRingStyle {
   classic,
-  liquidPlasma,
-  chronoTurbine,
-  thermalPulse,
-  holoPrism,
+  boilerFlame,
+  autoTacho,
+  thermoMercury,
+  chronoRadar,
   magneticFlux,
 }
 

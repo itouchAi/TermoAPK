@@ -1681,7 +1681,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  test('DialRingStyle exposes 5 dynamic styles and round-trips through VisualCustomizationState', () {
+  test('DialRingStyle exposes 5 full-dial dynamic styles, resolves dynamic accents, and round-trips', () {
     expect(DialRingStyleInfo.dynamicFive.length, 5);
     expect(VisualCustomizationState.defaults().dialRingStyle, DialRingStyle.classic);
 
@@ -1696,50 +1696,82 @@ void main() {
       'dialRingStyle': 'non_existent_ring_theme',
     });
     expect(unknownFallback.dialRingStyle, DialRingStyle.classic);
+
+    // Boiler flame accent: standby pilot is cool sky-blue; roaring flame warms to amber-orange
+    final pilotAccent = DialRingStyleInfo.resolveDialAccent(
+      style: DialRingStyle.boilerFlame,
+      baseAccent: const Color(0xFFFF7A24),
+      targetTemp: 18.0,
+      flameIntensity: 0.0,
+    );
+    expect(pilotAccent, const Color(0xFF38BDF8));
+
+    final roarAccent = DialRingStyleInfo.resolveDialAccent(
+      style: DialRingStyle.boilerFlame,
+      baseAccent: const Color(0xFF38BDF8),
+      targetTemp: 28.5,
+      flameIntensity: 1.0,
+    );
+    expect(roarAccent, const Color(0xFFFF7A24));
+
+    // Motorsport tachometer hits redline crimson >= 26°C
+    final redlineAccent = DialRingStyleInfo.resolveDialAccent(
+      style: DialRingStyle.autoTacho,
+      baseAccent: const Color(0xFFFF7A24),
+      targetTemp: 28.5,
+      flameIntensity: 0.9,
+    );
+    expect(redlineAccent, const Color(0xFFEF4444));
   });
 
-  testWidgets('RotaryDial renders all 5 dynamic ring styles smoothly across dark/light themes', (tester) async {
-    final boiler = ThermostatMath.computeBoilerTelemetry(20.0, 24.0);
+  testWidgets('RotaryDial renders all 5 full-dial dynamic styles smoothly across standby/heating and dark/light themes', (tester) async {
+    final standbyBoiler = ThermostatMath.computeBoilerTelemetry(22.0, 18.0);
+    final roaringBoiler = ThermostatMath.computeBoilerTelemetry(18.0, 28.5);
     final darkPalette = VisualCustomizationState.defaults().resolvePalette();
     final lightPalette = VisualCustomizationState.defaults()
         .copyWith(theme: AppThemeMode.lightDay)
         .resolvePalette();
 
     for (final palette in [darkPalette, lightPalette]) {
-      for (final style in DialRingStyle.values) {
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: Center(
-                child: RotaryDial(
-                  targetTemp: 24.0,
-                  onChangeTarget: (_) {},
-                  modeName: 'KONFOR MODU',
-                  accentColor: const Color(0xFFFF7A24),
-                  boiler: boiler,
-                  lang: LangCode.tr,
-                  palette: palette,
-                  dialRingStyle: style,
-                  performanceMode: style == DialRingStyle.thermalPulse
-                      ? PerformanceMode.ecoBattery
-                      : PerformanceMode.ultra60fps,
+      for (final boiler in [standbyBoiler, roaringBoiler]) {
+        final target = boiler.isHeating ? 28.5 : 18.0;
+        for (final style in DialRingStyle.values) {
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Scaffold(
+                body: Center(
+                  child: RotaryDial(
+                    targetTemp: target,
+                    onChangeTarget: (_) {},
+                    modeName: 'KONFOR MODU',
+                    accentColor: const Color(0xFFFF7A24),
+                    boiler: boiler,
+                    lang: LangCode.tr,
+                    palette: palette,
+                    dialRingStyle: style,
+                    performanceMode: style == DialRingStyle.thermoMercury
+                        ? PerformanceMode.ecoBattery
+                        : PerformanceMode.ultra60fps,
+                  ),
                 ),
               ),
             ),
-          ),
-        );
-        await tester.pump(const Duration(milliseconds: 120));
-        expect(find.text('24.0°'), findsOneWidget);
-        if (style != DialRingStyle.classic) {
-          expect(find.byType(DialRingEffectLayer), findsOneWidget);
-        } else {
-          expect(find.byType(DialRingEffectLayer), findsNothing);
+          );
+          await tester.pump(const Duration(milliseconds: 120));
+          expect(find.text('${target.toStringAsFixed(1)}°'), findsOneWidget);
+          if (style != DialRingStyle.classic) {
+            expect(find.byType(DialRingEffectLayer), findsOneWidget);
+            expect(find.byType(DialInteriorEffectLayer), findsOneWidget);
+          } else {
+            expect(find.byType(DialRingEffectLayer), findsNothing);
+            expect(find.byType(DialInteriorEffectLayer), findsNothing);
+          }
         }
       }
     }
   });
 
-  testWidgets('ThemeEffectsSheet shows live previews for all 5 dynamic dial ring styles and updates state on tap', (tester) async {
+  testWidgets('ThemeEffectsSheet shows live previews & heat test chips for all 5 full-dial styles and updates state on tap', (tester) async {
     VisualCustomizationState latestVisual = VisualCustomizationState.defaults();
 
     await tester.pumpWidget(
@@ -1769,20 +1801,38 @@ void main() {
     await tester.pump(const Duration(milliseconds: 350));
 
     final listScroll = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(
+      find.text('Harlı / Redline (28.5°)'),
+      160.0,
+      scrollable: listScroll,
+    );
+    await tester.tap(find.text('Harlı / Redline (28.5°)'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('28.5°'), findsWidgets);
+
     for (final info in DialRingStyleInfo.dynamicFive) {
       await tester.scrollUntilVisible(
         find.text(info.titleTr),
         200.0,
         scrollable: listScroll,
       );
-      expect(find.text(info.titleTr), findsOneWidget);
+      expect(find.text(info.titleTr), findsWidgets);
       expect(find.byType(DialRingPreviewThumb), findsWidgets);
     }
 
-    await tester.ensureVisible(find.text('Holografik Prizma'));
+    await tester.ensureVisible(find.text('Süper Oto Kadranı (10–30)').last);
     await tester.pump();
-    await tester.tap(find.text('Holografik Prizma'));
+    await tester.tap(find.text('Süper Oto Kadranı (10–30)').last);
     await tester.pump(const Duration(milliseconds: 120));
-    expect(latestVisual.dialRingStyle, DialRingStyle.holoPrism);
+    expect(latestVisual.dialRingStyle, DialRingStyle.autoTacho);
+
+    await tester.scrollUntilVisible(
+      find.text('Gerçekçi Kombi Alevi').first,
+      -200.0,
+      scrollable: listScroll,
+    );
+    await tester.tap(find.text('Gerçekçi Kombi Alevi').last);
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(latestVisual.dialRingStyle, DialRingStyle.boilerFlame);
   });
 }

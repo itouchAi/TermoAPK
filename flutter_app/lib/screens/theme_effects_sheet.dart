@@ -50,7 +50,7 @@ class _ThemeEffectsModalState extends State<_ThemeEffectsModal>
     with SingleTickerProviderStateMixin {
   late VisualCustomizationState _visual;
   late final AnimationController _dialPreviewCtrl;
-  double _previewTemp = 23.0;
+  double _previewTemp = 23.5;
 
   @override
   void initState() {
@@ -413,7 +413,7 @@ class _ThemeEffectsModalState extends State<_ThemeEffectsModal>
                     ),
                     const SizedBox(height: 8),
 
-                    // Interactive Large Stage Preview of the Active Dial Ring Theme
+                    // Interactive Large Stage Preview of the Active Dial Theme
                     () {
                       final activeAccent =
                           palette.themeOverrideAccent?.toColor() ??
@@ -422,90 +422,168 @@ class _ThemeEffectsModalState extends State<_ThemeEffectsModal>
                           DialRingStyleInfo.findDynamic(_visual.dialRingStyle);
                       final stageBoiler =
                           ThermostatMath.computeBoilerTelemetry(
-                        20.2,
+                        21.0,
                         _previewTemp,
                       );
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 10),
-                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-                        decoration: BoxDecoration(
-                          color: palette.cardBg,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: activeMeta != null
-                                ? activeMeta.swatchColor.withValues(alpha: 0.45)
-                                : palette.cardBorder,
-                          ),
-                        ),
-                        child: Column(
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      final stageFlame = stageBoiler.isHeating
+                          ? (stageBoiler.flamePercent / 100.0).clamp(0.18, 1.0)
+                          : 0.0;
+                      final testPresets = [
+                        (tr ? 'Sönük (18°)' : 'Pilot (18°)', 18.0),
+                        (tr ? 'Mavi Alev (22.5°)' : 'Blue Gas (22.5°)', 22.5),
+                        (tr ? 'Harlı / Redline (28.5°)' : 'Roar (28.5°)', 28.5),
+                      ];
+
+                      return Column(
+                        children: [
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                            decoration: BoxDecoration(
+                              color: palette.cardBg,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: activeMeta != null
+                                    ? activeMeta.swatchColor
+                                        .withValues(alpha: 0.45)
+                                    : palette.cardBorder,
+                              ),
+                            ),
+                            child: Column(
                               children: [
-                                Flexible(
-                                  child: Text(
-                                    activeMeta != null
-                                        ? (tr
-                                            ? activeMeta.titleTr
-                                            : activeMeta.titleEn)
-                                        : (tr
-                                            ? 'Klasik Kadran (Standart)'
-                                            : 'Classic Dial (Standard)'),
-                                    style: TextStyle(
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: textMain,
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        activeMeta != null
+                                            ? (tr
+                                                ? activeMeta.titleTr
+                                                : activeMeta.titleEn)
+                                            : (tr
+                                                ? 'Klasik Kadran (Standart)'
+                                                : 'Classic Dial (Standard)'),
+                                        style: TextStyle(
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: textMain,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ),
-                                    overflow: TextOverflow.ellipsis,
+                                    Text(
+                                      tr
+                                          ? 'Sürükle veya dene'
+                                          : 'Drag or test below',
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        color: textSub,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                Center(
+                                  child: RotaryDial(
+                                    targetTemp: _previewTemp,
+                                    onChangeTarget: (t) =>
+                                        setState(() => _previewTemp = t),
+                                    modeName: tr
+                                        ? 'CANLI ÖNİZLEME'
+                                        : 'LIVE PREVIEW',
+                                    accentColor: activeMeta?.swatchColor ??
+                                        activeAccent,
+                                    boiler: stageBoiler,
+                                    lang: widget.lang,
+                                    palette: palette,
+                                    sizePx: isLandscape ? 186.0 : 178.0,
+                                    compact: true,
+                                    dialRingStyle: _visual.dialRingStyle,
+                                    performanceMode: _visual.performanceMode,
                                   ),
                                 ),
-                                Text(
-                                  tr
-                                      ? 'Sürükle veya tekerlekle dene'
-                                      : 'Drag or scroll to test',
-                                  style: TextStyle(
-                                    fontSize: 10.5,
-                                    color: textSub,
-                                  ),
+                                const SizedBox(height: 10),
+                                Row(
+                                  children: [
+                                    for (int p = 0; p < testPresets.length; p++) ...[
+                                      if (p > 0) const SizedBox(width: 6),
+                                      Expanded(
+                                        child: TactilePress(
+                                          child: GestureDetector(
+                                            onTap: () => setState(() =>
+                                                _previewTemp = testPresets[p].$2),
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 6,
+                                                vertical: 6,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: (_previewTemp -
+                                                                testPresets[p]
+                                                                    .$2)
+                                                            .abs() <
+                                                        0.3
+                                                    ? (activeMeta?.swatchColor ??
+                                                            activeAccent)
+                                                        .withValues(alpha: 0.22)
+                                                    : palette.scaffoldBg
+                                                        .withValues(alpha: 0.45),
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                                border: Border.all(
+                                                  color: (_previewTemp -
+                                                                  testPresets[p]
+                                                                      .$2)
+                                                              .abs() <
+                                                          0.3
+                                                      ? (activeMeta
+                                                              ?.swatchColor ??
+                                                          activeAccent)
+                                                      : palette.cardBorder,
+                                                ),
+                                              ),
+                                              child: Text(
+                                                testPresets[p].$1,
+                                                textAlign: TextAlign.center,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: textMain,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 10),
-                            Center(
-                              child: RotaryDial(
-                                targetTemp: _previewTemp,
-                                onChangeTarget: (t) =>
-                                    setState(() => _previewTemp = t),
-                                modeName: tr ? 'CANLI ÖNİZLEME' : 'LIVE PREVIEW',
-                                accentColor:
-                                    activeMeta?.swatchColor ?? activeAccent,
-                                boiler: stageBoiler,
-                                lang: widget.lang,
-                                palette: palette,
-                                sizePx: isLandscape ? 164.0 : 154.0,
-                                compact: true,
-                                dialRingStyle: _visual.dialRingStyle,
-                                performanceMode: _visual.performanceMode,
+                          ),
+
+                          // 5 Live Animated Full-Dial Theme Cards
+                          for (final ringInfo in DialRingStyleInfo.dynamicFive)
+                            _DialRingStyleCard(
+                              info: ringInfo,
+                              lang: widget.lang,
+                              selected:
+                                  _visual.dialRingStyle == ringInfo.style,
+                              palette: palette,
+                              animation: _dialPreviewCtrl,
+                              previewTemp: _previewTemp,
+                              flameIntensity: stageFlame,
+                              onTap: () => _apply(
+                                _visual.copyWith(dialRingStyle: ringInfo.style),
                               ),
                             ),
-                          ],
-                        ),
+                        ],
                       );
                     }(),
-
-                    // 5 Live Animated Dynamic Dial Theme Cards
-                    for (final ringInfo in DialRingStyleInfo.dynamicFive)
-                      _DialRingStyleCard(
-                        info: ringInfo,
-                        lang: widget.lang,
-                        selected: _visual.dialRingStyle == ringInfo.style,
-                        palette: palette,
-                        animation: _dialPreviewCtrl,
-                        previewTemp: _previewTemp,
-                        onTap: () => _apply(
-                          _visual.copyWith(dialRingStyle: ringInfo.style),
-                        ),
-                      ),
 
                     const SizedBox(height: 10),
                     Text(
@@ -918,6 +996,7 @@ class _DialRingStyleCard extends StatelessWidget {
   final ThemePaletteSpec palette;
   final Animation<double> animation;
   final double previewTemp;
+  final double flameIntensity;
   final VoidCallback onTap;
 
   const _DialRingStyleCard({
@@ -927,6 +1006,7 @@ class _DialRingStyleCard extends StatelessWidget {
     required this.palette,
     required this.animation,
     required this.previewTemp,
+    required this.flameIntensity,
     required this.onTap,
   });
 
@@ -955,10 +1035,11 @@ class _DialRingStyleCard extends StatelessWidget {
               DialRingPreviewThumb(
                 style: info.style,
                 animation: animation,
-                sizePx: 66.0,
+                sizePx: 76.0,
                 accentColor: info.swatchColor,
                 palette: palette,
                 targetTemp: previewTemp,
+                flameIntensity: flameIntensity,
               ),
               const SizedBox(width: 12),
               Expanded(

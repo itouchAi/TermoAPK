@@ -236,6 +236,25 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
     final knobRadius = innerDiameter * 0.39;
     final isLight = widget.palette.isLight;
     final isTactile = widget.palette.isTactileDeck;
+    final isDynamic = widget.dialRingStyle != DialRingStyle.classic;
+
+    final flameIntensity = widget.boiler.isHeating
+        ? (widget.boiler.flamePercent / 100.0).clamp(0.18, 1.0)
+        : 0.0;
+    final effectiveAccent = isDynamic
+        ? DialRingStyleInfo.resolveDialAccent(
+            style: widget.dialRingStyle,
+            baseAccent: widget.accentColor,
+            targetTemp: widget.targetTemp,
+            flameIntensity: flameIntensity,
+          )
+        : widget.accentColor;
+
+    final isFlameStyle = widget.dialRingStyle == DialRingStyle.boilerFlame;
+    final centerPrimaryColor =
+        isFlameStyle ? Colors.white : widget.palette.textPrimary;
+    final centerSecondaryColor =
+        isFlameStyle ? Colors.white70 : widget.palette.textSecondary;
 
     final dialColors = isLight
         ? const [Color(0xFFFFFFFF), Color(0xFFF1F5F9), Color(0xFFE2E8F0)]
@@ -255,11 +274,13 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
         ),
         border: Border.all(
           width: isTactile ? 2.0 : 1.0,
-          color: isTactile
-              ? const Color(0xFFD97706).withValues(alpha: 0.35)
-              : (isLight
-                  ? widget.palette.cardBorder
-                  : Colors.white.withValues(alpha: 0.10)),
+          color: isFlameStyle
+              ? effectiveAccent.withValues(alpha: 0.45)
+              : isTactile
+                  ? const Color(0xFFD97706).withValues(alpha: 0.35)
+                  : (isLight
+                      ? widget.palette.cardBorder
+                      : Colors.white.withValues(alpha: 0.10)),
         ),
         boxShadow: [
           BoxShadow(
@@ -268,7 +289,7 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
             offset: const Offset(0, 18),
           ),
           BoxShadow(
-            color: widget.accentColor.withValues(
+            color: effectiveAccent.withValues(
               alpha: (tactileActive && _pressed)
                   ? (isLight ? 0.30 : 0.40)
                   : (isLight ? 0.16 : 0.22),
@@ -282,41 +303,56 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
         child: Stack(
           alignment: Alignment.center,
           children: [
-            // 3D top specular highlight & bottom concave inner shadow
-            Positioned.fill(
-              child: IgnorePointer(
-                child: CustomPaint(
-                  painter: _DialBevelPainter(isLight: isLight),
-                ),
-              ),
-            ),
-
-            // Rotating glowing indicator pill
-            Transform.rotate(
-              angle: activeAngleDeg * math.pi / 180.0,
-              child: Transform.translate(
-                offset: Offset(0, -knobRadius),
-                child: Container(
-                  width: 6,
-                  height: 15,
-                  decoration: BoxDecoration(
-                    color: Color.lerp(widget.accentColor, Colors.white, 0.28),
-                    borderRadius: BorderRadius.circular(99),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.white.withValues(alpha: 0.75),
-                        blurRadius: 4,
-                      ),
-                      BoxShadow(
-                        color: widget.accentColor,
-                        blurRadius: 14,
-                        spreadRadius: 1,
-                      ),
-                    ],
+            if (!isDynamic) ...[
+              // 3D top specular highlight & bottom concave inner shadow
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: CustomPaint(
+                    painter: _DialBevelPainter(isLight: isLight),
                   ),
                 ),
               ),
-            ),
+
+              // Rotating glowing indicator pill
+              Transform.rotate(
+                angle: activeAngleDeg * math.pi / 180.0,
+                child: Transform.translate(
+                  offset: Offset(0, -knobRadius),
+                  child: Container(
+                    width: 6,
+                    height: 15,
+                    decoration: BoxDecoration(
+                      color: Color.lerp(effectiveAccent, Colors.white, 0.28),
+                      borderRadius: BorderRadius.circular(99),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.white.withValues(alpha: 0.75),
+                          blurRadius: 4,
+                        ),
+                        BoxShadow(
+                          color: effectiveAccent,
+                          blurRadius: 14,
+                          spreadRadius: 1,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ] else
+              // Bespoke full-dial physics/mechanics interior (flames, tacho needle, liquid, radar, reactor)
+              Positioned.fill(
+                child: DialInteriorEffectLayer(
+                  style: widget.dialRingStyle,
+                  animation: _ringAnimCtrl,
+                  diameterPx: innerDiameter,
+                  targetTemp: widget.targetTemp,
+                  activeAngleDeg: activeAngleDeg,
+                  accentColor: effectiveAccent,
+                  isLight: isLight,
+                  flameIntensity: flameIntensity,
+                ),
+              ),
 
             Column(
               mainAxisSize: MainAxisSize.min,
@@ -329,7 +365,7 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
                     fontSize: widget.compact ? 9 : 10,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 1.4,
-                    color: widget.palette.textSecondary,
+                    color: centerSecondaryColor,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -340,7 +376,7 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
                     fontWeight: FontWeight.w700,
                     height: 1.05,
                     letterSpacing: -0.5,
-                    color: widget.palette.textPrimary,
+                    color: centerPrimaryColor,
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
@@ -351,7 +387,7 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
                     fontSize: widget.compact ? 9 : 11,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 1.0,
-                    color: widget.accentColor,
+                    color: effectiveAccent,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -362,8 +398,8 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
                       Icons.local_fire_department_outlined,
                       size: 12,
                       color: widget.boiler.isHeating
-                          ? widget.accentColor
-                          : widget.palette.textSecondary,
+                          ? effectiveAccent
+                          : centerSecondaryColor,
                     ),
                     const SizedBox(width: 4),
                     Text(
@@ -373,7 +409,7 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w500,
-                        color: widget.palette.textSecondary,
+                        color: centerSecondaryColor,
                         fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
@@ -386,10 +422,6 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
       ),
     );
 
-    final flameIntensity = widget.boiler.isHeating
-        ? (widget.boiler.flamePercent / 100.0).clamp(0.25, 1.0)
-        : 0.25;
-
     final dialWithTicks = SizedBox(
       key: _dialCircleKey,
       width: widget.sizePx,
@@ -398,29 +430,29 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
         clipBehavior: Clip.none,
         alignment: Alignment.center,
         children: [
-          // Dynamic animated dial ring theme (60 FPS RepaintBoundary)
-          if (widget.dialRingStyle != DialRingStyle.classic)
+          if (isDynamic)
             DialRingEffectLayer(
               style: widget.dialRingStyle,
               animation: _ringAnimCtrl,
               sizePx: widget.sizePx,
+              targetTemp: widget.targetTemp,
               activeAngleDeg: activeAngleDeg,
-              accentColor: widget.accentColor,
+              accentColor: effectiveAccent,
               isLight: isLight,
               flameIntensity: flameIntensity,
+            )
+          else
+            // 45 Segmented radial perimeter ticks (Classic)
+            CustomPaint(
+              size: Size(widget.sizePx, widget.sizePx),
+              painter: _TickRingPainter(
+                activeAngleDeg: activeAngleDeg,
+                accentColor: effectiveAccent,
+                unlitTickColor: isLight
+                    ? const Color(0xFF0F172A).withValues(alpha: 0.14)
+                    : Colors.white.withValues(alpha: 0.16),
+              ),
             ),
-
-          // 45 Segmented radial perimeter ticks
-          CustomPaint(
-            size: Size(widget.sizePx, widget.sizePx),
-            painter: _TickRingPainter(
-              activeAngleDeg: activeAngleDeg,
-              accentColor: widget.accentColor,
-              unlitTickColor: isLight
-                  ? const Color(0xFF0F172A).withValues(alpha: 0.14)
-                  : Colors.white.withValues(alpha: 0.16),
-            ),
-          ),
 
           // Inner sculpted 3D dial face
           dialFace,
@@ -452,12 +484,12 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
                         center: const Alignment(0, -0.05),
                         radius: 0.5,
                         colors: [
-                          widget.accentColor.withValues(
+                          effectiveAccent.withValues(
                             alpha: (tactileActive && _pressed)
                                 ? (isLight ? 0.28 : 0.34)
                                 : (isLight ? 0.20 : 0.25),
                           ),
-                          widget.accentColor
+                          effectiveAccent
                               .withValues(alpha: isLight ? 0.08 : 0.09),
                           Colors.transparent,
                         ],
