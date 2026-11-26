@@ -566,8 +566,8 @@ class _ThemeEffectsModalState extends State<_ThemeEffectsModal>
                             ),
                           ),
 
-                          // 5 Live Animated Full-Dial Theme Cards
-                          for (final ringInfo in DialRingStyleInfo.dynamicFive)
+                          // Live Animated Full-Dial Theme Cards (Boiler Flame, Motorsport Gauge, Liquid Chamber)
+                          for (final ringInfo in DialRingStyleInfo.dynamicThemes)
                             _DialRingStyleCard(
                               info: ringInfo,
                               lang: widget.lang,

@@ -2086,8 +2086,6 @@ enum DialRingStyle {
   boilerFlame,
   autoTacho,
   thermoMercury,
-  chronoRadar,
-  magneticFlux,
 }
 
 enum ObsidianPalette {

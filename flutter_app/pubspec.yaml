@@ -33,3 +33,5 @@ flutter:
     - assets/mascots/
   shaders:
     - shaders/flow_tab_bar.frag
+    - shaders/boiler_flame.frag
+    - shaders/thermo_liquid.frag

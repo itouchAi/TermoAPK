@@ -1681,8 +1681,8 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  test('DialRingStyle exposes 5 full-dial dynamic styles, resolves dynamic accents, and round-trips', () {
-    expect(DialRingStyleInfo.dynamicFive.length, 5);
+  test('DialRingStyle exposes 3 curated dynamic styles, resolves dynamic accents, and safely migrates removed themes', () {
+    expect(DialRingStyleInfo.dynamicThemes.length, 3);
     expect(VisualCustomizationState.defaults().dialRingStyle, DialRingStyle.classic);
 
     for (final style in DialRingStyle.values) {
@@ -1691,11 +1691,13 @@ void main() {
       expect(restored.dialRingStyle, style);
     }
 
-    final unknownFallback = VisualCustomizationState.fromJson({
-      ...VisualCustomizationState.defaults().toJson(),
-      'dialRingStyle': 'non_existent_ring_theme',
-    });
-    expect(unknownFallback.dialRingStyle, DialRingStyle.classic);
+    for (final removedName in ['chronoRadar', 'magneticFlux', 'non_existent_ring_theme']) {
+      final fallback = VisualCustomizationState.fromJson({
+        ...VisualCustomizationState.defaults().toJson(),
+        'dialRingStyle': removedName,
+      });
+      expect(fallback.dialRingStyle, DialRingStyle.classic);
+    }
 
     // Boiler flame accent: standby pilot is cool sky-blue; roaring flame warms to amber-orange
     final pilotAccent = DialRingStyleInfo.resolveDialAccent(
@@ -1724,7 +1726,7 @@ void main() {
     expect(redlineAccent, const Color(0xFFEF4444));
   });
 
-  testWidgets('RotaryDial renders all 5 full-dial dynamic styles smoothly across standby/heating and dark/light themes', (tester) async {
+  testWidgets('RotaryDial renders all curated dial styles smoothly across standby/heating and dark/light themes', (tester) async {
     final standbyBoiler = ThermostatMath.computeBoilerTelemetry(22.0, 18.0);
     final roaringBoiler = ThermostatMath.computeBoilerTelemetry(18.0, 28.5);
     final darkPalette = VisualCustomizationState.defaults().resolvePalette();
@@ -1771,7 +1773,7 @@ void main() {
     }
   });
 
-  testWidgets('ThemeEffectsSheet shows live previews & heat test chips for all 5 full-dial styles and updates state on tap', (tester) async {
+  testWidgets('ThemeEffectsSheet shows live previews & heat test chips for the 3 curated dial styles and updates state on tap', (tester) async {
     VisualCustomizationState latestVisual = VisualCustomizationState.defaults();
 
     await tester.pumpWidget(
@@ -1810,7 +1812,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('28.5°'), findsWidgets);
 
-    for (final info in DialRingStyleInfo.dynamicFive) {
+    for (final info in DialRingStyleInfo.dynamicThemes) {
       await tester.scrollUntilVisible(
         find.text(info.titleTr),
         200.0,
@@ -1834,5 +1836,11 @@ void main() {
     await tester.tap(find.text('Gerçekçi Kombi Alevi').last);
     await tester.pump(const Duration(milliseconds: 120));
     expect(latestVisual.dialRingStyle, DialRingStyle.boilerFlame);
+
+    await tester.ensureVisible(find.text('Sıvı Termal Hazne').last);
+    await tester.pump();
+    await tester.tap(find.text('Sıvı Termal Hazne').last);
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(latestVisual.dialRingStyle, DialRingStyle.thermoMercury);
   });
 }
