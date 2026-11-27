@@ -10,6 +10,7 @@ import '../services/ambient_audio_service.dart';
 import '../services/hardware_service.dart';
 import '../services/media_storage_service.dart';
 import '../services/video_source_bridge.dart';
+import '../services/weather_service.dart';
 import 'rotary_dial.dart';
 import 'tactile_button.dart';
 
@@ -18,9 +19,10 @@ class SmartDisplayOverlay extends StatefulWidget {
   final int slideIndex;
   final DateTime now;
   final String locationName;
-  final double roomTemp;
+  final double? roomTemp;
   final double targetTemp;
   final BoilerTelemetry boiler;
+  final WeatherReport? weatherReport;
   final Color accentColor;
   final ThemePaletteSpec palette;
   final LangCode lang;
@@ -44,6 +46,7 @@ class SmartDisplayOverlay extends StatefulWidget {
     required this.roomTemp,
     required this.targetTemp,
     required this.boiler,
+    this.weatherReport,
     required this.accentColor,
     required this.palette,
     required this.lang,
@@ -623,16 +626,17 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
     return '${dt.day} $m ${dt.year} $d';
   }
 
-  (String, double, IconData) _resolveOutdoorWeather() {
+  (String, double?, IconData) _resolveOutdoorWeather() {
     final city = SystemSettingsState.extractCityName(widget.locationName);
-    final lower = city.toLowerCase();
-    if (lower.contains('izmir')) {
-      return (city, 16.4, Icons.wb_sunny_outlined);
+    final report = widget.weatherReport;
+    if (report != null) {
+      return (
+        report.cityName.isNotEmpty ? report.cityName : city,
+        report.currentTempC,
+        report.icon,
+      );
     }
-    if (lower.contains('ankara')) {
-      return (city, 7.2, Icons.ac_unit_rounded);
-    }
-    return (city, 11.9, Icons.cloud_outlined);
+    return (city, null, Icons.cloud_off_outlined);
   }
 
   BoxFit _boxFitForLayout(VisualLayoutMode layout) {
@@ -897,12 +901,16 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
                                                       ),
                                                     ),
                                                     Text(
-                                                      '${widget.roomTemp.toStringAsFixed(1)}°C',
-                                                      style: const TextStyle(
+                                                      widget.roomTemp != null
+                                                          ? '${widget.roomTemp!.toStringAsFixed(1)}°C'
+                                                          : '--',
+                                                      style: TextStyle(
                                                         fontSize: 14,
                                                         fontWeight: FontWeight.w800,
-                                                        color: Color(0xFF10B981),
-                                                        fontFeatures: [FontFeature.tabularFigures()],
+                                                        color: widget.roomTemp != null
+                                                            ? const Color(0xFF10B981)
+                                                            : Colors.white.withValues(alpha: 0.72),
+                                                        fontFeatures: const [FontFeature.tabularFigures()],
                                                       ),
                                                     ),
                                                   ],
@@ -1405,15 +1413,17 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
   Widget _buildTopHeader({
     required bool tr,
     required String cityName,
-    required double outdoorTemp,
+    required double? outdoorTemp,
     required IconData weatherIcon,
     required bool compact,
   }) {
     final s = widget.settings;
     final room = s.googleHomeRoom.trim().isEmpty ? (tr ? 'Oturma Odası' : 'Living Room') : s.googleHomeRoom;
-    final statusTxt = widget.boiler.isHeating
-        ? (tr ? '🔥 Isıtma %${widget.boiler.flamePercent}' : '🔥 Heating ${widget.boiler.flamePercent}%')
-        : (tr ? '❄️ Bekleme' : '❄️ Standby');
+    final statusTxt = !widget.boiler.hasSensorReading
+        ? (tr ? '⚡ Bağlı Değil' : '⚡ Offline')
+        : (widget.boiler.isHeating
+            ? (tr ? '🔥 Isıtma %${widget.boiler.flamePercent}' : '🔥 Heating ${widget.boiler.flamePercent}%')
+            : (tr ? '❄️ Bekleme' : '❄️ Standby'));
 
     final thermoBadge = TactilePress(
       child: GestureDetector(
@@ -1489,7 +1499,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                '${outdoorTemp.toStringAsFixed(1)}°C',
+                outdoorTemp != null ? '${outdoorTemp.toStringAsFixed(1)}°C' : '--',
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w800,
@@ -2268,7 +2278,7 @@ class _ScrollingMarqueeTextState extends State<_ScrollingMarqueeText> with Singl
 /// Embedded Thermostat Popup inside Smart Display (Img 9: theme-matched & genuine RotaryDial)
 class _EmbeddedThermostatModal extends StatelessWidget {
   final double targetTemp;
-  final double roomTemp;
+  final double? roomTemp;
   final BoilerTelemetry boiler;
   final Color accentColor;
   final ThemePaletteSpec palette;
@@ -2304,8 +2314,8 @@ class _EmbeddedThermostatModal extends StatelessWidget {
     final tr = lang == LangCode.tr;
     final size = MediaQuery.of(context).size;
     final dialSize = math.min(220.0, math.max(166.0, size.height * 0.28));
-    final diff = targetTemp - roomTemp;
-    final diffText = '${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}°C';
+    final diff = roomTemp != null ? targetTemp - roomTemp! : null;
+    final diffText = diff != null ? '${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}°C' : '--';
     final isLight = palette.isLight;
     final themeAccent = palette.themeOverrideAccent?.toColor() ?? accentColor;
     final matchedPreset = ThermostatMath.findMatchingPreset(targetTemp);
@@ -2522,8 +2532,11 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                             style: TextStyle(color: palette.textSecondary),
                           ),
                           TextSpan(
-                            text: '${roomTemp.toStringAsFixed(1)}°C ',
-                            style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.w700),
+                            text: roomTemp != null ? '${roomTemp!.toStringAsFixed(1)}°C ' : '-- ',
+                            style: TextStyle(
+                              color: roomTemp != null ? const Color(0xFF10B981) : palette.textSecondary,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                           TextSpan(
                             text: '($diffText)',

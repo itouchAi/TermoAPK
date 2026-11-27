@@ -85,7 +85,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   );
   int _virtualPageIndex = _virtualCenterBase;
   TabId _activeTab = TabId.termo;
-  double _roomTemp = 21.8;
+  double? _roomTemp;
   double _targetTemp = 22.5;
   PresetId? _activePreset = PresetId.konfor;
   LangCode _lang = LangCode.tr;
@@ -103,6 +103,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   bool _aiCallUrgent = false;
   DateTime? _lastAiCallAt;
   DateTime? _lastPassiveEventNotifyAt;
+  DateTime? _lastOfflineWarnAt;
   List<AiCallLogEntry> _unreadAlerts = const [];
   bool _alertsExpanded = false;
   String? _activeCallScheduleTr;
@@ -206,44 +207,27 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       _thermalTicks++;
-      final shouldDrift = !_remoteRoomTempActive &&
-          !_hardwareSensors.isConnected &&
-          _thermalTicks % 15 == 0;
-      double? driftedRoom;
-      if (shouldDrift) {
-        final boiler = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp);
-        if (boiler.isHeating && _roomTemp < _targetTemp - 0.1) {
-          driftedRoom = double.parse((_roomTemp + 0.1).clamp(10.0, 32.0).toStringAsFixed(1));
-        } else if (!boiler.isHeating && _roomTemp > 17.2) {
-          driftedRoom = double.parse((_roomTemp - 0.1).clamp(10.0, 32.0).toStringAsFixed(1));
-        }
-      }
-
       final tickNow = DateTime.now();
-      final effectiveRoom = driftedRoom ?? _roomTemp;
-      final tickBoiler = ThermostatMath.computeBoilerTelemetry(effectiveRoom, _targetTemp);
+      final activeRoom = _roomTemp;
+      final tickBoiler = ThermostatMath.computeBoilerTelemetry(activeRoom, _targetTemp);
       Map<String, DailyThermalLog>? updatedLogs;
-      if (_persistedLoaded) {
+      if (_persistedLoaded && activeRoom != null && _settings.espOnline) {
         updatedLogs = ThermalLogAggregator.recordSample(
           logs: _dailyLogs,
           timestamp: tickNow,
-          roomTemp: effectiveRoom,
+          roomTemp: activeRoom,
           boiler: tickBoiler,
           seconds: 1,
         );
       }
 
-      final shouldRefreshUi = driftedRoom != null ||
-          _ambientMode ||
+      final shouldRefreshUi = _ambientMode ||
           _visual.theme == AppThemeMode.autoSmart ||
           (_persistedLoaded &&
               (_activeTab == TabId.rapor || _activeTab == TabId.prog || _thermalTicks % 5 == 0));
 
       if (shouldRefreshUi) {
         setState(() {
-          if (driftedRoom != null) {
-            _roomTemp = driftedRoom;
-          }
           if (updatedLogs != null) {
             _dailyLogs = updatedLogs;
           }
@@ -276,15 +260,6 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
         _persist();
       }
 
-      if (driftedRoom != null && _thermalTicks % 60 == 0) {
-        final curHeating = tickBoiler.isHeating;
-        _evaluateBoilerAlertsAndCalls(
-          wasHeating: curHeating,
-          nextTargetTemp: _targetTemp,
-          isUserChange: false,
-        );
-      }
-
       if (_persistedLoaded) {
         final minuteKey = ScheduleEngine.minuteKey(tickNow);
         if (minuteKey != _lastScheduleMinuteKey) {
@@ -305,14 +280,18 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     _automationTimer = Timer.periodic(const Duration(hours: 3), (_) {
       if (!mounted || !_settings.notifications3hEnabled) return;
       final b = ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp);
-      final roomStr = AiCallService.formatSpokenNumber(_roomTemp);
+      final roomStr = _roomTemp != null ? '${AiCallService.formatSpokenNumber(_roomTemp!)}°C' : '--';
       final targetStr = AiCallService.formatSpokenNumber(_targetTemp);
-      final summaryTr = b.isHeating
-          ? '3 saatlik durum özeti: Oda $roomStr°C, kombi $targetStr°C hedefte aktif. Eko 20°C\'ye alalım mı yoksa kapatalım mı?'
-          : '3 saatlik durum özeti: Oda $roomStr°C, kombi şu an kapalı. İsterseniz 22.5°C ile açalım mı?';
-      final summaryEn = b.isHeating
-          ? '3h status summary: Room is $roomStr°C with boiler active at $targetStr°C. Lower to Eco 20°C or turn off?'
-          : '3h status summary: Room is $roomStr°C and boiler is off. Should I turn it on at 22.5°C?';
+      final summaryTr = !b.hasSensorReading
+          ? '3 saatlik durum özeti: ESP32 / kombi bağlantısı yok (Oda --, Hedef $targetStr°C).'
+          : (b.isHeating
+              ? '3 saatlik durum özeti: Oda $roomStr, kombi $targetStr°C hedefte aktif. Eko 20°C\'ye alalım mı yoksa kapatalım mı?'
+              : '3 saatlik durum özeti: Oda $roomStr, kombi şu an kapalı. İsterseniz 22.5°C ile açalım mı?');
+      final summaryEn = !b.hasSensorReading
+          ? '3h status summary: ESP32 / boiler offline (Room --, Target $targetStr°C).'
+          : (b.isHeating
+              ? '3h status summary: Room is $roomStr with boiler active at $targetStr°C. Lower to Eco 20°C or turn off?'
+              : '3h status summary: Room is $roomStr and boiler is off. Should I turn it on at 22.5°C?');
       _enqueueUnreadAlert(
         AiCallLogEntry(
           id: 'periodic_${DateTime.now().microsecondsSinceEpoch}',
@@ -682,7 +661,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           _customScheduleRules = const [];
           _dailyLogs = const {};
           _hardwareSensors = const BoilerHardwareSensors.disconnected();
+          _roomTemp = null;
           _remoteRoomTempActive = false;
+          _heatingCycleStartedAt = null;
           _targetTemp = 22.5;
           _activePreset = PresetId.konfor;
           _settings = _settings.copyWith(
@@ -727,7 +708,12 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     required bool prevHeating,
     required double nextTargetTemp,
   }) {
-    final nextBoiler = ThermostatMath.computeBoilerTelemetry(_roomTemp, nextTargetTemp);
+    final currentRoom = _roomTemp;
+    if (currentRoom == null) {
+      _heatingCycleStartedAt = null;
+      return;
+    }
+    final nextBoiler = ThermostatMath.computeBoilerTelemetry(currentRoom, nextTargetTemp);
     final tr = _lang == LangCode.tr;
     if (!prevHeating && nextBoiler.isHeating) {
       _heatingCycleStartedAt = DateTime.now();
@@ -736,7 +722,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           EspLogEntry(
             timestamp: NotificationService.formatNowTime(),
             event: tr ? 'Brülör Ateşleme' : 'Boiler Ignition',
-            detail: '${_roomTemp.toStringAsFixed(1)}°C → ${nextTargetTemp.toStringAsFixed(1)}°C · %${nextBoiler.flamePercent}',
+            detail: '${currentRoom.toStringAsFixed(1)}°C → ${nextTargetTemp.toStringAsFixed(1)}°C · %${nextBoiler.flamePercent}',
             category: EspLogCategory.burner,
           ),
         );
@@ -756,7 +742,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           EspLogEntry(
             timestamp: NotificationService.formatNowTime(),
             event: tr ? 'Yanma Döngüsü Tamamlandı' : 'Burn Cycle Completed',
-            detail: '${_roomTemp.toStringAsFixed(1)}°C → ${nextTargetTemp.toStringAsFixed(1)}°C$pressureSuffix',
+            detail: '${currentRoom.toStringAsFixed(1)}°C → ${nextTargetTemp.toStringAsFixed(1)}°C$pressureSuffix',
             category: EspLogCategory.burner,
             durationSeconds: elapsedSec,
           ),
@@ -766,7 +752,54 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     }
   }
 
-  void _recordSyncFailure(FirebaseSyncResult res) {
+  void _maybeShowDisconnectedWarning(
+    double targetTemp, {
+    bool bypassCooldown = false,
+    String? reasonOverrideTr,
+    String? reasonOverrideEn,
+  }) {
+    if (!mounted) return;
+    final hasLink = _settings.espOnline &&
+        _roomTemp != null &&
+        (_settings.cloudSyncEnabled || _settings.googleHomeLinked);
+    if (hasLink && reasonOverrideTr == null) return;
+    final now = DateTime.now();
+    if (!bypassCooldown &&
+        _lastOfflineWarnAt != null &&
+        now.difference(_lastOfflineWarnAt!) < const Duration(seconds: 5)) {
+      return;
+    }
+    if (Overlay.maybeOf(context, rootOverlay: true) == null) return;
+    _lastOfflineWarnAt = now;
+    final tr = _lang == LangCode.tr;
+    final targetStr = targetTemp.toStringAsFixed(1);
+    final String body;
+    if (reasonOverrideTr != null || reasonOverrideEn != null) {
+      body = tr
+          ? (reasonOverrideTr ?? reasonOverrideEn!)
+          : (reasonOverrideEn ?? reasonOverrideTr!);
+    } else if (!_settings.cloudSyncEnabled && !_settings.googleHomeLinked) {
+      body = tr
+          ? 'Hedef $targetStr°C yerel olarak ayarlandı. Bulut ve ESP32 bağlantısı kapalı olduğu için kombiye iletilemedi.'
+          : 'Target $targetStr°C saved locally. Cloud & ESP32 sync is disabled, so command was not sent to boiler.';
+    } else if (!_settings.espOnline) {
+      body = tr
+          ? 'Hedef $targetStr°C yerel olarak ayarlandı ancak ESP32, kombi veya internet bağlantısı yok.'
+          : 'Target $targetStr°C saved locally, but ESP32, boiler, or internet connection is unavailable.';
+    } else {
+      body = tr
+          ? 'Hedef $targetStr°C ayarlandı ancak ESP32 oda sensörü verisi okunamıyor (--).'
+          : 'Target $targetStr°C set, but ESP32 room sensor reading is unavailable (--).';
+    }
+    NotificationService.showFloatingBanner(
+      context: context,
+      title: tr ? '⚠️ ESP32 / Kombi Bağlantısı Yok' : '⚠️ ESP32 / Boiler Disconnected',
+      body: body,
+      severity: AlertSeverity.warning,
+    );
+  }
+
+  void _recordSyncFailure(FirebaseSyncResult res, {bool notifyUser = false}) {
     if (!mounted) return;
     final nowLabel = NotificationService.formatNowTime();
     final wasOnline = _settings.espOnline;
@@ -780,6 +813,13 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       );
     });
     _persist();
+    if (notifyUser) {
+      _maybeShowDisconnectedWarning(
+        _targetTemp,
+        reasonOverrideTr: 'İnternet veya Firebase RTDB bağlantısı yok — hedef kombiye iletilemedi (${res.messageTr}).',
+        reasonOverrideEn: 'Internet or Firebase RTDB unavailable — target could not reach boiler (${res.messageEn}).',
+      );
+    }
     if (wasOnline) {
       _appendEspLog(
         EspLogEntry(
@@ -803,7 +843,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     final remoteTarget = pullRes.remoteTargetTemp;
     final remoteTargetChanged = remoteTarget != null && (remoteTarget - _targetTemp).abs() >= 0.05;
     final remoteRoom = pullRes.remoteRoomTemp;
-    final remoteRoomChanged = remoteRoom != null && ((remoteRoom - _roomTemp).abs() >= 0.05 || !_remoteRoomTempActive);
+    final remoteRoomChanged = remoteRoom != null &&
+        (_roomTemp == null || (remoteRoom - _roomTemp!).abs() >= 0.05 || !_remoteRoomTempActive);
     final hasSensorUpdate = pullRes.remoteSensors != null;
 
     if (!wasOnline) {
@@ -845,6 +886,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     double target, {
     bool allowAutoPull = false,
     bool pushCommand = true,
+    bool notifyUserOnFailure = false,
   }) {
     if (!_settings.googleHomeLinked && !_settings.cloudSyncEnabled) return;
 
@@ -858,7 +900,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
         if (pullRes.ok) {
           _applyPullSyncResult(pullRes);
         } else {
-          _recordSyncFailure(pullRes);
+          _recordSyncFailure(pullRes, notifyUser: notifyUserOnFailure);
         }
       });
       return;
@@ -913,13 +955,14 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           });
         }
       } else {
-        _recordSyncFailure(res);
+        _recordSyncFailure(res, notifyUser: notifyUserOnFailure);
       }
     });
   }
 
   @override
   void dispose() {
+    NotificationService.dismissActiveBanner();
     _clockTimer?.cancel();
     _idleTimer?.cancel();
     _automationTimer?.cancel();
@@ -1208,9 +1251,12 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     });
     _persist();
     _recordBoilerTransitionEspLog(prevHeating: prevHeating, nextTargetTemp: snapped);
-    _syncFirebaseBackground(snapped, pushCommand: true);
+    _syncFirebaseBackground(snapped, pushCommand: true, notifyUserOnFailure: true);
     final isScheduleEvent =
         scheduleTitleTr != null && scheduleTitleTr.trim().isNotEmpty;
+    if ((snapped - prevTarget).abs() >= 0.05 && !isScheduleEvent) {
+      _maybeShowDisconnectedWarning(snapped);
+    }
     if (!suppressAiCall &&
         (isScheduleEvent || (snapped - prevTarget).abs() >= 0.05)) {
       _scheduleSettledAiCallEvaluation(
@@ -1233,7 +1279,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     });
     _persist();
     _recordBoilerTransitionEspLog(prevHeating: prevHeating, nextTargetTemp: preset.temp);
-    _syncFirebaseBackground(preset.temp, pushCommand: true);
+    _syncFirebaseBackground(preset.temp, pushCommand: true, notifyUserOnFailure: true);
+    _maybeShowDisconnectedWarning(preset.temp);
     _scheduleSettledAiCallEvaluation(
       prevHeating: prevHeating,
       prevTarget: prevTarget,
@@ -1273,6 +1320,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             accentColor: activeColor,
             boiler: boiler,
             sensors: _hardwareSensors,
+            espOnline: _settings.espOnline,
             lang: _lang,
             palette: palette,
             dialRingStyle: _visual.dialRingStyle,
@@ -1820,6 +1868,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                    roomTemp: _roomTemp,
                    targetTemp: _targetTemp,
                    boiler: boiler,
+                   weatherReport: _weatherReport,
                    accentColor: activeColor,
                    palette: palette,
                    lang: _lang,
@@ -1911,8 +1960,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
                         ? '📵 Cevapsız AI Asistan Araması (${meta.name})'
                         : '📵 Missed AI Assistant Call (${meta.name})',
                     customBody: tr
-                        ? '$_locationName · Oda ${_roomTemp.toStringAsFixed(1)}°C / Hedef ${_targetTemp.toStringAsFixed(1)}°C · ${boiler.statusTextTr}'
-                        : '$_locationName · Room ${_roomTemp.toStringAsFixed(1)}°C / Target ${_targetTemp.toStringAsFixed(1)}°C · ${boiler.statusTextEn}',
+                        ? '$_locationName · Oda ${_roomTemp != null ? '${_roomTemp!.toStringAsFixed(1)}°C' : '--'} / Hedef ${_targetTemp.toStringAsFixed(1)}°C · ${boiler.statusTextTr}'
+                        : '$_locationName · Room ${_roomTemp != null ? '${_roomTemp!.toStringAsFixed(1)}°C' : '--'} / Target ${_targetTemp.toStringAsFixed(1)}°C · ${boiler.statusTextEn}',
                     showOverlayBanner: false,
                   );
                 },

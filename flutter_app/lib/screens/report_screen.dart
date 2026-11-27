@@ -7,7 +7,7 @@ import '../widgets/tactile_button.dart';
 
 class ReportScreen extends StatefulWidget {
   final LangCode lang;
-  final double roomTemp;
+  final double? roomTemp;
   final double targetTemp;
   final BoilerTelemetry boiler;
   final BoilerHardwareSensors sensors;
@@ -697,7 +697,7 @@ class _ReportScreenState extends State<ReportScreen> {
                     border: Border.all(color: themeAccent.withValues(alpha: 0.45)),
                   ),
                   child: Text(
-                    '${widget.roomTemp.toStringAsFixed(1)}°C',
+                    widget.roomTemp != null ? '${widget.roomTemp!.toStringAsFixed(1)}°C' : '--',
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w700,

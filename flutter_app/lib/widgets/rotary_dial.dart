@@ -395,7 +395,9 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      Icons.local_fire_department_outlined,
+                      widget.boiler.hasSensorReading
+                          ? Icons.local_fire_department_outlined
+                          : Icons.link_off_rounded,
                       size: 12,
                       color: widget.boiler.isHeating
                           ? effectiveAccent

@@ -7,7 +7,7 @@ import '../widgets/tactile_button.dart';
 Future<void> showGoogleHomeSheet({
   required BuildContext context,
   required LangCode lang,
-  required double roomTemp,
+  required double? roomTemp,
   required double targetTemp,
   required BoilerTelemetry boiler,
   required SystemSettingsState initialSettings,
@@ -36,7 +36,7 @@ Future<void> showGoogleHomeSheet({
 
 class _GoogleHomeModal extends StatefulWidget {
   final LangCode lang;
-  final double roomTemp;
+  final double? roomTemp;
   final double targetTemp;
   final BoilerTelemetry boiler;
   final SystemSettingsState initialSettings;
@@ -63,7 +63,7 @@ class _GoogleHomeModal extends StatefulWidget {
 
 class _GoogleHomeModalState extends State<_GoogleHomeModal> {
   late SystemSettingsState _settings;
-  late double _liveRoom;
+  double? _liveRoom;
   late double _liveTarget;
   late BoilerTelemetry _liveBoiler;
   String? _assistantReply;
@@ -82,7 +82,7 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
   const { inputs = [], requestId } = req.body;
   const ref = admin.database().ref("kombi");
   const snap = await ref.once("value");
-  const state = snap.val() || { targetTemp: 22.5, roomTemp: 21.8 };
+  const state = snap.val() || { targetTemp: 22.5, roomTemp: null };
 
   for (const input of inputs) {
     if (input.intent === "action.devices.SYNC") {
@@ -226,10 +226,11 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
       });
       if (_settings.googleHomeLinked) _pushToFirebase(silent: true);
     } else {
+      final roomStr = _liveRoom != null ? '${_liveRoom!.toStringAsFixed(1)}°C' : '--';
       setState(() {
         _assistantReply = tr
-            ? 'Google Asistan: "${_settings.googleHomeRoom} şu an ${widget.roomTemp.toStringAsFixed(1)}°C, hedef ${_liveTarget.toStringAsFixed(1)}°C."'
-            : 'Google Assistant: "${_settings.googleHomeRoom} is currently ${widget.roomTemp.toStringAsFixed(1)}°C, set to ${_liveTarget.toStringAsFixed(1)}°C."';
+            ? 'Google Asistan: "${_settings.googleHomeRoom} şu an $roomStr, hedef ${_liveTarget.toStringAsFixed(1)}°C."'
+            : 'Google Assistant: "${_settings.googleHomeRoom} is currently $roomStr, set to ${_liveTarget.toStringAsFixed(1)}°C."';
       });
     }
   }
@@ -539,7 +540,7 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                         _ProfileTile(label: tr ? 'Cihaz Tipi' : 'Device Type', value: 'THERMOSTAT'),
                         _ProfileTile(
                           label: tr ? 'Canlı Oda Sıcaklığı' : 'Ambient Temp',
-                          value: '${widget.roomTemp.toStringAsFixed(1)}°C',
+                          value: _liveRoom != null ? '${_liveRoom!.toStringAsFixed(1)}°C' : '--',
                         ),
                         _ProfileTile(
                           label: tr ? 'Hedef Sıcaklık' : 'Target Setpoint',
@@ -548,10 +549,14 @@ exports.smartHomeFulfillment = functions.https.onRequest(async (req, res) => {
                         ),
                         _ProfileTile(
                           label: tr ? 'Kombi Yanma Durumu' : 'Boiler State',
-                          value: liveBoiler.isHeating
-                              ? (tr ? 'Aktif Ateşleme 🔥' : 'Active Flame 🔥')
-                              : (tr ? 'Beklemede ❄️' : 'Standby ❄️'),
-                          valueColor: liveBoiler.isHeating ? const Color(0xFFF97316) : const Color(0xFF38BDF8),
+                          value: !liveBoiler.hasSensorReading
+                              ? (tr ? 'Bağlı Değil (--)' : 'Offline (--)')
+                              : (liveBoiler.isHeating
+                                  ? (tr ? 'Aktif Ateşleme 🔥' : 'Active Flame 🔥')
+                                  : (tr ? 'Beklemede ❄️' : 'Standby ❄️')),
+                          valueColor: !liveBoiler.hasSensorReading
+                              ? const Color(0xFFF59E0B)
+                              : (liveBoiler.isHeating ? const Color(0xFFF97316) : const Color(0xFF38BDF8)),
                         ),
                       ],
                     ),

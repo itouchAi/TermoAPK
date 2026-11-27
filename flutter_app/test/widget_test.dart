@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:termostat_flow/main.dart';
 import 'package:termostat_flow/models/thermostat_state.dart';
 import 'package:termostat_flow/screens/secondary_screens.dart';
 import 'package:termostat_flow/screens/theme_effects_sheet.dart';
@@ -19,6 +21,7 @@ import 'package:termostat_flow/services/vault_crypto_service.dart';
 import 'package:termostat_flow/services/voice_gender_classifier.dart';
 import 'package:termostat_flow/services/voice_speech_service.dart';
 import 'package:termostat_flow/services/weather_service.dart';
+import 'package:termostat_flow/widgets/boot_ceremony_overlay.dart';
 import 'package:termostat_flow/widgets/dial_ring_effects.dart';
 import 'package:termostat_flow/widgets/missed_call_alert.dart';
 import 'package:termostat_flow/widgets/rotary_dial.dart';
@@ -2214,5 +2217,165 @@ void main() {
     expect(find.text('Ankara canlı hava raporu alınamadı'), findsOneWidget);
     await tester.tap(find.text('Tekrar Dene'));
     expect(retried, isTrue);
+  });
+
+  test('Disconnected ESP32 yields zero fake defaults, no fake heating comparisons, and -- reports', () {
+    final defaults = SystemSettingsState.defaults();
+    expect(defaults.espOnline, isFalse);
+    expect(defaults.espWdtResetCount, 0);
+    expect(defaults.espOfflineBurnMinutes, 0);
+    expect(defaults.espLogs, isEmpty);
+
+    final disconnected = ThermostatMath.computeBoilerTelemetry(null, 28.0);
+    expect(disconnected.hasSensorReading, isFalse);
+    expect(disconnected.isHeating, isFalse);
+    expect(disconnected.flamePercent, 0);
+    expect(disconnected.pumpRpm, 0);
+    expect(disconnected.statusTextTr, contains('--'));
+
+    final guard = NotificationService.evaluateSafetyThresholds(
+      roomTemp: null,
+      boiler: disconnected,
+      sensors: const BoilerHardwareSensors.disconnected(),
+    );
+    expect(guard.lowPressure, isFalse);
+    expect(guard.overheat, isFalse);
+    expect(guard.freezeRisk, isFalse);
+
+    final callDecision = AiCallService.evaluateTrigger(
+      enabled: true,
+      triggerMode: AiCallTriggerMode.ignitionAndSafety,
+      wasHeating: false,
+      nextBoiler: disconnected,
+      safety: guard,
+      roomTemp: null,
+      targetTemp: 28.5,
+      isUserChange: true,
+    );
+    expect(callDecision.shouldCall, isFalse);
+
+    final eventDecision = AiCallService.evaluateBoilerEventNotification(
+      enabled: true,
+      wasHeating: false,
+      nextBoiler: disconnected,
+      safety: guard,
+      locationName: 'Ev · İstanbul',
+      roomTemp: null,
+      targetTemp: 25.0,
+      isUserChange: true,
+    );
+    expect(eventDecision.shouldNotify, isFalse);
+
+    final report = EspLogService.exportLogsReport(
+      settings: defaults,
+      roomTemp: null,
+      targetTemp: 22.5,
+      boiler: disconnected,
+      lang: LangCode.tr,
+    );
+    expect(report, contains('-- → 22.5°C'));
+    expect(report, contains('Alev --'));
+    expect(report, isNot(contains('21.8')));
+  });
+
+  testWidgets('Screens and SmartDisplay show -- when roomTemp or weatherReport is null, and warn on offline target change', (tester) async {
+    final palette = VisualCustomizationState.defaults().resolvePalette();
+    final disconnected = ThermostatMath.computeBoilerTelemetry(null, 25.0);
+
+    // 1. ThermostatScreen shows -- & offline hardware strip
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ThermostatScreen(
+            roomTemp: null,
+            targetTemp: 25.0,
+            activePreset: PresetId.boost,
+            accentColor: const Color(0xFFF59E0B),
+            boiler: disconnected,
+            espOnline: false,
+            lang: LangCode.tr,
+            palette: palette,
+            onChangeTarget: (_) {},
+            onSelectPreset: (_) {},
+          ),
+        ),
+      ),
+    );
+    expect(find.text('--'), findsNWidgets(4));
+    expect(find.text('ESP32 Bağlı Değil'), findsOneWidget);
+    expect(find.textContaining('21.8'), findsNothing);
+
+    // 2. SmartDisplayOverlay shows -- outdoor & -- room without hardcoded 16.4/7.2/11.9
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SmartDisplayOverlay(
+          settings: SystemSettingsState.defaults().copyWith(
+            smartDisplayMode: SmartDisplayMode.aod,
+          ),
+          slideIndex: 0,
+          now: DateTime(2026, 11, 26, 12, 30),
+          locationName: 'Yazlık · İzmir',
+          roomTemp: null,
+          targetTemp: 22.5,
+          boiler: disconnected,
+          weatherReport: null,
+          accentColor: const Color(0xFFF59E0B),
+          palette: palette,
+          lang: LangCode.tr,
+          paletteTag: 'obsidian',
+          onChangeTargetTemp: (_) {},
+          onSelectPreset: (_) {},
+          onUpdateSettings: (_) {},
+          onStepSlideIndex: (_) {},
+          onClose: () {},
+        ),
+      ),
+    );
+    expect(find.text('--'), findsWidgets);
+    expect(find.text('16.4°C'), findsNothing);
+    expect(find.text('21.8°C'), findsNothing);
+    expect(find.text('⚡ Bağlı Değil'), findsOneWidget);
+
+    // 3. BootCeremonyOverlay renders Oda: -- & ESP32: --
+    await tester.pumpWidget(
+      MaterialApp(
+        home: BootCeremonyOverlay(
+          style: BootCeremonyStyle.thermalPulse,
+          durationMs: 1200,
+          soundChimeEnabled: false,
+          hapticEnabled: false,
+          hapticStrength: 50,
+          roomTemp: null,
+          targetTemp: 22.5,
+          boiler: disconnected,
+          locationName: 'Ev · İstanbul',
+          accentColor: const Color(0xFFF59E0B),
+          palette: palette,
+          lang: LangCode.tr,
+          onComplete: () {},
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 900));
+    expect(find.text('Oda: --'), findsOneWidget);
+    expect(find.text('ESP32: --'), findsOneWidget);
+
+    // 4. Full app shell boots with null roomTemp (shows --) and shows offline warning banner when target changes
+    SharedPreferences.setMockInitialValues({
+      'termostat_flow_flutter_v2': jsonEncode({
+        'settings': {'bootCeremonyEnabled': false, 'cloudSyncEnabled': false},
+      }),
+    });
+    await tester.pumpWidget(const TermostatFlowApp());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('21.8°C'), findsNothing);
+
+    await tester.tap(find.byIcon(Icons.add_rounded).first);
+    await tester.pump();
+    expect(find.textContaining('ESP32 / Kombi Bağlantısı Yok'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
   });
 }

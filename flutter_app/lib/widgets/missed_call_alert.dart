@@ -740,7 +740,9 @@ Future<void> showMissedCallActionDialog({
                           children: [
                             _DialogMetricChip(
                               label: tr ? 'Oda' : 'Room',
-                              value: '${AiCallService.formatSpokenNumber(entry.roomTemp)}°C',
+                              value: entry.roomTemp != null
+                                  ? '${AiCallService.formatSpokenNumber(entry.roomTemp!)}°C'
+                                  : '--',
                             ),
                             const SizedBox(width: 6),
                             _DialogMetricChip(

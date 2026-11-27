@@ -96,7 +96,7 @@ class EspLogService {
 
   static String exportLogsReport({
     required SystemSettingsState settings,
-    required double roomTemp,
+    required double? roomTemp,
     required double targetTemp,
     required BoilerTelemetry boiler,
     BoilerHardwareSensors sensors = const BoilerHardwareSensors.disconnected(),
@@ -106,6 +106,8 @@ class EspLogService {
     final pressureText = (sensors.isConnected && sensors.waterPressureBar != null)
         ? '${sensors.waterPressureBar!.toStringAsFixed(1)} Bar'
         : '--';
+    final roomText = roomTemp != null ? '${roomTemp.toStringAsFixed(1)}°C' : '--';
+    final flameText = boiler.hasSensorReading ? '%${boiler.flamePercent}' : '--';
     final buffer = StringBuffer();
     buffer.writeln(tr ? '=== ESP32 DONANIM & WDT RAPORU ===' : '=== ESP32 HARDWARE & WDT REPORT ===');
     buffer.writeln('${tr ? 'Cihaz Kimliği' : 'Device ID'}: ${settings.espDeviceId}');
@@ -124,8 +126,8 @@ class EspLogService {
     );
     buffer.writeln(
       '${tr ? 'Anlık Telemetri' : 'Live Telemetry'}: '
-      '${roomTemp.toStringAsFixed(1)}°C → ${targetTemp.toStringAsFixed(1)}°C | '
-      '${tr ? 'Alev' : 'Flame'} %${boiler.flamePercent} | '
+      '$roomText → ${targetTemp.toStringAsFixed(1)}°C | '
+      '${tr ? 'Alev' : 'Flame'} $flameText | '
       '$pressureText',
     );
     buffer.writeln(tr ? '--- Son Kayıtlar (${settings.espLogs.length}) ---' : '--- Recent Logs (${settings.espLogs.length}) ---');
@@ -147,7 +149,7 @@ class EspLogService {
     String nodePath = 'kombi',
     required String espDeviceId,
     required String roomName,
-    required double roomTemp,
+    required double? roomTemp,
     required double targetTemp,
     required BoilerTelemetry boiler,
     required LangCode lang,
@@ -179,6 +181,8 @@ class EspLogService {
     if (ok) {
       final msgTr = 'ESP32 ($espDeviceId) RTDB bağlantısı doğrulandı · ${ms}ms';
       final msgEn = 'ESP32 ($espDeviceId) RTDB link verified · ${ms}ms';
+      final effectiveRoom = pull.remoteRoomTemp ?? roomTemp;
+      final roomText = effectiveRoom != null ? '${effectiveRoom.toStringAsFixed(1)}°C' : '--';
       return EspPingResult(
         ok: true,
         latencyMs: ms,
@@ -188,7 +192,7 @@ class EspLogService {
         logEntry: EspLogEntry(
           timestamp: nowLabel,
           event: tr ? 'RTDB Ping Başarılı (${ms}ms)' : 'RTDB Ping OK (${ms}ms)',
-          detail: '$espDeviceId · ${roomTemp.toStringAsFixed(1)}°C / ${targetTemp.toStringAsFixed(1)}°C',
+          detail: '$espDeviceId · $roomText / ${targetTemp.toStringAsFixed(1)}°C',
           category: EspLogCategory.sync,
         ),
       );

@@ -12,7 +12,7 @@ class BootCeremonyOverlay extends StatefulWidget {
   final bool soundChimeEnabled;
   final bool hapticEnabled;
   final int hapticStrength;
-  final double roomTemp;
+  final double? roomTemp;
   final double targetTemp;
   final BoilerTelemetry boiler;
   final BoilerHardwareSensors sensors;
@@ -281,7 +281,9 @@ class _BootCeremonyOverlayState extends State<BootCeremonyOverlay> with SingleTi
                                     alignment: WrapAlignment.center,
                                     children: [
                                       _DiagnosticChip(
-                                        label: '${tr ? 'Oda' : 'Room'}: ${widget.roomTemp.toStringAsFixed(1)}°C',
+                                        label: widget.roomTemp != null
+                                            ? '${tr ? 'Oda' : 'Room'}: ${widget.roomTemp!.toStringAsFixed(1)}°C'
+                                            : '${tr ? 'Oda' : 'Room'}: --',
                                         active: t >= 0.25,
                                         color: const Color(0xFF38BDF8),
                                         isLight: isLight,
@@ -295,7 +297,9 @@ class _BootCeremonyOverlayState extends State<BootCeremonyOverlay> with SingleTi
                                         isLight: isLight,
                                       ),
                                       _DiagnosticChip(
-                                        label: widget.boiler.modulationActive ? 'OpenTherm OK' : 'Standby OK',
+                                        label: !widget.boiler.hasSensorReading
+                                            ? (tr ? 'ESP32: --' : 'ESP32: --')
+                                            : (widget.boiler.modulationActive ? 'OpenTherm OK' : 'Standby OK'),
                                         active: t >= 0.68,
                                         color: widget.accentColor,
                                         isLight: isLight,

@@ -1378,8 +1378,8 @@ extension _SmartDisplaySettingsBuilder on _SystemSettingsModalState {
                                     const SizedBox(height: 3),
                                     Text(
                                       tr
-                                          ? 'Oda ${widget.roomTemp.toStringAsFixed(1)}°C · Hedef ${_liveTargetTemp.toStringAsFixed(1)}°C'
-                                          : 'Room ${widget.roomTemp.toStringAsFixed(1)}°C · Target ${_liveTargetTemp.toStringAsFixed(1)}°C',
+                                          ? 'Oda ${widget.roomTemp != null ? '${widget.roomTemp!.toStringAsFixed(1)}°C' : '--'} · Hedef ${_liveTargetTemp.toStringAsFixed(1)}°C'
+                                          : 'Room ${widget.roomTemp != null ? '${widget.roomTemp!.toStringAsFixed(1)}°C' : '--'} · Target ${_liveTargetTemp.toStringAsFixed(1)}°C',
                                       style: const TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.w600,
@@ -1542,7 +1542,7 @@ extension _SmartDisplaySettingsBuilder on _SystemSettingsModalState {
                               border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
                             ),
                             child: Text(
-                              '☀️ ${widget.roomTemp.toStringAsFixed(0)}°C - ${_liveTargetTemp.toStringAsFixed(1)}°C',
+                              '☀️ ${widget.roomTemp != null ? '${widget.roomTemp!.toStringAsFixed(0)}°C' : '--'} - ${_liveTargetTemp.toStringAsFixed(1)}°C',
                               style: const TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,

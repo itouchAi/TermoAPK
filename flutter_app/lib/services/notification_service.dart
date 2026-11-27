@@ -14,8 +14,8 @@ class SafetyGuardStatus {
   final bool overheat;
   final bool flameHealthy;
   final double waterPressureBar;
-  final double roomTemp;
-  final double outsideTemp;
+  final double? roomTemp;
+  final double? outsideTemp;
 
   const SafetyGuardStatus({
     required this.lowPressure,
@@ -78,26 +78,27 @@ class NotificationService {
   static Timer? _dismissTimer;
 
   static SafetyGuardStatus evaluateSafetyThresholds({
-    required double roomTemp,
+    required double? roomTemp,
     double? outsideTemp,
     required BoilerTelemetry boiler,
     BoilerHardwareSensors? sensors,
   }) {
     final effectivePressure = sensors != null
         ? (sensors.isConnected ? sensors.waterPressureBar : null)
-        : boiler.waterPressureBar;
+        : (boiler.hasSensorReading ? boiler.waterPressureBar : null);
     final lowPressure = effectivePressure != null && effectivePressure < 1.0;
-    final freezeRisk = roomTemp < 5.0 || (outsideTemp != null && outsideTemp < 5.0);
-    final overheat = roomTemp >= 28.5;
-    final flameHealthy = !boiler.isHeating || boiler.flamePercent > 0;
+    final freezeRisk = (roomTemp != null && roomTemp < 5.0) ||
+        (outsideTemp != null && outsideTemp < 5.0);
+    final overheat = roomTemp != null && roomTemp >= 28.5;
+    final flameHealthy = !boiler.hasSensorReading || !boiler.isHeating || boiler.flamePercent > 0;
     return SafetyGuardStatus(
       lowPressure: lowPressure,
       freezeRisk: freezeRisk,
       overheat: overheat,
       flameHealthy: flameHealthy,
-      waterPressureBar: effectivePressure ?? boiler.waterPressureBar,
+      waterPressureBar: effectivePressure ?? 0.0,
       roomTemp: roomTemp,
-      outsideTemp: outsideTemp ?? roomTemp,
+      outsideTemp: outsideTemp,
     );
   }
 
@@ -114,7 +115,7 @@ class NotificationService {
     BuildContext? context,
     required LangCode lang,
     required String locationName,
-    required double roomTemp,
+    required double? roomTemp,
     required double targetTemp,
     double? outsideTemp,
     required BoilerTelemetry boiler,
@@ -140,14 +141,15 @@ class NotificationService {
     final pressurePart = (sensors.isConnected && sensors.waterPressureBar != null)
         ? ' · ${sensors.waterPressureBar!.toStringAsFixed(1)} Bar'
         : '';
+    final roomPart = roomTemp != null ? '${roomTemp.toStringAsFixed(1)}°C' : '--';
     final title = customTitle ??
         (isCritical
             ? (tr ? '⚠️ Kritik Kombi Emniyet Uyarısı' : '⚠️ Critical Boiler Safety Alert')
             : (tr ? '🔔 Termostat 3 Saatlik Durum & Test Bildirimi' : '🔔 Thermostat 3h Status & Test Alert'));
     final body = customBody ??
         (tr
-            ? '$locationName · Oda ${roomTemp.toStringAsFixed(1)}°C / Hedef ${targetTemp.toStringAsFixed(1)}°C$pressurePart · ${boiler.statusTextTr}'
-            : '$locationName · Room ${roomTemp.toStringAsFixed(1)}°C / Target ${targetTemp.toStringAsFixed(1)}°C$pressurePart · ${boiler.statusTextEn}');
+            ? '$locationName · Oda $roomPart / Hedef ${targetTemp.toStringAsFixed(1)}°C$pressurePart · ${boiler.statusTextTr}'
+            : '$locationName · Room $roomPart / Target ${targetTemp.toStringAsFixed(1)}°C$pressurePart · ${boiler.statusTextEn}');
 
     if (settings.hapticEnabled && !suppressChime) {
       HardwareService.vibrateMs(isCritical ? 140 : 55, amplitude: isCritical ? 230 : 150);
@@ -327,6 +329,8 @@ class NotificationService {
       _dismissTimer = Timer(const Duration(seconds: 4), _dismissBanner);
     } catch (_) {}
   }
+
+  static void dismissActiveBanner() => _dismissBanner();
 
   static void _dismissBanner() {
     _dismissTimer?.cancel();

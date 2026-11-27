@@ -27,7 +27,7 @@ class AiPhoneCallOverlay extends StatefulWidget {
   final int hapticStrength;
   final String locationName;
   final String espDeviceId;
-  final double roomTemp;
+  final double? roomTemp;
   final double targetTemp;
   final BoilerTelemetry boiler;
   final SafetyGuardStatus safety;
@@ -806,7 +806,9 @@ class _AiPhoneCallOverlayState extends State<AiPhoneCallOverlay>
                                   children: [
                                     _CallStatTile(
                                       label: tr ? 'ODA' : 'ROOM',
-                                      value: '${AiCallService.formatSpokenNumber(widget.roomTemp)}°',
+                                      value: widget.roomTemp != null
+                                          ? '${AiCallService.formatSpokenNumber(widget.roomTemp!)}°'
+                                          : '--',
                                       color: Colors.white,
                                     ),
                                     _CallStatTile(

@@ -348,7 +348,7 @@ class WeatherScreen extends StatefulWidget {
   final ThemePaletteSpec palette;
   final VoidCallback onApplyEcoCompensation;
   final bool weatherAlertsEnabled;
-  final double roomTemp;
+  final double? roomTemp;
   final double targetTemp;
   final BoilerTelemetry? boiler;
   final BoilerHardwareSensors sensors;
@@ -368,7 +368,7 @@ class WeatherScreen extends StatefulWidget {
     required this.palette,
     required this.onApplyEcoCompensation,
     this.weatherAlertsEnabled = true,
-    this.roomTemp = 21.8,
+    this.roomTemp,
     this.targetTemp = 22.5,
     this.boiler,
     this.sensors = const BoilerHardwareSensors.disconnected(),
@@ -1104,8 +1104,8 @@ class _WeatherScreenState extends State<WeatherScreen> with SingleTickerProvider
                                     ? '🌧️ Hava & Donma Koruma Test Bildirimi'
                                     : '🌧️ Weather & Freeze Guard Test Alert',
                                 customBody: tr
-                                    ? '$weatherDesc · Oda ${widget.roomTemp.toStringAsFixed(1)}°C.'
-                                    : '$weatherDesc · Room ${widget.roomTemp.toStringAsFixed(1)}°C.',
+                                    ? '$weatherDesc · Oda ${widget.roomTemp != null ? '${widget.roomTemp!.toStringAsFixed(1)}°C' : '--'}.'
+                                    : '$weatherDesc · Room ${widget.roomTemp != null ? '${widget.roomTemp!.toStringAsFixed(1)}°C' : '--'}.',
                                 severityOverride: AlertSeverity.warning,
                               );
                               if (!mounted) return;

@@ -31,7 +31,7 @@ Future<void> showSystemSettingsSheet({
   required LangCode lang,
   required String locationName,
   required Color accentColor,
-  required double roomTemp,
+  required double? roomTemp,
   required double targetTemp,
   double? outsideTemp,
   required BoilerTelemetry boiler,
@@ -84,7 +84,7 @@ class _SystemSettingsModal extends StatefulWidget {
   final LangCode lang;
   final String locationName;
   final Color accentColor;
-  final double roomTemp;
+  final double? roomTemp;
   final double targetTemp;
   final double? outsideTemp;
   final BoilerTelemetry boiler;
@@ -1895,10 +1895,10 @@ class _SystemSettingsModalState extends State<_SystemSettingsModal> {
                   Text(
                     tr
                         ? '• Basınç İzleme: $pressureLabel (Eşik: < 1.0 Bar acil uyarı)\n'
-                            '• Donma Koruması: Oda ${widget.roomTemp.toStringAsFixed(1)}°C (Eşik: < 5.0°C otomatik ateşleme)\n'
+                            '• Donma Koruması: Oda ${widget.roomTemp != null ? '${widget.roomTemp!.toStringAsFixed(1)}°C' : '--'} (Eşik: < 5.0°C otomatik ateşleme)\n'
                             '• Alev & Brülör: ${liveBoiler.statusTextTr}'
                         : '• Pressure Guard: $pressureLabel (Threshold: < 1.0 Bar)\n'
-                            '• Freeze Guard: Room ${widget.roomTemp.toStringAsFixed(1)}°C (Threshold: < 5.0°C)\n'
+                            '• Freeze Guard: Room ${widget.roomTemp != null ? '${widget.roomTemp!.toStringAsFixed(1)}°C' : '--'} (Threshold: < 5.0°C)\n'
                             '• Flame & Burner: ${liveBoiler.statusTextEn}',
                     style: TextStyle(fontSize: 10.5, color: Colors.white.withValues(alpha: 0.76), height: 1.45),
                   ),

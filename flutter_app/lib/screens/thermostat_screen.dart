@@ -5,12 +5,13 @@ import '../widgets/rotary_dial.dart';
 import '../widgets/tactile_button.dart';
 
 class ThermostatScreen extends StatelessWidget {
-  final double roomTemp;
+  final double? roomTemp;
   final double targetTemp;
   final PresetId? activePreset;
   final Color accentColor;
   final BoilerTelemetry boiler;
   final BoilerHardwareSensors sensors;
+  final bool espOnline;
   final LangCode lang;
   final ThemePaletteSpec palette;
   final DialRingStyle dialRingStyle;
@@ -26,6 +27,7 @@ class ThermostatScreen extends StatelessWidget {
     required this.accentColor,
     required this.boiler,
     this.sensors = const BoilerHardwareSensors.disconnected(),
+    this.espOnline = false,
     required this.lang,
     required this.palette,
     this.dialRingStyle = DialRingStyle.classic,
@@ -89,13 +91,13 @@ class ThermostatScreen extends StatelessWidget {
                 children: [
                   _TelemetryCell(
                     label: lang == LangCode.tr ? 'ODA:' : 'ROOM:',
-                    value: '${roomTemp.toStringAsFixed(1)}°C',
+                    value: roomTemp != null ? '${roomTemp!.toStringAsFixed(1)}°C' : '--',
                     palette: palette,
                   ),
                   Text('|', style: TextStyle(color: dividerColor)),
                   _TelemetryCell(
                     label: lang == LangCode.tr ? 'BASINÇ:' : 'PRESS:',
-                    value: sensors.waterPressureBar != null
+                    value: sensors.isConnected && sensors.waterPressureBar != null
                         ? '${sensors.waterPressureBar!.toStringAsFixed(1)} Bar'
                         : '--',
                     palette: palette,
@@ -110,6 +112,54 @@ class ThermostatScreen extends StatelessWidget {
                 ],
               ),
             );
+
+            final bool isHardwareLinked = espOnline && roomTemp != null && boiler.hasSensorReading;
+            final String hardwareStatusText = !boiler.hasSensorReading || !espOnline
+                ? (lang == LangCode.tr ? 'ESP32 Bağlı Değil' : 'ESP32 Offline')
+                : (boiler.isHeating
+                    ? (lang == LangCode.tr ? 'Kombi Aktif' : 'Heating')
+                    : (lang == LangCode.tr ? 'Beklemede' : 'Idle'));
+            final Widget? offlineStrip = !isHardwareLinked
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF59E0B).withValues(alpha: palette.isLight ? 0.12 : 0.14),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: const Color(0xFFF59E0B).withValues(alpha: 0.38),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.portable_wifi_off_rounded,
+                            size: 13,
+                            color: Color(0xFFF59E0B),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              lang == LangCode.tr
+                                  ? 'ESP32 / Kombi bağlantısı yok — canlı oda verisi okunamıyor (--)'
+                                  : 'ESP32 / Boiler disconnected — live room sensor unavailable (--)',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                                color: palette.isLight
+                                    ? const Color(0xFF92400E)
+                                    : const Color(0xFFFDE68A),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : null;
 
             final bottomMicroStrip = _TactileGlassBox(
               borderRadius: 12,
@@ -215,18 +265,20 @@ class ThermostatScreen extends StatelessWidget {
                                     ),
                                   ),
                                   Text(
-                                    boiler.isHeating
-                                        ? (lang == LangCode.tr ? 'Kombi Aktif' : 'Heating')
-                                        : (lang == LangCode.tr ? 'Beklemede' : 'Idle'),
+                                    hardwareStatusText,
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: palette.textSecondary,
+                                      fontWeight: !isHardwareLinked ? FontWeight.w600 : FontWeight.w400,
+                                      color: !isHardwareLinked
+                                          ? const Color(0xFFF59E0B)
+                                          : palette.textSecondary,
                                     ),
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 10),
                               telemetryStrip,
+                              if (offlineStrip != null) offlineStrip,
                               const SizedBox(height: 12),
                               GridView.count(
                                 shrinkWrap: true,
@@ -285,18 +337,20 @@ class ThermostatScreen extends StatelessWidget {
                                 ),
                               ),
                               Text(
-                                boiler.isHeating
-                                    ? (lang == LangCode.tr ? 'Kombi Aktif' : 'Heating')
-                                    : (lang == LangCode.tr ? 'Beklemede' : 'Idle'),
+                                hardwareStatusText,
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: palette.textSecondary,
+                                  fontWeight: !isHardwareLinked ? FontWeight.w600 : FontWeight.w400,
+                                  color: !isHardwareLinked
+                                      ? const Color(0xFFF59E0B)
+                                      : palette.textSecondary,
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 10),
                           telemetryStrip,
+                          if (offlineStrip != null) offlineStrip,
                         ],
                       ),
 

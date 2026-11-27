@@ -152,13 +152,18 @@ extension _CloudEspSettingsBuilders on _SystemSettingsModalState {
                   final pressurePart = (widget.sensors.isConnected && widget.sensors.waterPressureBar != null)
                       ? ' · ${widget.sensors.waterPressureBar!.toStringAsFixed(1)} Bar'
                       : '';
+                  final roomStr = widget.roomTemp != null
+                      ? '${widget.roomTemp!.toStringAsFixed(1)}°C'
+                      : '--';
                   final entry = EspLogEntry(
                     timestamp: nowLabel,
-                    event: liveBoiler.isHeating
-                        ? (tr ? 'Modülasyon %${liveBoiler.flamePercent}' : 'Modulation %${liveBoiler.flamePercent}')
-                        : (tr ? 'Bekleme Telemetrisi' : 'Standby Telemetry'),
+                    event: !liveBoiler.hasSensorReading
+                        ? (tr ? 'Çevrimdışı Telemetri (--)' : 'Offline Telemetry (--)')
+                        : (liveBoiler.isHeating
+                            ? (tr ? 'Modülasyon %${liveBoiler.flamePercent}' : 'Modulation %${liveBoiler.flamePercent}')
+                            : (tr ? 'Bekleme Telemetrisi' : 'Standby Telemetry')),
                     detail:
-                        '$devId · ${widget.roomTemp.toStringAsFixed(1)}°C → ${_liveTargetTemp.toStringAsFixed(1)}°C$pressurePart',
+                        '$devId · $roomStr → ${_liveTargetTemp.toStringAsFixed(1)}°C$pressurePart',
                     category: liveBoiler.isHeating ? EspLogCategory.burner : EspLogCategory.system,
                   );
                   final next = _draft.copyWith(

@@ -1591,7 +1591,7 @@ class TermoBotOverlay extends StatefulWidget {
   final bool soundsEnabled;
   final bool hapticEnabled;
   final int hapticStrength;
-  final double roomTemp;
+  final double? roomTemp;
   final double targetTemp;
   final BoilerTelemetry boiler;
   final LangCode lang;
@@ -1609,7 +1609,7 @@ class TermoBotOverlay extends StatefulWidget {
     required this.soundsEnabled,
     this.hapticEnabled = true,
     this.hapticStrength = 80,
-    this.roomTemp = 21.8,
+    this.roomTemp,
     this.targetTemp = 22.5,
     required this.boiler,
     required this.lang,
@@ -1701,13 +1701,18 @@ class _TermoBotOverlayState extends State<TermoBotOverlay> with SingleTickerProv
     if (widget.soundsEnabled) {
       AmbientAudioService.playMascotSound(widget.character);
     }
-    final statusLine = widget.boiler.isHeating
+    final roomLabel = widget.roomTemp != null ? '${widget.roomTemp!.toStringAsFixed(1)}°C' : '--';
+    final statusLine = !widget.boiler.hasSensorReading
         ? (tr
-            ? 'Kombi %${widget.boiler.flamePercent} devrede (${widget.targetTemp.toStringAsFixed(1)}°)'
-            : 'Boiler ${widget.boiler.flamePercent}% active (${widget.targetTemp.toStringAsFixed(1)}°)')
-        : (tr
-            ? 'Oda ${widget.roomTemp.toStringAsFixed(1)}°C dengede!'
-            : 'Room ${widget.roomTemp.toStringAsFixed(1)}°C steady!');
+            ? 'ESP32 bağlantısı bekleniyor (Hedef ${widget.targetTemp.toStringAsFixed(1)}°)'
+            : 'Waiting for ESP32 link (Target ${widget.targetTemp.toStringAsFixed(1)}°)')
+        : (widget.boiler.isHeating
+            ? (tr
+                ? 'Kombi %${widget.boiler.flamePercent} devrede (${widget.targetTemp.toStringAsFixed(1)}°)'
+                : 'Boiler ${widget.boiler.flamePercent}% active (${widget.targetTemp.toStringAsFixed(1)}°)')
+            : (tr
+                ? 'Oda $roomLabel dengede!'
+                : 'Room $roomLabel steady!'));
 
     setState(() {
       _behavior = MascotBehavior.idle;
@@ -1814,7 +1819,7 @@ class FullscreenScreensaverOverlay extends StatefulWidget {
   final bool soundsEnabled;
   final bool hapticEnabled;
   final int hapticStrength;
-  final double roomTemp;
+  final double? roomTemp;
   final double targetTemp;
   final BoilerTelemetry? boiler;
   final String locationName;
@@ -1982,15 +1987,18 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
     if (_sleepDimmed) {
       HardwareService.exitSmartDisplayHardware();
     }
-    final isHeating = widget.boiler?.isHeating ?? (widget.targetTemp > widget.roomTemp + 0.1);
+    final isHeating = widget.boiler?.isHeating ??
+        (widget.roomTemp != null && widget.targetTemp > widget.roomTemp! + 0.1);
     _behaviorTimer?.cancel();
     setState(() {
       _happy = true;
       _sleepDimmed = false;
       _currentBehavior = MascotBehavior.idle;
-      _reactionText = isHeating
-          ? (tr ? '${meta.name}: Ev ısıtılıyor!' : '${meta.name}: Warming up!')
-          : (tr ? '${meta.name}: Konfor sıcaklığı ideal!' : '${meta.name}: Comfort steady!');
+      _reactionText = (widget.boiler != null && !widget.boiler!.hasSensorReading)
+          ? (tr ? '${meta.name}: ESP32 bağlantısı yok (--)' : '${meta.name}: ESP32 offline (--)')
+          : (isHeating
+              ? (tr ? '${meta.name}: Ev ısıtılıyor!' : '${meta.name}: Warming up!')
+              : (tr ? '${meta.name}: Konfor sıcaklığı ideal!' : '${meta.name}: Comfort steady!'));
     });
     _reactionTimer?.cancel();
     _reactionTimer = Timer(const Duration(seconds: 2), () {
@@ -2137,7 +2145,7 @@ class _FullscreenScreensaverOverlayState extends State<FullscreenScreensaverOver
                               border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
                             ),
                             child: Text(
-                              '${tr ? 'Oda' : 'Room'} ${widget.roomTemp.toStringAsFixed(1)}°C  →  ${tr ? 'Hedef' : 'Target'} ${widget.targetTemp.toStringAsFixed(1)}°C  ·  ${tr ? activeBoiler.statusTextTr : activeBoiler.statusTextEn}',
+                              '${tr ? 'Oda' : 'Room'} ${widget.roomTemp != null ? '${widget.roomTemp!.toStringAsFixed(1)}°C' : '--'}  →  ${tr ? 'Hedef' : 'Target'} ${widget.targetTemp.toStringAsFixed(1)}°C  ·  ${tr ? activeBoiler.statusTextTr : activeBoiler.statusTextEn}',
                               style: TextStyle(
                                 fontSize: 12.5,
                                 color: Colors.white.withValues(alpha: 0.84),

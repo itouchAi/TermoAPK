@@ -77,6 +77,7 @@ class BoilerTelemetry {
   final int pumpRpm;
   final double waterPressureBar;
   final bool modulationActive;
+  final bool hasSensorReading;
   final String statusTextTr;
   final String statusTextEn;
 
@@ -86,9 +87,20 @@ class BoilerTelemetry {
     required this.pumpRpm,
     required this.waterPressureBar,
     required this.modulationActive,
+    this.hasSensorReading = true,
     required this.statusTextTr,
     required this.statusTextEn,
   });
+
+  const BoilerTelemetry.disconnected()
+      : isHeating = false,
+        flamePercent = 0,
+        pumpRpm = 0,
+        waterPressureBar = 0.0,
+        modulationActive = false,
+        hasSensorReading = false,
+        statusTextTr = 'ESP32 Bağlı Değil · --',
+        statusTextEn = 'ESP32 Offline · --';
 }
 
 /// Real physical boiler / environmental sensor readings.
@@ -850,7 +862,10 @@ abstract final class ThermostatMath {
     return resolveThermostatAccent(targetTemp, activePreset).toColor();
   }
 
-  static BoilerTelemetry computeBoilerTelemetry(double roomTemp, double targetTemp) {
+  static BoilerTelemetry computeBoilerTelemetry(double? roomTemp, double targetTemp) {
+    if (roomTemp == null) {
+      return const BoilerTelemetry.disconnected();
+    }
     final delta = targetTemp - roomTemp;
     if (delta <= 0.1) {
       return const BoilerTelemetry(
@@ -859,6 +874,7 @@ abstract final class ThermostatMath {
         pumpRpm: 0,
         waterPressureBar: 1.6,
         modulationActive: false,
+        hasSensorReading: true,
         statusTextTr: 'Beklemede',
         statusTextEn: 'Standby',
       );
@@ -872,6 +888,7 @@ abstract final class ThermostatMath {
       pumpRpm: pumpRpm,
       waterPressureBar: 1.6,
       modulationActive: modulationActive,
+      hasSensorReading: true,
       statusTextTr: modulationActive ? 'Modülasyon · %$flamePercent' : 'Yüksek Alev · %$flamePercent',
       statusTextEn: modulationActive ? 'Modulating · $flamePercent%' : 'High Flame · $flamePercent%',
     );
@@ -1412,7 +1429,7 @@ class AiCallLogEntry {
   final String summaryEn;
   final String actionTakenTr;
   final String actionTakenEn;
-  final double roomTemp;
+  final double? roomTemp;
   final double targetTemp;
   final bool boilerHeating;
   final bool urgent;
@@ -1433,7 +1450,7 @@ class AiCallLogEntry {
     required this.summaryEn,
     required this.actionTakenTr,
     required this.actionTakenEn,
-    required this.roomTemp,
+    this.roomTemp,
     required this.targetTemp,
     required this.boilerHeating,
     this.urgent = false,
@@ -1541,7 +1558,7 @@ class AiCallLogEntry {
       summaryEn: (map['summaryEn'] as String?) ?? '',
       actionTakenTr: (map['actionTakenTr'] as String?) ?? '',
       actionTakenEn: (map['actionTakenEn'] as String?) ?? '',
-      roomTemp: (map['roomTemp'] as num?)?.toDouble() ?? 21.8,
+      roomTemp: (map['roomTemp'] as num?)?.toDouble(),
       targetTemp: (map['targetTemp'] as num?)?.toDouble() ?? 22.5,
       boilerHeating: (map['boilerHeating'] as bool?) ?? false,
       urgent: (map['urgent'] as bool?) ?? false,
@@ -1841,8 +1858,8 @@ class SystemSettingsState {
     this.espWdtEnabled = true,
     this.espOfflineBufferEnabled = true,
     this.espLastPingAt = '',
-    this.espWdtResetCount = 1,
-    this.espOfflineBurnMinutes = 42,
+    this.espWdtResetCount = 0,
+    this.espOfflineBurnMinutes = 0,
     required this.firebaseRtdbUrl,
     this.firebaseApiKey = '',
     this.firebaseNodePath = 'kombi',
@@ -1934,8 +1951,8 @@ class SystemSettingsState {
         espWdtEnabled: true,
         espOfflineBufferEnabled: true,
         espLastPingAt: '',
-        espWdtResetCount: 1,
-        espOfflineBurnMinutes: 42,
+        espWdtResetCount: 0,
+        espOfflineBurnMinutes: 0,
         firebaseRtdbUrl: 'https://kombi-kontrol-babd5-default-rtdb.firebaseio.com',
         firebaseApiKey: '',
         firebaseNodePath: 'kombi',
@@ -1945,29 +1962,7 @@ class SystemSettingsState {
         cloudLastSyncAt: '',
         cloudLastSyncOk: false,
         cloudLastSyncMessage: '',
-        espLogs: [
-          EspLogEntry(
-            timestamp: '23:10',
-            event: 'Modülasyon %36',
-            detail: 'Oda 21.8°C → Hedef 22.5°C',
-            category: EspLogCategory.burner,
-            durationSeconds: 1080,
-          ),
-          EspLogEntry(
-            timestamp: '20:45',
-            event: 'Brülör Ateşleme',
-            detail: 'Basınç 1.6 Bar normal',
-            category: EspLogCategory.burner,
-            durationSeconds: 1440,
-          ),
-          EspLogEntry(
-            timestamp: '16:12',
-            event: 'WDT Kontrolü',
-            detail: 'Çevrimdışı tampon kaydedildi',
-            isWarning: true,
-            category: EspLogCategory.watchdog,
-          ),
-        ],
+        espLogs: const [],
       );
 
   static String extractCityName(String locationName) {

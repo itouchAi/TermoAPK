@@ -816,7 +816,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     final p = widget.palette;
     final emerald = p.isLight ? const Color(0xFF059669) : const Color(0xFF34D399);
     final themeAccent = p.themeOverrideAccent?.toColor() ?? emerald;
-    final liveBoiler = widget.boiler ?? ThermostatMath.computeBoilerTelemetry(21.8, 22.5);
+    final liveBoiler = widget.boiler ?? const BoilerTelemetry.disconnected();
     final burnSeconds = widget.todayLog?.activeBurnSeconds ?? 0;
     final burnDurationText = ThermalLogAggregator.formatDuration(burnSeconds, widget.lang);
     final gasEstimate = widget.todayLog?.gasM3 ?? 0.0;
@@ -1425,7 +1425,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        '%${liveBoiler.flamePercent}',
+                        liveBoiler.hasSensorReading ? '%${liveBoiler.flamePercent}' : '--',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
