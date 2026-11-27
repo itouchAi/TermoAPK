@@ -268,11 +268,13 @@ class _Home3dScreenState extends State<Home3dScreen> with SingleTickerProviderSt
         final isLandscape = constraints.maxWidth > constraints.maxHeight;
         final compact = constraints.maxHeight < 460;
 
+        final bottomNavClearance = isLandscape ? (compact ? 26.0 : 38.0) : 34.0;
+
         return Center(
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: isLandscape ? 980 : 520),
+            constraints: BoxConstraints(maxWidth: isLandscape ? 1040 : 520),
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+              padding: EdgeInsets.fromLTRB(14, 6, 14, bottomNavClearance),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -611,7 +613,102 @@ class _Home3dScreenState extends State<Home3dScreen> with SingleTickerProviderSt
           const SizedBox(width: 10),
           Expanded(
             flex: 4,
-            child: SingleChildScrollView(child: inspectorCard),
+            child: Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: palette.isLight
+                    ? Colors.white.withValues(alpha: 0.72)
+                    : const Color(0xFF0A0D16).withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(color: palette.cardBorder),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  inspectorCard,
+                  const SizedBox(height: 10),
+                  Text(
+                    tr ? 'TÜM ODALAR · ANLIK DURUM' : 'ALL ROOMS · LIVE STATUS',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                      color: palette.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: rooms.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 6),
+                      itemBuilder: (ctx, idx) {
+                        final r = rooms[idx];
+                        final sel = r.id == _selectedRoomId;
+                        final t = telMap[r.id]!;
+                        final tStr = t.roomTempC != null ? '${t.roomTempC!.toStringAsFixed(1)}°C' : '--';
+                        final radStr = t.radiatorTempC != null ? '${t.radiatorTempC!.toStringAsFixed(1)}°C' : '--';
+                        return GestureDetector(
+                          onTap: () => _focusOnRoom(r),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: sel
+                                  ? widget.accentColor.withValues(alpha: 0.14)
+                                  : palette.cardBg,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: sel ? widget.accentColor : palette.cardBorder,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  HouseRoom.kindIcon(r.kind),
+                                  size: 15,
+                                  color: sel ? widget.accentColor : palette.textSecondary,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        r.name,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: palette.textPrimary,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        '${r.areaM2.toStringAsFixed(1)} m² · ${tr ? 'Petek' : 'Rad'}: $radStr',
+                                        style: TextStyle(fontSize: 10, color: palette.textSecondary),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  tStr,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: t.roomTempC != null ? widget.accentColor : palette.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       );
@@ -892,57 +989,69 @@ class _Home3dScreenState extends State<Home3dScreen> with SingleTickerProviderSt
       ),
     );
 
-    final inspector = ListView(
-      padding: const EdgeInsets.only(bottom: 6),
+    final templatesHeader = Row(
       children: [
-        // Ready Templates Row
-        Text(
-          tr ? 'HAZIR EV ŞABLONLARI' : 'READY TEMPLATES',
-          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.8, color: palette.textSecondary),
-        ),
-        const SizedBox(height: 5),
-        SizedBox(
-          height: 36,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: HouseFloorPlan.readyTemplates.length + 1,
-            separatorBuilder: (_, __) => const SizedBox(width: 6),
-            itemBuilder: (ctx, idx) {
-              if (idx == HouseFloorPlan.readyTemplates.length) {
-                return OutlinedButton.icon(
-                  onPressed: _addNewRoom,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: widget.accentColor,
-                    side: BorderSide(color: widget.accentColor.withValues(alpha: 0.5)),
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  icon: const Icon(Icons.add_box_outlined, size: 15),
-                  label: Text(tr ? '+ Oda Ekle' : '+ Add Room', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
-                );
-              }
-              final tpl = HouseFloorPlan.readyTemplates[idx];
-              final active = widget.floorPlan.templateId == tpl.id;
-              return ChoiceChip(
-                label: Text(
-                  tr ? tpl.labelTr : tpl.labelEn,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: active ? Colors.white : palette.textPrimary,
-                  ),
-                ),
-                selected: active,
-                selectedColor: widget.accentColor,
-                backgroundColor: palette.cardBg,
-                side: BorderSide(color: active ? widget.accentColor : palette.cardBorder),
-                onSelected: (_) => _selectTemplate(tpl.id),
-              );
-            },
+        Expanded(
+          child: Text(
+            tr ? 'HAZIR EV ŞABLONLARI' : 'READY TEMPLATES',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
+              color: palette.textSecondary,
+            ),
           ),
         ),
-        if (selectedRoom != null) ...[
-          const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _addNewRoom,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: widget.accentColor,
+            side: BorderSide(color: widget.accentColor.withValues(alpha: 0.5)),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            minimumSize: const Size(0, 30),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+          icon: const Icon(Icons.add_box_outlined, size: 14),
+          label: Text(
+            tr ? '+ Oda Ekle' : '+ Add Room',
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ],
+    );
+
+    final templatesWrap = Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final tpl in HouseFloorPlan.readyTemplates)
+          ChoiceChip(
+            label: Text(
+              tr ? tpl.labelTr : tpl.labelEn,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: widget.floorPlan.templateId == tpl.id ? Colors.white : palette.textPrimary,
+              ),
+            ),
+            selected: widget.floorPlan.templateId == tpl.id,
+            selectedColor: widget.accentColor,
+            backgroundColor: palette.cardBg,
+            side: BorderSide(
+              color: widget.floorPlan.templateId == tpl.id ? widget.accentColor : palette.cardBorder,
+            ),
+            visualDensity: VisualDensity.compact,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            onSelected: (_) => _selectTemplate(tpl.id),
+          ),
+      ],
+    );
+
+    final roomEditorDetails = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (selectedRoom != null)
           Container(
             padding: const EdgeInsets.all(11),
             decoration: BoxDecoration(
@@ -1104,7 +1213,61 @@ class _Home3dScreenState extends State<Home3dScreen> with SingleTickerProviderSt
               ],
             ),
           ),
-        ],
+        const SizedBox(height: 10),
+        Text(
+          tr ? 'PLANDAKİ ODALAR (${rooms.length})' : 'ROOMS IN PLAN (${rooms.length})',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+            color: palette.textSecondary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final r in rooms)
+              GestureDetector(
+                onTap: () {
+                  setState(() => _selectedRoomId = r.id);
+                  _syncEditorFields();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: r.id == _selectedRoomId
+                        ? widget.accentColor.withValues(alpha: 0.20)
+                        : palette.cardBg,
+                    borderRadius: BorderRadius.circular(11),
+                    border: Border.all(
+                      color: r.id == _selectedRoomId ? widget.accentColor : palette.cardBorder,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        HouseRoom.kindIcon(r.kind),
+                        size: 13,
+                        color: r.id == _selectedRoomId ? widget.accentColor : palette.textSecondary,
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        '${r.name} · ${r.width.toStringAsFixed(1)}×${r.depth.toStringAsFixed(1)}m',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: r.id == _selectedRoomId ? FontWeight.w700 : FontWeight.w500,
+                          color: palette.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
       ],
     );
 
@@ -1114,7 +1277,34 @@ class _Home3dScreenState extends State<Home3dScreen> with SingleTickerProviderSt
         children: [
           Expanded(flex: 6, child: gridWidget),
           const SizedBox(width: 10),
-          Expanded(flex: 4, child: inspector),
+          Expanded(
+            flex: 4,
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: palette.isLight
+                    ? Colors.white.withValues(alpha: 0.72)
+                    : const Color(0xFF0A0D16).withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: palette.cardBorder),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  templatesHeader,
+                  const SizedBox(height: 6),
+                  templatesWrap,
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: roomEditorDetails,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       );
     }
@@ -1124,7 +1314,19 @@ class _Home3dScreenState extends State<Home3dScreen> with SingleTickerProviderSt
       children: [
         Expanded(flex: 5, child: gridWidget),
         const SizedBox(height: 8),
-        Expanded(flex: 5, child: inspector),
+        Expanded(
+          flex: 5,
+          child: ListView(
+            padding: const EdgeInsets.only(bottom: 6),
+            children: [
+              templatesHeader,
+              const SizedBox(height: 6),
+              templatesWrap,
+              const SizedBox(height: 8),
+              roomEditorDetails,
+            ],
+          ),
+        ),
       ],
     );
   }
