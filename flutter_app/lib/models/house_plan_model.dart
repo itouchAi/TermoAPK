@@ -286,14 +286,14 @@ class HouseFloorPlan {
   static HouseFloorPlan fromTemplate(String templateId, {bool tr = true}) {
     switch (templateId) {
       case '1+1':
-        return template1Plus1(tr: tr);
+        return HouseFloorPlan.template1Plus1(tr: tr);
       case '3+1':
-        return template3Plus1(tr: tr);
+        return HouseFloorPlan.template3Plus1(tr: tr);
       case 'duplex':
-        return templateDuplex(tr: tr);
+        return HouseFloorPlan.templateDuplex(tr: tr);
       case '2+1':
       default:
-        return template2Plus1(tr: tr);
+        return HouseFloorPlan.template2Plus1(tr: tr);
     }
   }
 
