@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/house_plan_model.dart';
@@ -332,7 +331,7 @@ class _Home3dScreenState extends State<Home3dScreen> with SingleTickerProviderSt
                           ),
                         ),
                         child: Text(
-                          tr ? '$onlineCount/${rooms.length} ESP' : '$onlineCount/${rooms.length} ESP',
+                          '$onlineCount/${rooms.length} ESP',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
@@ -1553,24 +1552,32 @@ class _House3DPainter extends CustomPainter {
         late bool isHorizontalWall;
         switch (rad.wallSide) {
           case RadiatorWallSide.north:
-            final cx = x0 + r.width * rad.offsetRatio;
-            rx0 = cx - 0.38; rx1 = cx + 0.38; rz0 = z0 + 0.06; rz1 = z0 + 0.22;
-            isHorizontalWall = true;
+            {
+              final cx = x0 + r.width * rad.offsetRatio;
+              rx0 = cx - 0.38; rx1 = cx + 0.38; rz0 = z0 + 0.06; rz1 = z0 + 0.22;
+              isHorizontalWall = true;
+            }
             break;
           case RadiatorWallSide.south:
-            final cx = x0 + r.width * rad.offsetRatio;
-            rx0 = cx - 0.38; rx1 = cx + 0.38; rz0 = z1 - 0.22; rz1 = z1 - 0.06;
-            isHorizontalWall = true;
+            {
+              final cx = x0 + r.width * rad.offsetRatio;
+              rx0 = cx - 0.38; rx1 = cx + 0.38; rz0 = z1 - 0.22; rz1 = z1 - 0.06;
+              isHorizontalWall = true;
+            }
             break;
           case RadiatorWallSide.west:
-            final cz = z0 + r.depth * rad.offsetRatio;
-            rx0 = x0 + 0.06; rx1 = x0 + 0.22; rz0 = cz - 0.38; rz1 = cz + 0.38;
-            isHorizontalWall = false;
+            {
+              final cz = z0 + r.depth * rad.offsetRatio;
+              rx0 = x0 + 0.06; rx1 = x0 + 0.22; rz0 = cz - 0.38; rz1 = cz + 0.38;
+              isHorizontalWall = false;
+            }
             break;
           case RadiatorWallSide.east:
-            final cz = z0 + r.depth * rad.offsetRatio;
-            rx0 = x1 - 0.22; rx1 = x1 - 0.06; rz0 = cz - 0.38; rz1 = cz + 0.38;
-            isHorizontalWall = false;
+            {
+              final cz = z0 + r.depth * rad.offsetRatio;
+              rx0 = x1 - 0.22; rx1 = x1 - 0.06; rz0 = cz - 0.38; rz1 = cz + 0.38;
+              isHorizontalWall = false;
+            }
             break;
         }
         final topY = 0.08 + 0.36 * math.max(0.25, wallHeightRatio);
@@ -1802,20 +1809,28 @@ class _FloorplanEditorPainter extends CustomPainter {
         late Rect radRect;
         switch (rad.wallSide) {
           case RadiatorWallSide.north:
-            final cx = rect.left + rect.width * rad.offsetRatio;
-            radRect = Rect.fromCenter(center: Offset(cx, rect.top + 4), width: math.min(26, rect.width * 0.45), height: 5);
+            {
+              final cx = rect.left + rect.width * rad.offsetRatio;
+              radRect = Rect.fromCenter(center: Offset(cx, rect.top + 4.0), width: math.min(26.0, rect.width * 0.45), height: 5.0);
+            }
             break;
           case RadiatorWallSide.south:
-            final cx = rect.left + rect.width * rad.offsetRatio;
-            radRect = Rect.fromCenter(center: Offset(cx, rect.bottom - 4), width: math.min(26, rect.width * 0.45), height: 5);
+            {
+              final cx = rect.left + rect.width * rad.offsetRatio;
+              radRect = Rect.fromCenter(center: Offset(cx, rect.bottom - 4.0), width: math.min(26.0, rect.width * 0.45), height: 5.0);
+            }
             break;
           case RadiatorWallSide.west:
-            final cy = rect.top + rect.height * rad.offsetRatio;
-            radRect = Rect.fromCenter(center: Offset(rect.left + 4, cy), width: 5, height: math.min(26, rect.height * 0.45));
+            {
+              final cy = rect.top + rect.height * rad.offsetRatio;
+              radRect = Rect.fromCenter(center: Offset(rect.left + 4.0, cy), width: 5.0, height: math.min(26.0, rect.height * 0.45));
+            }
             break;
           case RadiatorWallSide.east:
-            final cy = rect.top + rect.height * rad.offsetRatio;
-            radRect = Rect.fromCenter(center: Offset(rect.right - 4, cy), width: 5, height: math.min(26, rect.height * 0.45));
+            {
+              final cy = rect.top + rect.height * rad.offsetRatio;
+              radRect = Rect.fromCenter(center: Offset(rect.right - 4.0, cy), width: 5.0, height: math.min(26.0, rect.height * 0.45));
+            }
             break;
         }
         canvas.drawRRect(
