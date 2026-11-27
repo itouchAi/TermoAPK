@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:termostat_flow/main.dart';
+import 'package:termostat_flow/models/house_plan_model.dart';
 import 'package:termostat_flow/models/thermostat_state.dart';
+import 'package:termostat_flow/screens/home_3d_screen.dart';
 import 'package:termostat_flow/screens/secondary_screens.dart';
 import 'package:termostat_flow/screens/theme_effects_sheet.dart';
 import 'package:termostat_flow/screens/thermostat_screen.dart';
@@ -23,6 +25,7 @@ import 'package:termostat_flow/services/voice_speech_service.dart';
 import 'package:termostat_flow/services/weather_service.dart';
 import 'package:termostat_flow/widgets/boot_ceremony_overlay.dart';
 import 'package:termostat_flow/widgets/dial_ring_effects.dart';
+import 'package:termostat_flow/widgets/flow_tab_bar.dart';
 import 'package:termostat_flow/widgets/missed_call_alert.dart';
 import 'package:termostat_flow/widgets/rotary_dial.dart';
 import 'package:termostat_flow/widgets/smart_display_overlay.dart';
@@ -50,20 +53,22 @@ void main() {
     expect(standby.waterPressureBar, 1.6);
   });
 
-  test('VisualCustomizationState round-trips theme and tab order', () {
+  test('VisualCustomizationState round-trips theme, 5-tab order, and startupTab', () {
     final initial = VisualCustomizationState.defaults().copyWith(
       theme: AppThemeMode.obsidianLavender,
       obsidianPalette: ObsidianPalette.royalViolet,
       performanceMode: PerformanceMode.ecoBattery,
       weatherPreview: WeatherEffectPreview.rainy,
-      tabOrder: [TabId.hava, TabId.termo, TabId.prog, TabId.rapor],
+      tabOrder: [TabId.hava, TabId.ev, TabId.termo, TabId.prog, TabId.rapor],
+      startupTab: TabId.ev,
     );
     final restored = VisualCustomizationState.fromJson(initial.toJson());
     expect(restored.theme, AppThemeMode.obsidianLavender);
     expect(restored.obsidianPalette, ObsidianPalette.royalViolet);
     expect(restored.performanceMode, PerformanceMode.ecoBattery);
     expect(restored.weatherPreview, WeatherEffectPreview.rainy);
-    expect(restored.tabOrder, [TabId.hava, TabId.termo, TabId.prog, TabId.rapor]);
+    expect(restored.tabOrder, [TabId.hava, TabId.ev, TabId.termo, TabId.prog, TabId.rapor]);
+    expect(restored.startupTab, TabId.ev);
   });
 
   test('SystemSettingsState round-trips Smart Display, TermoBot and Weather fields', () {
@@ -2374,6 +2379,138 @@ void main() {
     await tester.tap(find.byIcon(Icons.add_rounded).first);
     await tester.pump();
     expect(find.textContaining('ESP32 / Kombi Bağlantısı Yok'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  test('5-tab dock math, HouseFloorPlan templates, RoomEspTelemetry defaults, and RTDB rooms parser work accurately', () {
+    expect(ThermostatMath.tabs.length, 5);
+    expect(ThermostatMath.tabs.first.id, TabId.ev);
+    expect(ThermostatMath.tabs.first.labelTr, 'Ev');
+    expect(ThermostatMath.tabXs.length, 5);
+    expect(VisualCustomizationState.defaults().tabOrder.first, TabId.ev);
+    expect(VisualCustomizationState.defaults().startupTab, TabId.termo);
+
+    final voiceToHome = ThermostatMath.parseVoiceCommand('ev haritasını aç');
+    expect(voiceToHome.handled, isTrue);
+    expect(voiceToHome.navigateTab, TabId.ev);
+
+    expect(HouseFloorPlan.readyTemplates.length, 4);
+    final tpl11 = HouseFloorPlan.fromTemplate('1+1');
+    final tplDuplex = HouseFloorPlan.fromTemplate('duplex');
+    expect(tpl11.rooms.length, 4);
+    expect(tplDuplex.rooms.length, greaterThan(tpl11.rooms.length));
+
+    final restoredPlan = HouseFloorPlan.fromJson(tplDuplex.toJson());
+    expect(restoredPlan.templateId, 'duplex');
+    expect(restoredPlan.rooms.length, tplDuplex.rooms.length);
+    expect(restoredPlan.rooms.first.name, tplDuplex.rooms.first.name);
+
+    const offlineTel = RoomEspTelemetry.offline('esp-salon');
+    expect(offlineTel.online, isFalse);
+    expect(offlineTel.roomTempC, isNull);
+    expect(offlineTel.radiatorTempC, isNull);
+    expect(offlineTel.wifiRssiDbm, isNull);
+    expect(offlineTel.wifiQualityLabel(tr: true), '--');
+
+    final pulled = FirebaseSyncService.parsePullResponseBody(
+      jsonEncode({
+        'targetTemp': 23.0,
+        'roomTemp': 22.1,
+        'rooms': {
+          'esp-salon': {'online': true, 'roomTemp': 22.4, 'radiatorTemp': 48.2, 'wifiRssi': -58},
+          'esp-yatak': {'online': true, 'roomTemp': 19.6, 'radiatorTemp': 41.0, 'wifiRssi': -74},
+        },
+      }),
+      safeNode: 'kombi',
+      statusCode: 200,
+      latencyMs: 38,
+    );
+    expect(pulled.ok, isTrue);
+    expect(pulled.remoteRooms['esp-salon']?.roomTempC, 22.4);
+    expect(pulled.remoteRooms['esp-salon']?.radiatorTempC, 48.2);
+    expect(pulled.remoteRooms['esp-salon']?.wifiRssiDbm, -58);
+    expect(pulled.remoteRooms['esp-yatak']?.wifiBars, 2);
+  });
+
+  testWidgets('FlowTabBarShell renders 5 tabs with Ev first and Home3dScreen supports templates, editor, and -- telemetry', (tester) async {
+    final palette = VisualCustomizationState.defaults().resolvePalette();
+    final orderedTabs = VisualCustomizationState.defaults().orderedTabs;
+    TabId activeTab = TabId.termo;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (ctx, setState) => FlowTabBarShell(
+              activeTab: activeTab,
+              orderedTabs: orderedTabs,
+              startupTab: TabId.termo,
+              onSelectTab: (next) => setState(() => activeTab = next),
+              onReorderTabs: (_, {nextStartupTab}) {},
+              activeAccent: const RgbAccent(1.0, 0.48, 0.14),
+              lang: LangCode.tr,
+              isLandscape: false,
+              performanceMode: PerformanceMode.ecoBattery,
+              palette: palette,
+              onOpenVoice: () {},
+              voiceOpen: false,
+              child: const Center(child: Text('Body')),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Ev'), findsOneWidget);
+    expect(find.text('Termo.'), findsOneWidget);
+    expect(find.text('Hava'), findsOneWidget);
+    expect(find.text('Rapor'), findsOneWidget);
+    expect(find.text('Prog.'), findsOneWidget);
+
+    await tester.tap(find.text('Ev'));
+    await tester.pump();
+    expect(activeTab, TabId.ev);
+
+    // Home3dScreen renders 3D map with strict '--' when ESP32s are offline, plus template & editor actions
+    HouseFloorPlan plan = HouseFloorPlan.defaults();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (ctx, setState) => Home3dScreen(
+              lang: LangCode.tr,
+              palette: palette,
+              accentColor: const Color(0xFF2ED6C7),
+              floorPlan: plan,
+              mainRoomTemp: null,
+              targetTemp: 22.5,
+              boiler: ThermostatMath.computeBoilerTelemetry(null, 22.5),
+              espOnline: false,
+              onUpdateFloorPlan: (next) => setState(() => plan = next),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('3D Ev Haritası'), findsOneWidget);
+    expect(find.text('Planı Çiz / Düzenle'), findsOneWidget);
+    expect(find.text('--'), findsWidgets);
+
+    // Switch to Planı Çiz / Düzenle, switch to 1+1 Daire template, then add a room
+    await tester.tap(find.text('Planı Çiz / Düzenle'));
+    await tester.pumpAndSettle();
+    expect(find.text('1+1 Daire'), findsOneWidget);
+    await tester.tap(find.text('1+1 Daire'));
+    await tester.pumpAndSettle();
+    expect(plan.templateId, '1+1');
+    final countBeforeAdd = plan.rooms.length;
+
+    await tester.tap(find.text('+ Oda Ekle'));
+    await tester.pumpAndSettle();
+    expect(plan.rooms.length, countBeforeAdd + 1);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();

@@ -3,14 +3,17 @@ import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import '../models/thermostat_state.dart';
 import 'tactile_button.dart';
 
 class FlowTabBarShell extends StatefulWidget {
   final TabId activeTab;
   final List<TabMeta> orderedTabs;
+  final TabId? startupTab;
   final ValueChanged<TabId> onSelectTab;
   final ValueChanged<int>? onStepTab;
+  final void Function(List<TabId> nextOrder, {TabId? nextStartupTab})? onReorderTabs;
   final RgbAccent activeAccent;
   final LangCode lang;
   final bool isLandscape;
@@ -24,8 +27,10 @@ class FlowTabBarShell extends StatefulWidget {
     super.key,
     required this.activeTab,
     required this.orderedTabs,
+    this.startupTab,
     required this.onSelectTab,
     this.onStepTab,
+    this.onReorderTabs,
     required this.activeAccent,
     required this.lang,
     required this.isLandscape,
@@ -52,6 +57,13 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
   int? _hoveredTab;
   int? _pressedTab;
   Offset? _pressOrigin;
+
+  TabId? _draggingTabId;
+  double? _dragStartGlobalX;
+  int _dragStartIndex = 0;
+  bool _promotedStartupDuringDrag = false;
+  String? _reorderToastText;
+  int _reorderToastSeq = 0;
 
   void _handleDockWheel(PointerSignalEvent event) {
     if (_pressedTab != null) {
@@ -144,6 +156,7 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
   }
 
   void _handleTapTab(int idx, TabMeta meta) {
+    if (_draggingTabId != null) return;
     if (idx != _curIndex) {
       _activeMove = FlowMove(
         ts: _elapsedSec,
@@ -158,6 +171,91 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
     widget.onSelectTab(meta.id);
   }
 
+  void _beginLongPressDrag(int slotIdx, LongPressStartDetails details) {
+    if (widget.onReorderTabs == null || slotIdx >= widget.orderedTabs.length) return;
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _draggingTabId = widget.orderedTabs[slotIdx].id;
+      _dragStartGlobalX = details.globalPosition.dx;
+      _dragStartIndex = slotIdx;
+      _promotedStartupDuringDrag = false;
+      _pressedTab = null;
+      _pressOrigin = null;
+    });
+  }
+
+  void _updateLongPressDrag(LongPressMoveUpdateDetails details, double scale) {
+    final dragged = _draggingTabId;
+    final startX = _dragStartGlobalX;
+    final callback = widget.onReorderTabs;
+    if (dragged == null || startX == null || callback == null) return;
+
+    final currentIdx = widget.orderedTabs.indexWhere((t) => t.id == dragged);
+    if (currentIdx < 0) return;
+
+    final safeScale = math.max(0.2, scale);
+    final virtualDeltaX = (details.globalPosition.dx - startX) / safeScale;
+    final startCenterX = ThermostatMath.tabXs[_dragStartIndex.clamp(0, ThermostatMath.tabXs.length - 1)];
+    final targetVirtualX = startCenterX + virtualDeltaX;
+
+    var nearestIdx = currentIdx;
+    var bestDist = double.infinity;
+    final limit = math.min(widget.orderedTabs.length, ThermostatMath.tabXs.length);
+    for (int i = 0; i < limit; i++) {
+      final d = (ThermostatMath.tabXs[i] - targetVirtualX).abs();
+      if (d < bestDist) {
+        bestDist = d;
+        nearestIdx = i;
+      }
+    }
+
+    if (nearestIdx != currentIdx) {
+      HapticFeedback.selectionClick();
+      final nextOrder = [for (final t in widget.orderedTabs) t.id];
+      final moved = nextOrder.removeAt(currentIdx);
+      nextOrder.insert(nearestIdx, moved);
+      final promoteStartup = nearestIdx == 0;
+      if (promoteStartup) {
+        _promotedStartupDuringDrag = true;
+      }
+      callback(
+        nextOrder,
+        nextStartupTab: promoteStartup ? dragged : null,
+      );
+    }
+  }
+
+  void _endLongPressDrag() {
+    final dragged = _draggingTabId;
+    if (dragged == null) return;
+    final tr = widget.lang == LangCode.tr;
+    final meta = widget.orderedTabs.firstWhere(
+      (t) => t.id == dragged,
+      orElse: () => widget.orderedTabs.first,
+    );
+    final idx = widget.orderedTabs.indexWhere((t) => t.id == dragged);
+    final label = tr ? meta.labelTr : meta.labelEn;
+    final toast = _promotedStartupDuringDrag || idx == 0
+        ? (tr
+            ? '★ $label ana başlangıç ekranı & 1. sıra oldu'
+            : '★ $label set as startup & slot #1')
+        : (tr
+            ? '✓ $label yeni sıraya taşındı (${idx + 1}/${widget.orderedTabs.length})'
+            : '✓ $label moved to slot ${idx + 1}/${widget.orderedTabs.length}');
+    final seq = ++_reorderToastSeq;
+    setState(() {
+      _draggingTabId = null;
+      _dragStartGlobalX = null;
+      _promotedStartupDuringDrag = false;
+      _reorderToastText = toast;
+    });
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted && seq == _reorderToastSeq) {
+        setState(() => _reorderToastText = null);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
@@ -170,11 +268,11 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
     final voiceSize = compactLandscape ? 42.0 : 50.0;
     final gap = landscape ? 12.0 : 10.0;
     final maxDockWidth = compactLandscape
-        ? math.min(vw - 40, 380.0)
+        ? math.min(vw - 32, 410.0)
         : landscape
-            ? math.min(vw - 40, 420.0)
-            : math.min(vw - 24, 430.0);
-    final barPixelWidth = math.max(220.0, maxDockWidth - voiceSize - gap);
+            ? math.min(vw - 32, 460.0)
+            : math.min(vw - 18, 456.0);
+    final barPixelWidth = math.max(238.0, maxDockWidth - voiceSize - gap);
     final scale = barPixelWidth / 808.0;
     final barPixelHeight = 124.0 * scale;
     final bottomPad = (compactLandscape ? 6.0 : 14.0) + bottomSafe;
@@ -193,6 +291,24 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
     );
 
     final fgColor = widget.palette.isLight ? const Color(0xFF0F172A) : Colors.white;
+    final tr = widget.lang == LangCode.tr;
+
+    String? dragBannerText = _reorderToastText;
+    if (_draggingTabId != null) {
+      final dIdx = widget.orderedTabs.indexWhere((t) => t.id == _draggingTabId);
+      final meta = widget.orderedTabs.firstWhere(
+        (t) => t.id == _draggingTabId,
+        orElse: () => widget.orderedTabs.first,
+      );
+      final label = tr ? meta.labelTr : meta.labelEn;
+      dragBannerText = dIdx == 0
+          ? (tr
+              ? '★ $label · Sıra 1 (Ana Başlangıç Ekranı)'
+              : '★ $label · Slot 1 (Startup Screen)')
+          : (tr
+              ? '⇄ $label · Sıra ${dIdx + 1}/${widget.orderedTabs.length} (Başlangıç için en sola sürükle)'
+              : '⇄ $label · Slot ${dIdx + 1}/${widget.orderedTabs.length} (Drag leftmost for startup)');
+    }
 
     return Stack(
       children: [
@@ -215,7 +331,7 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
         // 2. App pages rendered above background
         Positioned.fill(child: widget.child),
 
-        // 3. Synchronized virtual 1080x1080 Flow Tab Bar icons, labels & tap targets
+        // 3. Synchronized virtual 1080x1080 Flow Tab Bar icons, labels & tap/drag targets
         Positioned(
           left: viewX - 540.0,
           top: viewY - 540.0,
@@ -230,9 +346,9 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
                   _buildVirtualTabVisuals(i, widget.orderedTabs[i], flow, fgColor),
                 for (int i = 0; i < widget.orderedTabs.length; i++)
                   Positioned(
-                    left: ThermostatMath.tabXs[i] - 90.0,
+                    left: ThermostatMath.tabXs[i] - 76.0,
                     top: 538.0,
-                    width: 180.0,
+                    width: 152.0,
                     height: 124.0,
                     child: MouseRegion(
                       onEnter: (_) {
@@ -259,7 +375,8 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
                           });
                         },
                         onPointerMove: (ev) {
-                          if (_pressedTab == i &&
+                          if (_draggingTabId == null &&
+                              _pressedTab == i &&
                               _pressOrigin != null &&
                               (ev.position - _pressOrigin!).distance > 14.0) {
                             setState(() {
@@ -293,6 +410,10 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
                             onTap: () => _handleTapTab(i, widget.orderedTabs[i]),
+                            onLongPressStart: (details) => _beginLongPressDrag(i, details),
+                            onLongPressMoveUpdate: (details) => _updateLongPressDrag(details, scale),
+                            onLongPressEnd: (_) => _endLongPressDrag(),
+                            onLongPressCancel: _endLongPressDrag,
                             child: const SizedBox.expand(),
                           ),
                         ),
@@ -303,6 +424,48 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
             ),
           ),
         ),
+
+        // Floating priority / drag-reorder guide chip right above Flow Tab Bar
+        if (dragBannerText != null)
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: bottomPad + barPixelHeight + 10,
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: widget.palette.isLight
+                        ? Colors.white.withValues(alpha: 0.94)
+                        : const Color(0xFF10131E).withValues(alpha: 0.94),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: widget.activeAccent.toColor(0.55),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.35),
+                        blurRadius: 14,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    dragBannerText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: widget.palette.textPrimary,
+                      decoration: TextDecoration.none,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
 
         // 4. Circular Voice Assistant button next to Flow Tab Bar
         Positioned(
@@ -351,8 +514,9 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
 
   Widget _buildVirtualTabVisuals(int i, TabMeta tab, FlowTabState flow, Color fgColor) {
     const by = 600.0;
+    final tx = ThermostatMath.tabXs[i.clamp(0, ThermostatMath.tabXs.length - 1)];
     final w = math.pow(
-      ThermostatMath.clamp01(1.0 - (flow.x - ThermostatMath.tabXs[i]).abs() / 106.0),
+      ThermostatMath.clamp01(1.0 - (flow.x - tx).abs() / 86.0),
       1.5,
     ).toDouble();
     final a = w * ThermostatMath.clamp01(flow.rise);
@@ -364,18 +528,41 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
     final labelY = by + 14.0 - 16.0 * la;
 
     final tactileActive = TactileMotionScope.isEnabled(context);
+    final isDraggingThis = _draggingTabId == tab.id;
     final isHovered = tactileActive && _hoveredTab == i;
     final isPressed = tactileActive && _pressedTab == i;
-    final tactileScale = isPressed ? 0.90 : (isHovered ? 1.055 : 1.0);
+    final tactileScale = isDraggingThis
+        ? 1.18
+        : (isPressed ? 0.90 : (isHovered ? 1.055 : 1.0));
+    final isStartup = widget.startupTab == tab.id;
 
     return IgnorePointer(
       child: Stack(
         children: [
+          if (isDraggingThis || (_draggingTabId != null && isStartup))
+            Positioned(
+              left: tx - 66.0,
+              top: by - 48.0 - 54.0 * a,
+              width: 132.0,
+              height: 112.0,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(28.0),
+                  color: (isDraggingThis ? widget.activeAccent.toColor() : const Color(0xFFFBBF24))
+                      .withValues(alpha: isDraggingThis ? 0.24 : 0.14),
+                  border: Border.all(
+                    color: (isDraggingThis ? widget.activeAccent.toColor() : const Color(0xFFFBBF24))
+                        .withValues(alpha: 0.72),
+                    width: 2.2,
+                  ),
+                ),
+              ),
+            ),
           Positioned(
-            left: ThermostatMath.tabXs[i] - 28.0,
+            left: tx - 26.0,
             top: by - 42.0 - 54.0 * a,
-            width: 56.0,
-            height: 56.0,
+            width: 52.0,
+            height: 52.0,
             child: AnimatedScale(
               scale: tactileScale,
               duration: Duration(milliseconds: isPressed ? 75 : 170),
@@ -388,17 +575,27 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
                     painter: _FlowTabIconPainter(
                       tabId: tab.id,
                       drawProgress: drawProgress,
-                      color: fgColor,
+                      color: isDraggingThis ? widget.activeAccent.toColor() : fgColor,
                     ),
                   ),
                 ),
               ),
             ),
           ),
+          if (isStartup && _draggingTabId != null)
+            Positioned(
+              left: tx + 18.0,
+              top: by - 48.0 - 54.0 * a,
+              child: const Icon(
+                Icons.star_rounded,
+                size: 22.0,
+                color: Color(0xFFFBBF24),
+              ),
+            ),
           Positioned(
-            left: ThermostatMath.tabXs[i] - 85.0,
+            left: tx - 74.0,
             top: labelY,
-            width: 170.0,
+            width: 148.0,
             child: AnimatedScale(
               scale: tactileScale,
               duration: Duration(milliseconds: isPressed ? 75 : 170),
@@ -411,8 +608,8 @@ class _FlowTabBarShellState extends State<FlowTabBarShell> with SingleTickerProv
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: fgColor,
-                    fontSize: 26,
+                    color: isDraggingThis ? widget.activeAccent.toColor() : fgColor,
+                    fontSize: 23,
                     fontWeight: FontWeight.w600,
                     letterSpacing: -0.3,
                     decoration: TextDecoration.none,
@@ -530,6 +727,28 @@ class _FlowTabIconPainter extends CustomPainter {
     final paths = <Path>[];
 
     switch (tabId) {
+      case TabId.ev:
+        paths.add(
+          Path()
+            ..moveTo(8, 21)
+            ..lineTo(22, 10)
+            ..lineTo(36, 21),
+        );
+        paths.add(
+          Path()
+            ..moveTo(12, 19)
+            ..lineTo(12, 34)
+            ..lineTo(32, 34)
+            ..lineTo(32, 19),
+        );
+        paths.add(
+          Path()
+            ..moveTo(19, 34)
+            ..lineTo(19, 25)
+            ..lineTo(25, 25)
+            ..lineTo(25, 34),
+        );
+        break;
       case TabId.termo:
         paths.add(
           Path()

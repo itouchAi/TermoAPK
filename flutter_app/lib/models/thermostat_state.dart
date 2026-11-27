@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 
 enum PresetId { eko, konfor, gece, boost }
 
-enum TabId { termo, hava, rapor, prog }
+enum TabId { ev, termo, hava, rapor, prog }
 
 enum LangCode { tr, en }
 
@@ -734,7 +734,7 @@ abstract final class ThermostatMath {
   static const double dialStartDeg = -135.0;
   static const double dialEndDeg = 135.0;
 
-  static const List<double> tabXs = [240.0, 440.0, 640.0, 840.0];
+  static const List<double> tabXs = [228.0, 384.0, 540.0, 696.0, 852.0];
 
   static const List<ThermostatPreset> presets = [
     ThermostatPreset(
@@ -780,6 +780,13 @@ abstract final class ThermostatMath {
   ];
 
   static const List<TabMeta> tabs = [
+    TabMeta(
+      id: TabId.ev,
+      labelTr: 'Ev',
+      labelEn: 'Home',
+      accent: RgbAccent(0.18, 0.84, 0.78),
+      color: Color(0xFF2ED6C7),
+    ),
     TabMeta(
       id: TabId.termo,
       labelTr: 'Termo.',
@@ -912,30 +919,34 @@ abstract final class ThermostatMath {
     int activeIndex,
     RgbAccent liveAccent,
   ) {
+    final maxIdx = tabXs.length - 1;
+    final safeActive = activeIndex.clamp(0, maxIdx);
     if (move == null || t < move.ts) {
       return FlowTabState(
-        x: tabXs[activeIndex.clamp(0, 3)],
+        x: tabXs[safeActive],
         rise: 1.0,
         sx: 1.0,
         acc: liveAccent,
         tapX: 0.0,
         tapAge: -1.0,
         sw: 0.0,
-        cur: activeIndex,
+        cur: safeActive,
         draw: 1.0,
       );
     }
 
+    final safeA = move.a.clamp(0, maxIdx);
+    final safeB = move.b.clamp(0, maxIdx);
     final rawK = (t - move.ts) / move.d;
     final u = _eIO(rawK);
     final k = clamp01(rawK);
-    final x = lerp(tabXs[move.a], tabXs[move.b], u);
+    final x = lerp(tabXs[safeA], tabXs[safeB], u);
     final dive = math.sin(math.pi * math.min(1.0, k * 1.08));
     var rise = 1.0 - 0.9 * math.pow(dive, 0.7).toDouble();
     if (k >= 1.0) {
       rise = 1.0 + 0.06 * math.exp(-(t - move.ts - move.d) * 9.0) * math.sin((t - move.ts - move.d) * 22.0);
     }
-    final sx = 1.0 + 0.55 * math.sin(math.pi * k) * ((move.b - move.a).abs() > 1 ? 1.25 : 1.0);
+    final sx = 1.0 + 0.55 * math.sin(math.pi * k) * ((safeB - safeA).abs() > 1 ? 1.25 : 1.0);
     var acc = RgbAccent.lerp(move.fromAcc, move.toAcc, u);
     if (t >= move.ts + move.d + 0.25) {
       acc = liveAccent;
@@ -949,10 +960,10 @@ abstract final class ThermostatMath {
       rise: rise,
       sx: sx,
       acc: acc,
-      tapX: tabXs[move.b],
+      tapX: tabXs[safeB],
       tapAge: tapAge,
       sw: sw,
-      cur: move.b,
+      cur: safeB,
       draw: draw,
     );
   }
@@ -1137,6 +1148,21 @@ abstract final class ThermostatMath {
     }
 
     // 6) Tab navigation
+    if (text.contains('ev harita') ||
+        text.contains('ev plan') ||
+        text.contains('kat plan') ||
+        text.contains('3d ev') ||
+        text.contains('home map') ||
+        text.contains('floorplan') ||
+        text == 'ev' ||
+        text == 'evim') {
+      return const VoiceCommandResult(
+        handled: true,
+        navigateTab: TabId.ev,
+        replyTr: '3D Ev haritası ekranına geçiliyor.',
+        replyEn: 'Opening 3D home floorplan.',
+      );
+    }
     if (text.contains('hava') || text.contains('weather')) {
       return const VoiceCommandResult(
         handled: true,
@@ -2540,6 +2566,7 @@ class VisualCustomizationState {
   final PerformanceMode performanceMode;
   final WeatherEffectPreview weatherPreview;
   final List<TabId> tabOrder;
+  final TabId startupTab;
   final List<ReportSubTab> reportSubTabOrder;
   final List<ScheduleSubTab> scheduleSubTabOrder;
   final bool buttonTactileFeedback;
@@ -2551,12 +2578,14 @@ class VisualCustomizationState {
     required this.performanceMode,
     required this.weatherPreview,
     required this.tabOrder,
+    this.startupTab = TabId.termo,
     required this.reportSubTabOrder,
     required this.scheduleSubTabOrder,
     this.buttonTactileFeedback = true,
   });
 
   static const List<TabId> defaultTabOrder = [
+    TabId.ev,
     TabId.termo,
     TabId.hava,
     TabId.rapor,
@@ -2581,6 +2610,7 @@ class VisualCustomizationState {
         performanceMode: PerformanceMode.ultra60fps,
         weatherPreview: WeatherEffectPreview.live,
         tabOrder: defaultTabOrder,
+        startupTab: TabId.termo,
         reportSubTabOrder: defaultReportSubOrder,
         scheduleSubTabOrder: defaultScheduleSubOrder,
         buttonTactileFeedback: true,
@@ -2735,6 +2765,7 @@ class VisualCustomizationState {
     PerformanceMode? performanceMode,
     WeatherEffectPreview? weatherPreview,
     List<TabId>? tabOrder,
+    TabId? startupTab,
     List<ReportSubTab>? reportSubTabOrder,
     List<ScheduleSubTab>? scheduleSubTabOrder,
     bool? buttonTactileFeedback,
@@ -2746,6 +2777,7 @@ class VisualCustomizationState {
       performanceMode: performanceMode ?? this.performanceMode,
       weatherPreview: weatherPreview ?? this.weatherPreview,
       tabOrder: tabOrder ?? this.tabOrder,
+      startupTab: startupTab ?? this.startupTab,
       reportSubTabOrder: reportSubTabOrder ?? this.reportSubTabOrder,
       scheduleSubTabOrder: scheduleSubTabOrder ?? this.scheduleSubTabOrder,
       buttonTactileFeedback:
@@ -2760,6 +2792,7 @@ class VisualCustomizationState {
         'performanceMode': performanceMode.name,
         'weatherPreview': weatherPreview.name,
         'tabOrder': tabOrder.map((e) => e.name).toList(),
+        'startupTab': startupTab.name,
         'reportSubTabOrder': reportSubTabOrder.map((e) => e.name).toList(),
         'scheduleSubTabOrder': scheduleSubTabOrder.map((e) => e.name).toList(),
         'buttonTactileFeedback': buttonTactileFeedback,
@@ -2821,6 +2854,13 @@ class VisualCustomizationState {
       return d.weatherPreview;
     }
 
+    TabId parseStartupTab(String? n) {
+      for (final v in TabId.values) {
+        if (v.name == n) return v;
+      }
+      return d.startupTab;
+    }
+
     return VisualCustomizationState(
       theme: parseTheme(map['theme'] as String?),
       dialRingStyle: parseDialRingStyle(map['dialRingStyle'] as String?),
@@ -2828,6 +2868,7 @@ class VisualCustomizationState {
       performanceMode: parsePerf(map['performanceMode'] as String?),
       weatherPreview: parseWeather(map['weatherPreview'] as String?),
       tabOrder: _parseEnumOrder(map['tabOrder'], TabId.values, defaultTabOrder),
+      startupTab: parseStartupTab(map['startupTab'] as String?),
       reportSubTabOrder: _parseEnumOrder(
         map['reportSubTabOrder'],
         ReportSubTab.values,

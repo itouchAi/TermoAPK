@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../models/house_plan_model.dart';
 import '../models/thermostat_state.dart';
 
 class FirebaseSyncResult {
@@ -11,6 +12,7 @@ class FirebaseSyncResult {
   final double? remoteTargetTemp;
   final double? remoteRoomTemp;
   final BoilerHardwareSensors? remoteSensors;
+  final Map<String, RoomEspTelemetry> remoteRooms;
 
   const FirebaseSyncResult({
     required this.ok,
@@ -21,6 +23,7 @@ class FirebaseSyncResult {
     this.remoteTargetTemp,
     this.remoteRoomTemp,
     this.remoteSensors,
+    this.remoteRooms = const {},
   });
 }
 
@@ -148,6 +151,7 @@ class FirebaseSyncService {
     double? room;
     BoilerHardwareSensors? sensors;
 
+    final roomsMap = <String, RoomEspTelemetry>{};
     if (decoded is Map<String, dynamic>) {
       if (decoded['targetTemp'] is num) {
         final rawTarget = (decoded['targetTemp'] as num).toDouble();
@@ -180,6 +184,36 @@ class FirebaseSyncService {
       } else if (decoded['hardwareConnected'] == false) {
         sensors = const BoilerHardwareSensors.disconnected();
       }
+      final rawRooms = decoded['rooms'];
+      if (rawRooms is Map) {
+        for (final entry in rawRooms.entries) {
+          final nodeId = entry.key.toString().trim();
+          if (nodeId.isEmpty || entry.value is! Map) continue;
+          final rMap = Map<String, dynamic>.from(entry.value as Map);
+          final rTemp = (rMap['roomTemp'] as num?)?.toDouble();
+          final radTemp = (rMap['radiatorTemp'] as num?)?.toDouble();
+          final hum = (rMap['humidity'] as num?)?.toDouble();
+          final rssi = (rMap['wifiRssi'] as num?)?.round();
+          final radHeat = rMap['radiatorHeating'] as bool?;
+          final explicitOnline = rMap['online'] as bool?;
+          final lastSeen = (rMap['lastSeenAt'] as String?) ?? '';
+          final isOnline = explicitOnline ?? (rTemp != null || radTemp != null || rssi != null);
+          roomsMap[nodeId] = RoomEspTelemetry(
+            espNodeId: nodeId,
+            online: isOnline,
+            roomTempC: (rTemp != null && rTemp.isFinite && rTemp >= -20 && rTemp <= 60)
+                ? double.parse(rTemp.toStringAsFixed(1))
+                : null,
+            humidityPercent: (hum != null && hum.isFinite && hum >= 0 && hum <= 100) ? hum : null,
+            radiatorTempC: (radTemp != null && radTemp.isFinite && radTemp >= -10 && radTemp <= 95)
+                ? double.parse(radTemp.toStringAsFixed(1))
+                : null,
+            radiatorHeating: radHeat ?? (radTemp != null ? radTemp >= 35.0 : null),
+            wifiRssiDbm: (rssi != null && rssi < 0 && rssi >= -110) ? rssi : null,
+            lastSeenLabel: lastSeen,
+          );
+        }
+      }
     }
 
     final msSuffix = latencyMs != null ? ' (${latencyMs}ms)' : '';
@@ -206,6 +240,7 @@ class FirebaseSyncService {
       remoteTargetTemp: target,
       remoteRoomTemp: room,
       remoteSensors: sensors,
+      remoteRooms: roomsMap,
       messageTr: msgTr,
       messageEn: msgEn,
     );

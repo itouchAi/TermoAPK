@@ -6,7 +6,9 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'models/house_plan_model.dart';
 import 'models/thermostat_state.dart';
+import 'screens/home_3d_screen.dart';
 import 'screens/secondary_screens.dart';
 import 'screens/settings_sheet.dart';
 import 'screens/theme_effects_sheet.dart';
@@ -122,6 +124,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   double _gasUnitPriceTl = 10.25;
   BoilerHardwareSensors _hardwareSensors = const BoilerHardwareSensors.disconnected();
   bool _remoteRoomTempActive = false;
+  HouseFloorPlan _floorPlan = HouseFloorPlan.defaults();
+  Map<String, RoomEspTelemetry> _roomTelemetries = const {};
   WeatherReport? _weatherReport;
   bool _weatherLoading = false;
   String? _weatherError;
@@ -196,11 +200,15 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
   @override
   void initState() {
     super.initState();
+    _activeTab = _visual.startupTab;
     _syncPreferredVoices(_settings);
     TactileMotionScope.globalEnabled.value = _visual.buttonTactileFeedback;
     if (ThermostatMath.computeBoilerTelemetry(_roomTemp, _targetTemp).isHeating) {
       _heatingCycleStartedAt = DateTime.now();
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncPageIndexToActiveTab(jump: true);
+    });
     _loadPersisted();
     VoiceSpeechService.warmup();
     _resetIdleTimer();
@@ -383,6 +391,9 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
         final loadedVisual = map['visual'] is Map<String, dynamic>
             ? VisualCustomizationState.fromJson(map['visual'] as Map<String, dynamic>)
             : _visual;
+        final loadedFloorPlan = map['floorPlan'] is Map<String, dynamic>
+            ? HouseFloorPlan.fromJson(map['floorPlan'] as Map<String, dynamic>)
+            : _floorPlan;
         bootOn = loadedSettings.bootCeremonyEnabled;
         setState(() {
           final t = (map['targetTemp'] as num?)?.toDouble();
@@ -395,6 +406,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           _locationName = (map['locationName'] as String?) ?? _locationName;
           _settings = loadedSettings;
           _visual = loadedVisual;
+          _activeTab = loadedVisual.startupTab;
+          _floorPlan = loadedFloorPlan;
           TactileMotionScope.globalEnabled.value = loadedVisual.buttonTactileFeedback;
           _syncPreferredVoices(loadedSettings);
           final rawSched = map['schedule'];
@@ -457,6 +470,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       } catch (_) {
         // Ignore malformed stored state
       }
+    } else {
+      _syncPageIndexToActiveTab(jump: true);
     }
 
     _persistedLoaded = true;
@@ -489,6 +504,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
         'unreadAlerts': _unreadAlerts.map((a) => a.toJson()).toList(),
         'settings': _settings.toJson(),
         'visual': _visual.toJson(),
+        'floorPlan': _floorPlan.toJson(),
       }),
     );
   }
@@ -663,6 +679,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
           _hardwareSensors = const BoilerHardwareSensors.disconnected();
           _roomTemp = null;
           _remoteRoomTempActive = false;
+          _roomTelemetries = const {};
           _heatingCycleStartedAt = null;
           _targetTemp = 22.5;
           _activePreset = PresetId.konfor;
@@ -805,6 +822,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     final wasOnline = _settings.espOnline;
     final syncMsg = _lang == LangCode.tr ? res.messageTr : res.messageEn;
     setState(() {
+      _roomTelemetries = const {};
       _settings = _settings.copyWith(
         espOnline: false,
         cloudLastSyncAt: nowLabel,
@@ -871,6 +889,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
       if (hasSensorUpdate) {
         _hardwareSensors = pullRes.remoteSensors!;
       }
+      _roomTelemetries = pullRes.remoteRooms;
       _settings = _settings.copyWith(
         espOnline: true,
         espLastPingAt: nowLabel,
@@ -1310,6 +1329,26 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
   Widget _buildTabPage(TabId id, BoilerTelemetry boiler, Color activeColor, ThemePaletteSpec palette) {
     switch (id) {
+      case TabId.ev:
+        return KeyedSubtree(
+          key: const ValueKey(TabId.ev),
+          child: Home3dScreen(
+            lang: _lang,
+            palette: palette,
+            accentColor: activeColor,
+            floorPlan: _floorPlan,
+            roomTelemetries: _roomTelemetries,
+            mainRoomTemp: _roomTemp,
+            targetTemp: _targetTemp,
+            boiler: boiler,
+            espOnline: _settings.espOnline,
+            mainEspDeviceId: _settings.espDeviceId,
+            onUpdateFloorPlan: (nextPlan) {
+              setState(() => _floorPlan = nextPlan);
+              _persist();
+            },
+          ),
+        );
       case TabId.termo:
         return KeyedSubtree(
           key: const ValueKey(TabId.termo),
@@ -1483,8 +1522,18 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             FlowTabBarShell(
               activeTab: _activeTab,
               orderedTabs: orderedTabs,
+              startupTab: _visual.startupTab,
               onSelectTab: _selectTab,
               onStepTab: _stepTab,
+              onReorderTabs: (nextOrder, {nextStartupTab}) {
+                _triggerHaptic();
+                _updateVisual(
+                  _visual.copyWith(
+                    tabOrder: nextOrder,
+                    startupTab: nextStartupTab ?? _visual.startupTab,
+                  ),
+                );
+              },
               activeAccent: activeAccent,
               lang: _lang,
               isLandscape: isLandscape,

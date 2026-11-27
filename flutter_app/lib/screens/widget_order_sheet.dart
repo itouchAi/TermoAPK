@@ -147,19 +147,34 @@ class _WidgetOrderModalState extends State<_WidgetOrderModal> {
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
                   children: [
                     _SectionTitle(
-                      title: tr ? 'ANA EKRAN SIRALAMASI (KARUSEL & ALT ÇUBUK)' : 'MAIN SCREEN ORDER (FLOW BAR & PAGES)',
+                      title: tr ? 'ANA EKRAN SIRALAMASI & BAŞLANGIÇ ÖNCELİĞİ' : 'MAIN SCREEN ORDER & STARTUP PRIORITY',
                       palette: palette,
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      tr
+                          ? 'Yıldız simgesine dokunarak açılış ekranını seçin veya alt bardaki bir sekmeye basılı tutup sağa/sola sürükleyin.'
+                          : 'Tap the star to pick the startup screen, or long-press and drag any tab left/right on the bottom bar.',
+                      style: TextStyle(fontSize: 11, color: palette.textSecondary, height: 1.35),
                     ),
                     const SizedBox(height: 8),
                     for (int i = 0; i < _visual.orderedTabs.length; i++)
                       _OrderTile(
                         title: tr ? _visual.orderedTabs[i].labelTr : _visual.orderedTabs[i].labelEn,
-                        subtitle: '${tr ? 'Sıra' : 'Slot'} ${i + 1}',
+                        subtitle: _visual.startupTab == _visual.orderedTabs[i].id
+                            ? (tr
+                                ? 'Sıra ${i + 1} · ★ Ana Başlangıç Ekranı'
+                                : 'Slot ${i + 1} · ★ Startup Screen')
+                            : '${tr ? 'Sıra' : 'Slot'} ${i + 1}',
                         icon: _iconForTab(_visual.orderedTabs[i].id),
                         color: _visual.orderedTabs[i].color,
                         index: i,
                         total: _visual.orderedTabs.length,
                         palette: palette,
+                        isStartup: _visual.startupTab == _visual.orderedTabs[i].id,
+                        onSetStartup: () => _apply(
+                          _visual.copyWith(startupTab: _visual.orderedTabs[i].id),
+                        ),
                         onMoveUp: () => _apply(
                           _visual.copyWith(tabOrder: _swapAt(_visual.tabOrder, i, -1)),
                         ),
@@ -234,6 +249,7 @@ class _WidgetOrderModalState extends State<_WidgetOrderModal> {
                         onPressed: () => _apply(
                           _visual.copyWith(
                             tabOrder: VisualCustomizationState.defaultTabOrder,
+                            startupTab: TabId.termo,
                             reportSubTabOrder: VisualCustomizationState.defaultReportSubOrder,
                             scheduleSubTabOrder: VisualCustomizationState.defaultScheduleSubOrder,
                           ),
@@ -267,6 +283,8 @@ class _WidgetOrderModalState extends State<_WidgetOrderModal> {
 
   IconData _iconForTab(TabId id) {
     switch (id) {
+      case TabId.ev:
+        return Icons.home_work_outlined;
       case TabId.termo:
         return Icons.thermostat_rounded;
       case TabId.hava:
@@ -333,6 +351,8 @@ class _OrderTile extends StatelessWidget {
   final int index;
   final int total;
   final ThemePaletteSpec palette;
+  final bool? isStartup;
+  final VoidCallback? onSetStartup;
   final VoidCallback onMoveUp;
   final VoidCallback onMoveDown;
 
@@ -344,19 +364,24 @@ class _OrderTile extends StatelessWidget {
     required this.index,
     required this.total,
     required this.palette,
+    this.isStartup,
+    this.onSetStartup,
     required this.onMoveUp,
     required this.onMoveDown,
   });
 
   @override
   Widget build(BuildContext context) {
+    final starActive = isStartup == true;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
         color: palette.cardBg,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: palette.cardBorder),
+        border: Border.all(
+          color: starActive ? const Color(0xFFFBBF24).withValues(alpha: 0.55) : palette.cardBorder,
+        ),
       ),
       child: Row(
         children: [
@@ -381,11 +406,29 @@ class _OrderTile extends StatelessWidget {
                 ),
                 Text(
                   subtitle,
-                  style: TextStyle(fontSize: 11, color: palette.textSecondary),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: starActive ? const Color(0xFFFBBF24) : palette.textSecondary,
+                    fontWeight: starActive ? FontWeight.w600 : FontWeight.w400,
+                  ),
                 ),
               ],
             ),
           ),
+          if (onSetStartup != null)
+            TactilePress(
+              child: IconButton(
+                onPressed: onSetStartup,
+                icon: Icon(
+                  starActive ? Icons.star_rounded : Icons.star_outline_rounded,
+                  size: 20,
+                ),
+                color: starActive ? const Color(0xFFFBBF24) : palette.textSecondary.withValues(alpha: 0.55),
+                tooltip: 'Başlangıç ekranı yap',
+                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                padding: EdgeInsets.zero,
+              ),
+            ),
           TactilePress(
             enabled: index > 0,
             child: IconButton(
