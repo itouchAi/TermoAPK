@@ -1343,6 +1343,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
             boiler: boiler,
             espOnline: _settings.espOnline,
             mainEspDeviceId: _settings.espDeviceId,
+            performanceMode: _visual.performanceMode,
             onUpdateFloorPlan: (nextPlan) {
               setState(() => _floorPlan = nextPlan);
               _persist();

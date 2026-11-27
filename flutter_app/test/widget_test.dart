@@ -2497,6 +2497,7 @@ void main() {
     await tester.pump();
     expect(find.text('3D Ev Haritası'), findsOneWidget);
     expect(find.text('Planı Çiz / Düzenle'), findsOneWidget);
+    expect(find.text('Döndür · Odaya dokun · 60 FPS'), findsOneWidget);
     expect(find.text('--'), findsWidgets);
 
     // Switch to Planı Çiz / Düzenle, switch to 1+1 Daire template, then add a room
@@ -2511,6 +2512,28 @@ void main() {
     await tester.tap(find.text('+ Oda Ekle'));
     await tester.pumpAndSettle();
     expect(plan.rooms.length, countBeforeAdd + 1);
+
+    // Verify ECO battery mode LOD renders cleanly
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Home3dScreen(
+            lang: LangCode.tr,
+            palette: palette,
+            accentColor: const Color(0xFF2ED6C7),
+            floorPlan: plan,
+            mainRoomTemp: null,
+            targetTemp: 22.5,
+            boiler: ThermostatMath.computeBoilerTelemetry(null, 22.5),
+            espOnline: false,
+            performanceMode: PerformanceMode.ecoBattery,
+            onUpdateFloorPlan: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('Döndür · Odaya dokun · Eko'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
