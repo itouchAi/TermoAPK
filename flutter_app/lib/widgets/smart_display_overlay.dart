@@ -114,6 +114,9 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
   VideoPlayerController? _videoCtrl;
   String _activeVideoSource = '';
   bool _videoReady = false;
+  Timer? _videoRetryTimer;
+  int _videoRetryCount = 0;
+  bool _videoLoadFailed = false;
 
   SmartDisplayMode get _effectiveMode {
     if (widget.forcedAod) return SmartDisplayMode.aod;
@@ -293,6 +296,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
     _leftCollapseTimer?.cancel();
     _rightCollapseTimer?.cancel();
     _hintTimer?.cancel();
+    _videoRetryTimer?.cancel();
     VideoSourceBridge.applyDomVideoBlur(0.0);
     _videoCtrl?.dispose();
     _volumeBarCtrl.dispose();
@@ -337,7 +341,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
     final mode = _effectiveMode;
     final wanted = _resolveWantedVideoSource(widget.settings, mode);
 
-    if (wanted == _activeVideoSource) {
+    if (wanted == _activeVideoSource && _videoCtrl != null) {
       final ctrl = _videoCtrl;
       if (ctrl != null && _videoReady) {
         try {
@@ -352,6 +356,12 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
       return;
     }
 
+    _videoRetryTimer?.cancel();
+    if (wanted != _activeVideoSource) {
+      _videoRetryCount = 0;
+    }
+    _videoLoadFailed = false;
+
     final old = _videoCtrl;
     _videoCtrl = null;
     _videoReady = false;
@@ -364,6 +374,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
       return;
     }
 
+    VideoPlayerController? createdCtrl;
     try {
       var playable = MediaStorageService.getPlayableVideoUrl(wanted);
       if (playable.isEmpty && MediaStorageService.isPersistedKey(wanted)) {
@@ -373,6 +384,7 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
 
       final ctrl = VideoSourceBridge.createController(playable);
       if (ctrl == null) return;
+      createdCtrl = ctrl;
       _videoCtrl = ctrl;
       await ctrl.initialize();
       if (!mounted || _activeVideoSource != wanted) {
@@ -385,13 +397,37 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
         await ctrl.play();
       }
       if (mounted) {
-        setState(() => _videoReady = true);
+        setState(() {
+          _videoReady = true;
+          _videoRetryCount = 0;
+          _videoLoadFailed = false;
+        });
         _syncDomVideoBlur();
         WidgetsBinding.instance.addPostFrameCallback((_) => _syncDomVideoBlur());
       }
     } catch (_) {
+      if (createdCtrl != null && _videoCtrl == createdCtrl) {
+        _videoCtrl = null;
+        unawaited(createdCtrl.dispose());
+      }
       if (mounted && _activeVideoSource == wanted) {
-        setState(() => _videoReady = false);
+        _activeVideoSource = '';
+        if (_videoRetryCount < 3) {
+          _videoRetryCount++;
+          final retryDelay = Duration(seconds: 2 * _videoRetryCount);
+          setState(() => _videoReady = false);
+          _videoRetryTimer?.cancel();
+          _videoRetryTimer = Timer(retryDelay, () {
+            if (mounted) {
+              unawaited(_syncVideoController());
+            }
+          });
+        } else {
+          setState(() {
+            _videoReady = false;
+            _videoLoadFailed = true;
+          });
+        }
       }
     }
   }
@@ -1340,11 +1376,23 @@ class _SmartDisplayOverlayState extends State<SmartDisplayOverlay> with TickerPr
     if (_isVideoBackedMode(mode, s)) {
       final hasReadyVideo = _videoCtrl != null && _videoReady && _videoCtrl!.value.isInitialized;
       final vSize = hasReadyVideo ? _videoCtrl!.value.size : const Size(1280, 720);
+      final vAspect = (hasReadyVideo && _videoCtrl!.value.aspectRatio > 0)
+          ? _videoCtrl!.value.aspectRatio
+          : (16.0 / 9.0);
       final vw = vSize.width > 0 ? vSize.width : 1280.0;
-      final vh = vSize.height > 0 ? vSize.height : 720.0;
+      final vh = vSize.height > 0 ? vSize.height : (1280.0 / vAspect);
 
-      return ColoredBox(
-        color: Colors.black,
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.black,
+          gradient: (!hasReadyVideo && _videoLoadFailed)
+              ? RadialGradient(
+                  center: const Alignment(0, -0.15),
+                  radius: 1.15,
+                  colors: _ambientBackdropColors(effectiveTheme),
+                )
+              : null,
+        ),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -2312,8 +2360,6 @@ class _EmbeddedThermostatModal extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tr = lang == LangCode.tr;
-    final size = MediaQuery.of(context).size;
-    final dialSize = math.min(220.0, math.max(166.0, size.height * 0.28));
     final diff = roomTemp != null ? targetTemp - roomTemp! : null;
     final diffText = diff != null ? '${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}°C' : '--';
     final isLight = palette.isLight;
@@ -2354,248 +2400,312 @@ class _EmbeddedThermostatModal extends StatelessWidget {
       }
     }
 
-    return Listener(
-      onPointerDown: (_) => onInteract(),
-      child: Container(
-        color: Colors.black.withValues(alpha: isLight ? 0.56 : 0.72),
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Container(
-            padding: const EdgeInsets.all(18),
+    Widget buildHeader(bool compact) {
+      return Row(
+        children: [
+          Container(
+            width: compact ? 32 : 38,
+            height: compact ? 32 : 38,
             decoration: BoxDecoration(
-              color: palette.sheetBg,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(
-                width: palette.isTactileDeck ? 1.5 : 1.0,
-                color: palette.cardBorder,
-              ),
-              boxShadow: [
-                BoxShadow(color: Colors.black.withValues(alpha: isLight ? 0.25 : 0.65), blurRadius: 32, offset: const Offset(0, 14)),
+              shape: BoxShape.circle,
+              color: themeAccent.withValues(alpha: 0.14),
+              border: Border.all(color: themeAccent.withValues(alpha: 0.45)),
+            ),
+            child: Icon(
+              Icons.local_fire_department_outlined,
+              size: compact ? 16 : 19,
+              color: themeAccent,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      tr ? 'Termostat Kontrolü' : 'Thermostat Control',
+                      style: TextStyle(
+                        fontSize: compact ? 14.5 : 16.5,
+                        fontWeight: FontWeight.w800,
+                        color: palette.textPrimary,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: themeAccent.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: themeAccent.withValues(alpha: 0.42)),
+                      ),
+                      child: Text(
+                        paletteTag.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w800,
+                          color: themeAccent,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (!compact) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    tr ? 'Hassas dokunmatik sıcaklık ayarı' : 'Precision touch temperature control',
+                    style: TextStyle(fontSize: 11, color: palette.textSecondary),
+                  ),
+                ],
               ],
             ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Header
-                  Row(
-                    children: [
-                      Container(
-                        width: 38,
-                        height: 38,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: themeAccent.withValues(alpha: 0.14),
-                          border: Border.all(color: themeAccent.withValues(alpha: 0.45)),
-                        ),
-                        child: Icon(Icons.local_fire_department_outlined, size: 19, color: themeAccent),
+          ),
+          TactilePress(
+            child: GestureDetector(
+              onTap: onClose,
+              child: Container(
+                width: compact ? 30 : 34,
+                height: compact ? 30 : 34,
+                decoration: BoxDecoration(
+                  color: palette.cardBg,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: palette.cardBorder),
+                ),
+                child: Icon(Icons.close_rounded, size: compact ? 16 : 18, color: palette.textSecondary),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    Widget buildCountdownBanner(bool compact) {
+      return Container(
+        padding: EdgeInsets.symmetric(horizontal: compact ? 11 : 14, vertical: compact ? 7 : 9),
+        decoration: BoxDecoration(
+          color: palette.cardBg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: palette.cardBorder),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                tr ? 'Dokunulmazsa ambiyansa döner' : 'Auto-returns to ambient if idle',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: compact ? 10.5 : 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: themeAccent,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+              decoration: BoxDecoration(
+                color: themeAccent.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: themeAccent.withValues(alpha: 0.45)),
+              ),
+              child: Text(
+                tr ? '$countdownSeconds sn' : '${countdownSeconds}s',
+                style: TextStyle(
+                  fontSize: compact ? 10.5 : 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: themeAccent,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Widget buildRoomBadge() {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: palette.cardBg,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: palette.cardBorder),
+        ),
+        child: RichText(
+          text: TextSpan(
+            style: const TextStyle(fontSize: 11.5, fontFeatures: [FontFeature.tabularFigures()]),
+            children: [
+              TextSpan(
+                text: tr ? 'Oda: ' : 'Room: ',
+                style: TextStyle(color: palette.textSecondary),
+              ),
+              TextSpan(
+                text: roomTemp != null ? '${roomTemp!.toStringAsFixed(1)}°C ' : '-- ',
+                style: TextStyle(
+                  color: roomTemp != null ? const Color(0xFF10B981) : palette.textSecondary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              TextSpan(
+                text: '($diffText)',
+                style: TextStyle(color: palette.textSecondary),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    Widget buildPresetCard(ThermostatPreset p, {bool compact = false}) {
+      final isActive = (targetTemp - p.temp).abs() < 0.05;
+      final col = colorFor(p.id);
+      return TactilePress.card(
+        child: GestureDetector(
+          onTap: () => onSelectPreset(p),
+          child: Container(
+            padding: EdgeInsets.symmetric(vertical: compact ? 7 : 9, horizontal: 6),
+            decoration: BoxDecoration(
+              color: isActive ? col.withValues(alpha: 0.18) : palette.cardBg,
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(color: isActive ? col : palette.cardBorder),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(iconFor(p.id), size: compact ? 14 : 15, color: col),
+                const SizedBox(height: 3),
+                Text(
+                  tr ? p.labelTr : p.labelEn,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: compact ? 10.5 : 11.0,
+                    fontWeight: FontWeight.w700,
+                    color: isActive ? col : palette.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  '${p.temp % 1 == 0 ? p.temp.toStringAsFixed(0) : p.temp.toStringAsFixed(1)}°C',
+                  style: TextStyle(
+                    fontSize: compact ? 9.5 : 10.0,
+                    fontWeight: FontWeight.w600,
+                    color: isActive ? col : palette.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Listener(
+      onPointerDown: (_) => onInteract(),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        // Absorb horizontal/vertical drags outside the dial so background or screen never scrolls
+        onVerticalDragStart: (_) {},
+        onHorizontalDragStart: (_) {},
+        onPanStart: (_) {},
+        child: Container(
+          color: Colors.black.withValues(alpha: isLight ? 0.56 : 0.72),
+          child: SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final availW = math.max(260.0, constraints.maxWidth - 20.0);
+                final availH = math.max(240.0, constraints.maxHeight - 16.0);
+                final useLandscapeTwoCol = availW >= 460.0 && availW > availH;
+
+                if (useLandscapeTwoCol) {
+                  final modalMaxW = math.min(680.0, availW);
+                  final dialSize = (availH - 122.0).clamp(124.0, 186.0);
+
+                  return Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: modalMaxW,
+                        maxHeight: availH,
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Wrap(
-                              spacing: 8,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                Text(
-                                  tr ? 'Termostat Kontrolü' : 'Thermostat Control',
-                                  style: TextStyle(
-                                    fontSize: 16.5,
-                                    fontWeight: FontWeight.w800,
-                                    color: palette.textPrimary,
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: themeAccent.withValues(alpha: 0.14),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: themeAccent.withValues(alpha: 0.42)),
-                                  ),
-                                  child: Text(
-                                    paletteTag.toUpperCase(),
-                                    style: TextStyle(
-                                      fontSize: 9.5,
-                                      fontWeight: FontWeight.w800,
-                                      color: themeAccent,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              tr ? 'Hassas dokunmatik sıcaklık ayarı' : 'Precision touch temperature control',
-                              style: TextStyle(fontSize: 11, color: palette.textSecondary),
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                        decoration: BoxDecoration(
+                          color: palette.sheetBg,
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(
+                            width: palette.isTactileDeck ? 1.5 : 1.0,
+                            color: palette.cardBorder,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: isLight ? 0.25 : 0.65),
+                              blurRadius: 32,
+                              offset: const Offset(0, 14),
                             ),
                           ],
                         ),
-                      ),
-                      TactilePress(
-                        child: GestureDetector(
-                          onTap: onClose,
-                          child: Container(
-                            width: 34,
-                            height: 34,
-                            decoration: BoxDecoration(
-                              color: palette.cardBg,
-                              borderRadius: BorderRadius.circular(11),
-                              border: Border.all(color: palette.cardBorder),
-                            ),
-                            child: Icon(Icons.close_rounded, size: 18, color: palette.textSecondary),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-
-                  // 5-second Inactivity Countdown Banner
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                    decoration: BoxDecoration(
-                      color: palette.cardBg,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: palette.cardBorder),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            tr ? 'Dokunulmazsa otomatik ambiyansa döner' : 'Auto-returns to ambient mode if idle',
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
-                              color: themeAccent,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: themeAccent.withValues(alpha: 0.14),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: themeAccent.withValues(alpha: 0.45)),
-                          ),
-                          child: Text(
-                            tr ? '$countdownSeconds sn' : '${countdownSeconds}s',
-                            style: TextStyle(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w800,
-                              color: themeAccent,
-                              fontFeatures: const [FontFeature.tabularFigures()],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Real Main-Screen RotaryDial (45 segmented ticks + 3D bevel + circular - / + steppers)
-                  RotaryDial(
-                    targetTemp: targetTemp,
-                    onChangeTarget: (t) {
-                      onInteract();
-                      onChangeTarget(t);
-                    },
-                    modeName: modeName,
-                    accentColor: themeAccent,
-                    boiler: boiler,
-                    lang: lang,
-                    palette: palette,
-                    sizePx: dialSize,
-                    compact: true,
-                    dialRingStyle: dialRingStyle,
-                    performanceMode: performanceMode,
-                  ),
-                  const SizedBox(height: 8),
-
-                  // Room Temp & Delta Badge
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: palette.cardBg,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: palette.cardBorder),
-                    ),
-                    child: RichText(
-                      text: TextSpan(
-                        style: const TextStyle(fontSize: 11.5, fontFeatures: [FontFeature.tabularFigures()]),
-                        children: [
-                          TextSpan(
-                            text: tr ? 'Oda: ' : 'Room: ',
-                            style: TextStyle(color: palette.textSecondary),
-                          ),
-                          TextSpan(
-                            text: roomTemp != null ? '${roomTemp!.toStringAsFixed(1)}°C ' : '-- ',
-                            style: TextStyle(
-                              color: roomTemp != null ? const Color(0xFF10B981) : palette.textSecondary,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          TextSpan(
-                            text: '($diffText)',
-                            style: TextStyle(color: palette.textSecondary),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Divider(color: palette.cardBorder, height: 1),
-                  const SizedBox(height: 12),
-
-                  // 4 Preset Cards (Gece 18.5°C, Eko 20°C, Konfor 22.5°C, Boost 25°C)
-                  Row(
-                    children: [
-                      for (final p in presets) ...[
-                        Expanded(
-                          child: Padding(
-                            padding: EdgeInsets.only(right: p.id == PresetId.boost ? 0 : 7),
-                            child: TactilePress.card(
-                              child: GestureDetector(
-                                onTap: () => onSelectPreset(p),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
-                                  decoration: BoxDecoration(
-                                    color: (targetTemp - p.temp).abs() < 0.05
-                                        ? colorFor(p.id).withValues(alpha: 0.18)
-                                        : palette.cardBg,
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(
-                                      color: (targetTemp - p.temp).abs() < 0.05
-                                          ? colorFor(p.id)
-                                          : palette.cardBorder,
-                                    ),
-                                  ),
-                                  child: Column(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            buildHeader(true),
+                            const SizedBox(height: 8),
+                            Flexible(
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.center,
+                                child: SizedBox(
+                                  width: modalMaxW - 32.0,
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
                                     children: [
-                                      Icon(iconFor(p.id), size: 15, color: colorFor(p.id)),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        tr ? p.labelTr : p.labelEn,
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w700,
-                                          color: (targetTemp - p.temp).abs() < 0.05
-                                              ? colorFor(p.id)
-                                              : palette.textPrimary,
-                                        ),
+                                      // Left column: RotaryDial + -/+ stepper
+                                      RotaryDial(
+                                        targetTemp: targetTemp,
+                                        onChangeTarget: (t) {
+                                          onInteract();
+                                          onChangeTarget(t);
+                                        },
+                                        modeName: modeName,
+                                        accentColor: themeAccent,
+                                        boiler: boiler,
+                                        lang: lang,
+                                        palette: palette,
+                                        sizePx: dialSize,
+                                        compact: true,
+                                        dialRingStyle: dialRingStyle,
+                                        performanceMode: performanceMode,
                                       ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        '${p.temp % 1 == 0 ? p.temp.toStringAsFixed(0) : p.temp.toStringAsFixed(1)}°C',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600,
-                                          color: (targetTemp - p.temp).abs() < 0.05
-                                              ? colorFor(p.id)
-                                              : palette.textSecondary,
+                                      const SizedBox(width: 16),
+                                      // Right column: Countdown banner + Room badge + 2x2 Presets beside dial
+                                      Expanded(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                                          children: [
+                                            buildCountdownBanner(true),
+                                            const SizedBox(height: 8),
+                                            Center(child: buildRoomBadge()),
+                                            const SizedBox(height: 10),
+                                            Row(
+                                              children: [
+                                                Expanded(child: buildPresetCard(presets[0], compact: true)),
+                                                const SizedBox(width: 8),
+                                                Expanded(child: buildPresetCard(presets[1], compact: true)),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Row(
+                                              children: [
+                                                Expanded(child: buildPresetCard(presets[2], compact: true)),
+                                                const SizedBox(width: 8),
+                                                Expanded(child: buildPresetCard(presets[3], compact: true)),
+                                              ],
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ],
@@ -2603,36 +2713,89 @@ class _EmbeddedThermostatModal extends StatelessWidget {
                                 ),
                               ),
                             ),
-                          ),
+                          ],
                         ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 12),
+                      ),
+                    ),
+                  );
+                }
 
-                  // Bottom Return CTA
-                  SizedBox(
-                    width: double.infinity,
-                    child: TactilePress.card(
-                      child: OutlinedButton.icon(
-                        onPressed: onClose,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: themeAccent,
-                          side: BorderSide(color: palette.cardBorder),
-                          backgroundColor: palette.cardBg,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                // Portrait layout: strictly constrained within screen height, no bottom return CTA
+                final portraitMaxW = math.min(420.0, availW);
+                final dialSize = math.min(208.0, math.max(146.0, availH * 0.30));
+
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: portraitMaxW,
+                      maxHeight: availH,
+                    ),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: palette.sheetBg,
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          width: palette.isTactileDeck ? 1.5 : 1.0,
+                          color: palette.cardBorder,
                         ),
-                        icon: const Icon(Icons.auto_awesome_outlined, size: 16),
-                        label: Text(
-                          tr ? 'Sinematik Ambiyans Moduna Dön' : 'Return to Cinematic Ambient Mode',
-                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: isLight ? 0.25 : 0.65),
+                            blurRadius: 32,
+                            offset: const Offset(0, 14),
+                          ),
+                        ],
+                      ),
+                      child: SingleChildScrollView(
+                        physics: const ClampingScrollPhysics(),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            buildHeader(false),
+                            const SizedBox(height: 10),
+                            buildCountdownBanner(false),
+                            const SizedBox(height: 12),
+                            RotaryDial(
+                              targetTemp: targetTemp,
+                              onChangeTarget: (t) {
+                                onInteract();
+                                onChangeTarget(t);
+                              },
+                              modeName: modeName,
+                              accentColor: themeAccent,
+                              boiler: boiler,
+                              lang: lang,
+                              palette: palette,
+                              sizePx: dialSize,
+                              compact: true,
+                              dialRingStyle: dialRingStyle,
+                              performanceMode: performanceMode,
+                            ),
+                            const SizedBox(height: 8),
+                            buildRoomBadge(),
+                            const SizedBox(height: 12),
+                            Divider(color: palette.cardBorder, height: 1),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                for (final p in presets) ...[
+                                  Expanded(
+                                    child: Padding(
+                                      padding: EdgeInsets.only(right: p.id == PresetId.boost ? 0 : 7),
+                                      child: buildPresetCard(p, compact: false),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ),
-                ],
-              ),
+                );
+              },
             ),
           ),
         ),

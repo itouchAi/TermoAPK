@@ -19,6 +19,7 @@ import 'services/ambient_audio_service.dart';
 import 'services/esp_log_service.dart';
 import 'services/firebase_sync_service.dart';
 import 'services/hardware_service.dart';
+import 'services/home_widget_bridge.dart';
 import 'services/media_storage_service.dart';
 import 'services/notification_service.dart';
 import 'services/schedule_engine.dart';
@@ -36,7 +37,7 @@ import 'widgets/weather_effects_layer.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
@@ -77,7 +78,7 @@ class TermostatHomeShell extends StatefulWidget {
   State<TermostatHomeShell> createState() => _TermostatHomeShellState();
 }
 
-class _TermostatHomeShellState extends State<TermostatHomeShell> {
+class _TermostatHomeShellState extends State<TermostatHomeShell> with WidgetsBindingObserver {
   static const _storageKey = 'termostat_flow_flutter_v2';
   static const int _virtualCenterBase = 4000;
 
@@ -197,9 +198,49 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     VoiceSpeechService.preferredMaleVoice = s.maleVoiceName;
   }
 
+  void _applyImmersiveFullscreen() {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  void _syncHomeWidget() {
+    unawaited(
+      HomeWidgetBridge.syncFromApp(
+        targetTemp: _targetTemp,
+        lang: _lang,
+        floorPlan: _floorPlan,
+        roomTelemetries: _roomTelemetries,
+        mainRoomTemp: _roomTemp,
+        espOnline: _settings.espOnline,
+        mainEspDeviceId: _settings.espDeviceId,
+      ),
+    );
+  }
+
+  Future<void> _consumeHomeWidgetPendingTarget() async {
+    final pending = await HomeWidgetBridge.consumePendingTarget();
+    if (pending != null && mounted && (pending - _targetTemp).abs() >= 0.05) {
+      setState(() {
+        _targetTemp = pending;
+        _activePreset = ThermostatMath.findMatchingPreset(pending)?.id;
+      });
+      await _persist();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _applyImmersiveFullscreen();
+      unawaited(_consumeHomeWidgetPendingTarget());
+      _syncHomeWidget();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _applyImmersiveFullscreen();
     _activeTab = _visual.startupTab;
     _syncPreferredVoices(_settings);
     TactileMotionScope.globalEnabled.value = _visual.buttonTactileFeedback;
@@ -486,6 +527,8 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     if (bootOn && mounted) {
       setState(() => _showBootCeremony = true);
     }
+    unawaited(_consumeHomeWidgetPendingTarget());
+    _syncHomeWidget();
   }
 
   Future<void> _persist() async {
@@ -507,6 +550,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
         'floorPlan': _floorPlan.toJson(),
       }),
     );
+    _syncHomeWidget();
   }
 
   void _triggerHaptic() {
@@ -566,6 +610,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     } else {
       AmbientAudioService.stop();
     }
+    _applyImmersiveFullscreen();
     HardwareService.enterSmartDisplayHardware(
       brightnessPercent: _settings.displayBrightness,
       keepAwake: _settings.displaySleepMinutes == 0,
@@ -587,6 +632,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
     }
     AmbientAudioService.stop();
     HardwareService.exitSmartDisplayHardware();
+    _applyImmersiveFullscreen();
     if (shouldReopenSettings && mounted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && !_ambientMode) {
@@ -981,6 +1027,7 @@ class _TermostatHomeShellState extends State<TermostatHomeShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     NotificationService.dismissActiveBanner();
     _clockTimer?.cancel();
     _idleTimer?.cancel();

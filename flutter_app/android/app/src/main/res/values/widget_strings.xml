@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="termostat_widget_name">Termostat Flow</string>
+    <string name="termostat_widget_description">Hedef sıcaklık, Gece/Eko/Konfor/Boost modları ve odalar arası sıcaklık takibi</string>
+</resources>

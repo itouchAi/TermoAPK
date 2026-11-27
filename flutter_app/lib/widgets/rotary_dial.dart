@@ -537,19 +537,24 @@ class _RotaryDialState extends State<RotaryDial> with TickerProviderStateMixin {
                   child: Listener(
                     behavior: HitTestBehavior.opaque,
                     onPointerSignal: _handlePointerSignal,
-                    onPointerDown: (_) => _beginDialPress(),
+                    onPointerDown: (details) {
+                      _beginDialPress();
+                      _updateFromLocalOffset(details.localPosition);
+                    },
+                    onPointerMove: (details) =>
+                        _updateFromLocalOffset(details.localPosition),
                     onPointerUp: (_) => _endDialPress(),
                     onPointerCancel: (_) => _endDialPress(),
-                    child: GestureDetector(
+                    child: RawGestureDetector(
                       behavior: HitTestBehavior.opaque,
-                      onPanDown: (details) {
-                        _beginDialPress();
-                        _updateFromLocalOffset(details.localPosition);
+                      gestures: <Type, GestureRecognizerFactory>{
+                        EagerGestureRecognizer:
+                            GestureRecognizerFactoryWithHandlers<
+                                EagerGestureRecognizer>(
+                          () => EagerGestureRecognizer(),
+                          (EagerGestureRecognizer instance) {},
+                        ),
                       },
-                      onPanUpdate: (details) =>
-                          _updateFromLocalOffset(details.localPosition),
-                      onPanEnd: (_) => _endDialPress(),
-                      onPanCancel: _endDialPress,
                       child: tactileActive
                           ? AnimatedBuilder(
                               animation: _tactileCtrl,
