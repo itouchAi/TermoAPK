@@ -682,6 +682,34 @@ class HouseFloorPlan {
       rooms: list,
     );
   }
+
+  static RoomEspTelemetry resolveRoomTelemetry({
+    required HouseRoom room,
+    required Map<String, RoomEspTelemetry> roomTelemetries,
+    required double? mainRoomTemp,
+    required bool mainEspOnline,
+    required String mainEspDeviceId,
+    bool boilerHeating = false,
+  }) {
+    final node = room.espNodeId.trim();
+    if (node.isEmpty) {
+      return const RoomEspTelemetry.offline('');
+    }
+    final direct = roomTelemetries[node];
+    if (direct != null) return direct;
+
+    final isMainNode = node.toLowerCase() == 'kombi' ||
+        node.toLowerCase() == mainEspDeviceId.trim().toLowerCase();
+    if (isMainNode && mainEspOnline && mainRoomTemp != null) {
+      return RoomEspTelemetry(
+        espNodeId: node,
+        online: true,
+        roomTempC: mainRoomTemp,
+        radiatorHeating: boilerHeating,
+      );
+    }
+    return RoomEspTelemetry.offline(node);
+  }
 }
 
 class RoomEspTelemetry {
